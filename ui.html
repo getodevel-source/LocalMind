@@ -999,7 +999,107 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.2);
     }
-  </style>
+    /* Engine Status Strip */
+    .status-strip {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .strip-state {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .strip-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.2s ease;
+    }
+
+    .strip-state.online { color: #34d399; }
+    .strip-state.online .strip-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    }
+    .strip-state.loading { color: #fbbf24; }
+    .strip-state.loading .strip-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    .strip-state.error { color: #f87171; }
+    .strip-state.error .strip-dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    }
+    .strip-state.stopped { color: var(--text-muted); }
+
+    .strip-port {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-muted);
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .strip-countdown {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-subtle);
+    }
+
+    .strip-action { margin-left: auto; }
+
+    .status-strip .btn { padding: 6px 14px; font-size: 12px; }
+
+    /* Advanced collapsible options */
+    details.advanced {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+
+    details.advanced summary {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      outline: none;
+      user-select: none;
+    }
+
+    details.advanced summary:hover { color: var(--text); }
+    details.advanced .fields-row { margin-top: 12px; }
+
+    /* Telemetry meta line */
+    .telemetry-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: var(--font-mono);
+    }
+
+    /* Telemetry card dimmed when engine down */
+    .card.telemetry-off .telemetry-grid {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+</style>
 </head>
 <body>
 
@@ -1039,14 +1139,20 @@
       </button>
     </nav>
 
-    <!-- Header Right Status -->
-    <div class="header-actions">
-      <div id="status-badge" class="status-badge">
-        <span class="status-dot"></span>
-        <span id="status-text">En reposo</span>
-      </div>
-    </div>
   </header>
+
+  <!-- Persistent Engine Status Strip -->
+  <div id="status-strip" class="status-strip">
+    <div id="strip-state" class="strip-state stopped">
+      <span id="strip-dot" class="strip-dot"></span>
+      <span id="strip-text">En reposo</span>
+    </div>
+    <span id="strip-port" class="strip-port" style="display: none;">127.0.0.1:8080</span>
+    <span id="strip-countdown" class="strip-countdown" style="display: none;">auto-stop --</span>
+    <button id="strip-action" class="btn btn-primary strip-action" onclick="stripAction()">
+      <span id="strip-action-label">Iniciar Motor</span>
+    </button>
+  </div>
 
   <!-- Main Viewport -->
   <main>
@@ -1061,7 +1167,6 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               Configuración de Motor
             </span>
-            <span id="pid-display" class="card-meta">PID: --</span>
           </div>
 
           <div class="card-body">
@@ -1112,94 +1217,57 @@
               </div>
             </div>
 
-            <div class="fields-row">
-              <div class="field-group">
-                <label class="field-label" for="threads-select">
-                  <span>Rendimiento CPU</span>
-                  <span class="field-hint">Ryzen 5 7600</span>
-                </label>
-                <div class="select-wrapper">
-                  <select id="threads-select">
-                    <option value="6" selected>6 núcleos físicos (Óptimo Zen 4)</option>
-                    <option value="12">12 hilos completos (SMT)</option>
-                    <option value="4">4 núcleos (Modo silencioso)</option>
-                  </select>
+            <details class="advanced">
+              <summary>Opciones avanzadas</summary>
+              <div class="fields-row">
+                <div class="field-group">
+                  <label class="field-label" for="threads-select">
+                    <span>Rendimiento CPU</span>
+                    <span class="field-hint">Ryzen 5 7600</span>
+                  </label>
+                  <div class="select-wrapper">
+                    <select id="threads-select">
+                      <option value="6" selected>6 núcleos físicos (Óptimo Zen 4)</option>
+                      <option value="12">12 hilos completos (SMT)</option>
+                      <option value="4">4 núcleos (Modo silencioso)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field-group">
+                  <label class="field-label" for="priority-select">
+                    <span>Prioridad de Ejecución</span>
+                    <span class="field-hint">Windows</span>
+                  </label>
+                  <div class="select-wrapper">
+                    <select id="priority-select">
+                      <option value="2" selected>Alta prioridad (Respuesta inmediata)</option>
+                      <option value="0">Normal (Equilibrado)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
+            </details>
 
-              <div class="field-group">
-                <label class="field-label" for="priority-select">
-                  <span>Prioridad de Ejecución</span>
-                  <span class="field-hint">Windows</span>
-                </label>
-                <div class="select-wrapper">
-                  <select id="priority-select">
-                    <option value="2" selected>Alta prioridad (Respuesta inmediata)</option>
-                    <option value="0">Normal (Equilibrado)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div class="feature-list">
-              <div class="feature-item">
-                <span class="feature-dot"></span>
-                <span>Vulkan 100% offload · Flash Attention activado (-fa on)</span>
-              </div>
-              <div class="feature-item">
-                <span class="feature-dot"></span>
-                <span>KV Cache cuantizado en 4-bit (q4_0) · Batch size 2048 / 512</span>
-              </div>
-            </div>
-
-            <!-- Start / Stop CTAs -->
-            <div style="display: flex; gap: 10px; margin-top: auto;">
-              <button id="btn-start" class="btn btn-primary" style="flex: 1;" onclick="startEngine()">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span>Iniciar Motor</span>
-              </button>
-              <button id="btn-stop" class="btn btn-danger" style="flex: 1;" onclick="stopEngine()" disabled>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-                <span>Detener & Liberar</span>
-              </button>
-            </div>
           </div>
         </div>
 
-        <!-- Right: Telemetry & Integrations -->
-        <div class="card">
+        <!-- Right top: Telemetry -->
+        <div class="card" id="telemetry-card">
           <div class="card-header">
             <span class="card-title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-              Accesos & Integraciones
+              Telemetría
             </span>
-            <span id="endpoint-meta" class="card-meta">127.0.0.1:8080</span>
+            <span id="pid-display" class="card-meta">PID: --</span>
           </div>
 
           <div class="card-body">
-            <button id="btn-omp" class="action-tile" onclick="launchOmp()" disabled>
-              <div class="action-tile-content">
-                <div class="action-tile-title">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                  <span>Lanzar Terminal OMP</span>
-                </div>
-                <span id="omp-desc" class="action-tile-desc">Sesión CLI conectada a localmind/qwen3.8-27b</span>
-              </div>
-              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
+            <div class="telemetry-meta">
+              <span id="endpoint-port">:8080/v1</span>
+              <span id="endpoint-meta">127.0.0.1:—</span>
+            </div>
 
-            <button id="btn-webchat" class="action-tile" onclick="launchWebChat()" disabled>
-              <div class="action-tile-content">
-                <div class="action-tile-title">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                  <span>Interfaz Web Externa</span>
-                </div>
-                <span class="action-tile-desc">Abrir UI oficial de llama.cpp en tu navegador por defecto</span>
-              </div>
-              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-
-            <!-- Live Telemetry -->
             <div class="telemetry-title">Telemetría en vivo</div>
             <div class="telemetry-grid">
               <div class="metric-box">
@@ -1227,26 +1295,40 @@
                 <span id="tel-requests" class="metric-value">—</span>
               </div>
             </div>
+          </div>
+        </div>
 
-            <!-- KPI Telemetry Grid -->
-            <div class="metrics-grid">
-              <div class="metric-box">
-                <span class="metric-label">GPU Offload</span>
-                <span class="metric-value highlight">RX 6800 XT</span>
+        <!-- Right bottom: Accesos -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+              Accesos
+            </span>
+          </div>
+
+          <div class="card-body">
+            <button id="btn-omp" class="action-tile" onclick="launchOmp()" disabled>
+              <div class="action-tile-content">
+                <div class="action-tile-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                  <span>Lanzar Terminal OMP</span>
+                </div>
+                <span id="omp-desc" class="action-tile-desc">Sesión CLI conectada a localmind/qwen3.8-27b</span>
               </div>
-              <div class="metric-box">
-                <span class="metric-label">Estado</span>
-                <span id="stat-state" class="metric-value">En reposo</span>
+              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button id="btn-webchat" class="action-tile" onclick="launchWebChat()" disabled>
+              <div class="action-tile-content">
+                <div class="action-tile-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <span>Interfaz Web Externa</span>
+                </div>
+                <span class="action-tile-desc">Abrir UI oficial de llama.cpp en tu navegador por defecto</span>
               </div>
-              <div class="metric-box">
-                <span class="metric-label">Tokens Decodificados</span>
-                <span id="stat-tokens" class="metric-value">0</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label">Endpoint Local</span>
-                <span id="endpoint-port" class="metric-value" style="font-size: 11.5px; font-family: var(--font-mono);">:8080/v1</span>
-              </div>
-            </div>
+              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
         </div>
 
@@ -1358,6 +1440,16 @@
               </tr>
             </tbody>
           </table>
+        <div class="feature-list" id="spec-features">
+          <div class="feature-item">
+            <span class="feature-dot"></span>
+            <span>Vulkan 100% offload · Flash Attention activado (-fa on)</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-dot"></span>
+            <span>KV Cache cuantizado en 4-bit (q4_0) · Batch size 2048 / 512</span>
+          </div>
+        </div>
         </div>
 
         <div class="info-card">
@@ -1517,22 +1609,49 @@
 
 
 
+    // Known static fallback profiles (used if /api/profiles is unavailable/empty)
+    const PROFILE_FALLBACK = [
+      { id: 'turbo', label: '⚡ Turbo VRAM (32K · Máxima Velocidad T/S)', context: 32768, hint: '100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia (pico de t/s).', description: 'Máxima velocidad: 100% en VRAM (RX 6800 XT), mínima latencia.' },
+      { id: 'balanced', label: '⚖️ Equilibrado Pro (64K · Documentos y Código)', context: 65536, hint: 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.', description: 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.' },
+      { id: 'deep', label: '📚 Extendido 128K (Libros y Repositorios)', context: 131072, hint: '128K tokens usando VRAM + RAM compartida optimizada.', description: '128K tokens usando VRAM + RAM compartida optimizada.' },
+      { id: 'ultra', label: '🌌 Límite Hardware 262K (Máximo Contexto Físico)', context: 262144, hint: 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.', description: 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.' }
+    ];
+    let profilesIndex = {};
+
+    async function refreshProfiles() {
+      const sel = document.getElementById('profile-select');
+      if (!sel) return;
+      let profiles = [];
+      try {
+        const res = await fetch('/api/profiles');
+        if (res.ok) profiles = await res.json() || [];
+      } catch (e) {}
+      if (!Array.isArray(profiles) || profiles.length === 0) profiles = PROFILE_FALLBACK;
+      profiles = profiles.map(p => (typeof p === 'string') ? (PROFILE_FALLBACK.find(f => f.id === p) || { id: p, label: p, context: null, hint: 'Perfil dinámico: ' + p, description: 'Perfil dinámico: ' + p }) : p);
+      profilesIndex = {};
+      sel.innerHTML = '';
+      profiles.forEach((p, idx) => {
+        profilesIndex[p.id] = p;
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label || p.id;
+        if (idx === 0) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      onProfileChange();
+    }
+
     function onProfileChange() {
-      const p = document.getElementById('profile-select').value;
+      const sel = document.getElementById('profile-select');
+      if (!sel) return;
+      const info = profilesIndex[sel.value];
       const ctxSel = document.getElementById('context-select');
       const hint = document.getElementById('profile-hint');
-      if (p === 'turbo') {
-        if (ctxSel) ctxSel.value = '32768';
-        if (hint) hint.textContent = '100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia (pico de t/s).';
-      } else if (p === 'balanced') {
-        if (ctxSel) ctxSel.value = '65536';
-        if (hint) hint.textContent = 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.';
-      } else if (p === 'deep') {
-        if (ctxSel) ctxSel.value = '131072';
-        if (hint) hint.textContent = '128K tokens usando VRAM + RAM compartida optimizada.';
-      } else if (p === 'ultra') {
-        if (ctxSel) ctxSel.value = '262144';
-        if (hint) hint.textContent = 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.';
+      if (info) {
+        if (ctxSel && info.context && ctxSel.querySelector(`option[value="${info.context}"]`)) {
+          ctxSel.value = String(info.context);
+        }
+        if (hint) hint.textContent = info.hint || info.description || '';
       }
     }
 
@@ -1627,8 +1746,6 @@
           if (idx === 0) opt.selected = true;
           sel.appendChild(opt);
         });
-        const btnStart = document.getElementById('btn-start');
-        if (btnStart) btnStart.disabled = false;
       } catch (err) {
         console.error('refreshModels error:', err);
       }
@@ -1647,11 +1764,8 @@
       const threads = parseInt(document.getElementById('threads-select').value);
       const prioEl = document.getElementById('priority-select');
       const priority = prioEl ? prioEl.value : '2';
-      const btnStart = document.getElementById('btn-start');
-      if (btnStart) {
-        btnStart.disabled = true;
-        btnStart.innerHTML = '<span>Cargando en VRAM...</span>';
-      }
+      const action = document.getElementById('strip-action');
+      if (action) action.disabled = true;
 
       const errBanner = document.getElementById('error-banner');
       if (errBanner) {
@@ -1659,12 +1773,7 @@
         errBanner.textContent = '';
       }
 
-      const badge = document.getElementById('status-badge');
-      const badgeText = document.getElementById('status-text');
-      if (badge && badgeText) {
-        badge.className = 'status-badge loading';
-        badgeText.textContent = 'Iniciando GPU...';
-      }
+      renderStatus({ status: 'starting' });
 
       const res = await api.startServer({ model, profile, context, threads: String(threads), priority: String(priority) });
       if (res && res.error) {
@@ -1672,23 +1781,13 @@
           errBanner.textContent = 'Error al iniciar: ' + res.error;
           errBanner.style.display = 'block';
         }
-        if (badge && badgeText) {
-          badge.className = 'status-badge error';
-          badgeText.textContent = 'Error al iniciar';
-        }
-        if (btnStart) {
-          btnStart.disabled = false;
-          btnStart.innerHTML = '<span>Iniciar Motor</span>';
-        }
+        renderStatus({ status: 'error', last_error: res.error });
       }
     }
 
     async function stopEngine() {
-      const btnStop = document.getElementById('btn-stop');
-      if (btnStop) {
-        btnStop.disabled = true;
-        btnStop.innerHTML = '<span>Deteniendo...</span>';
-      }
+      const action = document.getElementById('strip-action');
+      if (action) action.disabled = true;
       await api.stopServer();
     }
 
@@ -1706,110 +1805,136 @@
       try {
         const st = await api.getStatus();
         if (!st) return;
-        const ompDesc = document.getElementById('omp-desc');
-        if (ompDesc) {
-          const active = (st.model || '').toLowerCase();
-          if (active.includes('bonsai')) {
-            ompDesc.textContent = 'Sesión CLI conectada a bonsai/bonsai-2-27b';
-          } else {
-            ompDesc.textContent = 'Sesión CLI conectada a localmind/qwen3.8-27b';
-          }
-        }
         isServerRunning = st.is_healthy;
-
-        const badge = document.getElementById('status-badge');
-        const port = st.port || 8080;
-        const endpointMeta = document.getElementById('endpoint-meta');
-        const endpointPort = document.getElementById('endpoint-port');
-        if (endpointMeta) endpointMeta.textContent = st.is_healthy ? ('127.0.0.1:' + port) : '127.0.0.1:—';
-        if (endpointPort) endpointPort.textContent = ':' + port + '/v1';
-        const pidDisplay = document.getElementById('pid-display');
-        const statState = document.getElementById('stat-state');
-        const statTokens = document.getElementById('stat-tokens');
-        const chatHint = document.getElementById('chat-status-hint');
-        const errBanner = document.getElementById('error-banner');
-
-        if (st.is_healthy) {
-          if (badge && badgeText) {
-            badge.className = 'status-badge online';
-            badgeText.textContent = 'Activo (:' + port + ')';
-          }
-          if (btnStart) {
-            btnStart.disabled = true;
-            btnStart.innerHTML = '<span>Motor en ejecución</span>';
-          }
-          if (btnStop) {
-            btnStop.disabled = false;
-            btnStop.innerHTML = '<span>Detener & Liberar</span>';
-          }
-          if (btnOmp) btnOmp.disabled = false;
-          if (btnChat) btnChat.disabled = false;
-          if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || 'Activo');
-
-          if (statState) statState.textContent = st.idle_remaining_secs != null
-            ? ('Listo · auto-stop en ' + Math.floor(st.idle_remaining_secs / 60) + 'm ' + (st.idle_remaining_secs % 60) + 's')
-            : 'Listo';
-          if (chatHint) chatHint.textContent = 'Listo para consultar';
-          if (errBanner) {
-            errBanner.style.display = 'none';
-          }
-        } else if (st.status === 'starting') {
-          if (badge && badgeText) {
-            badge.className = 'status-badge loading';
-            badgeText.textContent = 'Cargando...';
-          }
-          if (btnStart) btnStart.disabled = true;
-          if (btnStop) btnStop.disabled = false;
-          if (btnOmp) btnOmp.disabled = true;
-          if (btnChat) btnChat.disabled = true;
-          if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || '...');
-          if (statState) statState.textContent = 'Iniciando tensores';
-          if (chatHint) chatHint.textContent = 'Cargando tensores en GPU...';
-        } else if (st.status === 'error' || st.last_error) {
-          if (badge && badgeText) {
-            badge.className = 'status-badge error';
-            badgeText.textContent = 'Error al iniciar';
-          }
-          if (btnStart) {
-            btnStart.disabled = false;
-            btnStart.innerHTML = '<span>Reintentar Inicio</span>';
-          }
-          if (btnStop) {
-            btnStop.disabled = true;
-            btnStop.innerHTML = '<span>Detener & Liberar</span>';
-          }
-          if (btnOmp) btnOmp.disabled = true;
-          if (btnChat) btnChat.disabled = true;
-          if (pidDisplay) pidDisplay.textContent = 'PID: --';
-          if (statState) statState.textContent = 'Error';
-          if (chatHint) chatHint.textContent = 'Error en el motor';
-          if (errBanner && st.last_error) {
-            errBanner.textContent = st.last_error;
-            errBanner.style.display = 'block';
-          }
-        } else {
-          if (badge && badgeText) {
-            badge.className = 'status-badge';
-            badgeText.textContent = 'En reposo';
-          }
-          if (btnStart) {
-            btnStart.disabled = false;
-            btnStart.innerHTML = '<span>Iniciar Motor</span>';
-          }
-          if (btnStop) {
-            btnStop.disabled = true;
-            btnStop.innerHTML = '<span>Detener & Liberar</span>';
-          }
-          if (btnOmp) btnOmp.disabled = true;
-          if (btnChat) btnChat.disabled = true;
-          if (pidDisplay) pidDisplay.textContent = 'PID: --';
-          if (statState) statState.textContent = 'En reposo';
-          if (chatHint) chatHint.textContent = 'Motor en reposo';
-          if (errBanner) {
-            errBanner.style.display = 'none';
-          }
-        }
+        renderStatus(st);
       } catch (e) {}
+    }
+
+    // Single data-driven status renderer. Drives the persistent engine strip,
+    // config card enable/disable, telemetry card dimming, action tiles, chat hint
+    // and the error banner. State machine: stopped / starting / online / error.
+    function renderStatus(st) {
+      const healthy = !!st.is_healthy;
+      const status = healthy ? 'online' : (st.status || 'stopped');
+      const port = st.port || 8080;
+
+      const stateText = {
+        online: 'Activo',
+        starting: 'Cargando…',
+        error: 'Error al iniciar',
+        stopped: 'En reposo'
+      }[status] || 'En reposo';
+
+      const countdown = st.idle_remaining_secs != null
+        ? ('auto-stop ' + Math.floor(st.idle_remaining_secs / 60) + 'm ' + (st.idle_remaining_secs % 60) + 's')
+        : null;
+
+      const actionLabel = {
+        online: 'Detener & Liberar',
+        starting: 'Cargando…',
+        error: 'Reintentar',
+        stopped: 'Iniciar Motor'
+      }[status] || 'Iniciar Motor';
+
+      const chatHintText = {
+        online: 'Listo para consultar',
+        starting: 'Cargando tensores en GPU...',
+        error: 'Error en el motor',
+        stopped: 'Motor en reposo'
+      }[status] || 'Motor en reposo';
+
+      const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = v;
+      };
+      const show = (id, on) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = on ? '' : 'none';
+      };
+
+      // Strip: state + port + countdown + action
+      const stripState = document.getElementById('strip-state');
+      if (stripState) stripState.className = 'strip-state ' + status;
+      const stripText = document.getElementById('strip-text');
+      if (stripText) stripText.textContent = status === 'online' ? (stateText + ' :' + port) : stateText;
+      const stripPort = document.getElementById('strip-port');
+      if (stripPort) {
+        stripPort.textContent = '127.0.0.1:' + port;
+        stripPort.style.display = status === 'online' ? '' : 'none';
+      }
+      const stripCountdown = document.getElementById('strip-countdown');
+      if (stripCountdown) {
+        stripCountdown.textContent = countdown || '';
+        stripCountdown.style.display = (status === 'online' && countdown) ? '' : 'none';
+      }
+      const stripAction = document.getElementById('strip-action');
+      const stripLabel = document.getElementById('strip-action-label');
+      if (stripLabel) stripLabel.textContent = actionLabel;
+      if (stripAction) {
+        stripAction.disabled = status === 'starting';
+        stripAction.className = 'btn ' + (status === 'online' ? 'btn-danger' : 'btn-primary') + ' strip-action';
+        stripAction.setAttribute('aria-label', actionLabel);
+      }
+
+      // Telemetry meta
+      set('endpoint-meta', healthy ? ('127.0.0.1:' + port) : '127.0.0.1:—');
+      set('endpoint-port', ':' + port + '/v1');
+      set('pid-display', 'PID: ' + (healthy ? (st.pid || 'Activo') : (status === 'starting' ? '...' : '--')));
+
+      // Telemetry card dimmed when engine down
+      const telCard = document.getElementById('telemetry-card');
+      if (telCard) telCard.classList.toggle('telemetry-off', !healthy);
+
+      // Config controls are engine launch params: disabled while running/starting
+      const locked = status === 'online' || status === 'starting';
+      ['model-select', 'profile-select', 'context-select', 'threads-select', 'priority-select'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = locked;
+      });
+
+      // Action tiles enabled only when healthy
+      const omp = document.getElementById('btn-omp');
+      const web = document.getElementById('btn-webchat');
+      if (omp) omp.disabled = !healthy;
+      if (web) web.disabled = !healthy;
+
+      // OMP description
+      const ompDesc = document.getElementById('omp-desc');
+      if (ompDesc) {
+        const active = (st.model || '').toLowerCase();
+        ompDesc.textContent = active.includes('bonsai')
+          ? 'Sesión CLI conectada a bonsai/bonsai-2-27b'
+          : 'Sesión CLI conectada a localmind/qwen3.8-27b';
+      }
+
+      // Chat hint + error banner
+      set('chat-status-hint', chatHintText);
+      const errBanner = document.getElementById('error-banner');
+      if (errBanner) {
+        if (status === 'error' && (st.last_error || '')) {
+          errBanner.textContent = st.last_error;
+          errBanner.style.display = 'block';
+        } else {
+          errBanner.style.display = 'none';
+        }
+      }
+    }
+
+    // Strip primary action: wired to current engine state
+    async function stripAction() {
+      const action = document.getElementById('strip-action');
+      if (!action || action.disabled) return;
+      try {
+        const st = await api.getStatus();
+        const state = (st && st.is_healthy) ? 'online' : (st && st.status === 'starting' ? 'starting' : (st && (st.status === 'error' || st.last_error) ? 'error' : 'stopped'));
+        if (state === 'online' || state === 'starting') {
+          await stopEngine();
+        } else {
+          await startEngine();
+        }
+      } catch (e) {
+        await startEngine();
+      }
     }
 
     // Markdown Parser & Formatter
@@ -2116,6 +2241,7 @@
     let statusPollerStarted = false;
     async function initApp() {
       await refreshModels();
+      await refreshProfiles();
       const settings = await api.getSettings();
       if (settings) {
         const s = settings.last || {};
