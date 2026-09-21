@@ -1342,7 +1342,7 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
                   <span>Lanzar Pi Normal</span>
                 </div>
-                <span class="action-tile-desc">Sesión interactiva CLI con Pi conectado al motor local</span>
+                <span id="pi-desc" class="action-tile-desc">Sesión interactiva CLI conectada al modelo activo</span>
               </div>
               <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
@@ -1754,9 +1754,13 @@
           });
         } catch (e) {}
       },
-      async launchPi() {
+      async launchPi(model) {
         try {
-          await fetch('/api/launch_pi', { method: 'POST' });
+          await fetch('/api/launch_pi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: model || '' })
+          });
         } catch (e) {}
       },
       async getHardware() {
@@ -1844,9 +1848,10 @@
       await api.launchOmp(model);
     }
 
-
     async function launchPi() {
-      await api.launchPi();
+      const modelSel = document.getElementById('model-select');
+      const model = modelSel ? modelSel.value : '';
+      await api.launchPi(model);
     }
 
     function openModelsFolder() {
@@ -2048,15 +2053,18 @@
       if (omp) omp.disabled = !healthy;
       if (pi) pi.disabled = !healthy;
       if (web) web.disabled = !healthy;
+      // OMP y Pi descriptions según modelo activo
+      const active = (st.model || '').toLowerCase();
+      const isBonsai = active.includes('bonsai');
+      const activeModelName = st.model ? (isBonsai ? 'bonsai-2-27b' : 'qwen3.8-27b') : 'localmind';
       const ompDesc = document.getElementById('omp-desc');
       if (ompDesc) {
-        const active = (st.model || '').toLowerCase();
-        ompDesc.textContent = active.includes('bonsai')
-          ? 'Sesión CLI conectada a bonsai/bonsai-2-27b'
-          : 'Sesión CLI conectada a localmind/qwen3.8-27b';
+        ompDesc.textContent = 'Sesión CLI conectada a ' + (isBonsai ? 'bonsai/bonsai-2-27b' : 'localmind/qwen3.8-27b');
       }
-
-      // Chat hint + error banner
+      const piDesc = document.getElementById('pi-desc');
+      if (piDesc) {
+        piDesc.textContent = 'Sesión CLI conectada a localmind/' + activeModelName;
+      }
       set('chat-status-hint', chatHintText);
       const errBanner = document.getElementById('error-banner');
       if (errBanner) {

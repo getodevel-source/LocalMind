@@ -459,9 +459,24 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/launch_pi" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let req_model = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("model").and_then(|m| m.as_str().map(str::to_string)));
+
         let st = mgr.get_status();
+        let active_model = st.model;
+        let chosen = req_model.filter(|m| !m.is_empty()).unwrap_or(active_model);
+
+        let pi_model = if chosen.to_lowercase().contains("bonsai") {
+            "bonsai-2-27b"
+        } else {
+            "localmind"
+        };
+
         let port = if st.port > 0 { st.port } else { 8080 };
-        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi", port);
+        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --model {}", port, pi_model);
 
         let wt_path = std::env::var("LOCALAPPDATA")
             .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
@@ -478,12 +493,12 @@ fn handle_request(
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal Pi lanzada conectada al motor local (puerto :{}).",
-            port
+            "[LocalMind] Terminal Pi lanzada conectada a {} (puerto :{}).",
+            pi_model, port
         ));
         let _ = req.respond(json_response(
             200,
-            format!(r#"{{"status":"ok","port":{}}}"#, port),
+            format!(r#"{{"status":"ok","model":"{}","port":{}}}"#, pi_model, port),
         ));
         return;
     }
