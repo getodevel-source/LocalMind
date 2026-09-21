@@ -13,6 +13,7 @@ parking_lot = "0.12"
 ureq = { version = "2.10", features = ["json"] }
 toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["ico", "png"] }
+rfd = "0.17.2"
 
 [profile.release]
 opt-level = 3

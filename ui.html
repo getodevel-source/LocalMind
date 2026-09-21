@@ -1323,8 +1323,28 @@
               Accesos
             </span>
           </div>
-
           <div class="card-body">
+            <!-- Selector de Carpeta de Proyecto para CLI -->
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  Carpeta de Trabajo (Proyecto)
+                </span>
+                <button class="tool-btn" type="button" onclick="selectProjectFolder()" title="Elegir directorio donde abrirán OMP y Pi">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  <span>Elegir Carpeta</span>
+                </button>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <code id="project-folder-display" style="font-size: 11px; color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); max-width: 85%;">
+                  (Ubicación predeterminada)
+                </code>
+                <button id="btn-clear-folder" type="button" onclick="clearProjectFolder()" style="display: none; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px;" title="Restablecer a default">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
             <button id="btn-omp" class="action-tile" onclick="launchOmp()" disabled>
               <div class="action-tile-content">
                 <div class="action-tile-title">
@@ -1745,36 +1765,24 @@
         } catch (e) {}
         return [];
       },
-      async launchOmp(model) {
+      async launchOmp(model, cwd) {
         try {
           await fetch('/api/launch_omp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: model || '' })
+            body: JSON.stringify({ model: model || '', cwd: cwd || '' })
           });
         } catch (e) {}
       },
-      async launchPi(model) {
+      async launchPi(model, cwd) {
         try {
           await fetch('/api/launch_pi', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: model || '' })
+            body: JSON.stringify({ model: model || '', cwd: cwd || '' })
           });
         } catch (e) {}
       },
-      async getHardware() {
-        try {
-          const res = await fetch('/api/hardware');
-          if (res.ok) return await res.json();
-        } catch (e) {}
-        return null;
-      },
-      async openBrowser() {
-        try {
-          await fetch('/api/open_browser', { method: 'POST' });
-        } catch (e) {}
-      }
     };
 
     async function refreshModels() {
@@ -1842,16 +1850,51 @@
       await api.stopServer();
     }
 
+    let selectedProjectCwd = '';
+
+    async function selectProjectFolder() {
+      try {
+        const res = await fetch('/api/select_folder', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok' && data.path) {
+          setProjectFolder(data.path);
+        }
+      } catch (e) {
+        alert('Error al seleccionar carpeta: ' + e.message);
+      }
+    }
+
+    function setProjectFolder(path) {
+      selectedProjectCwd = path || '';
+      const disp = document.getElementById('project-folder-display');
+      const btnClear = document.getElementById('btn-clear-folder');
+      if (disp) {
+        disp.textContent = selectedProjectCwd || '(Ubicación predeterminada)';
+        disp.title = selectedProjectCwd || '';
+      }
+      if (btnClear) {
+        btnClear.style.display = selectedProjectCwd ? '' : 'none';
+      }
+      try {
+        if (selectedProjectCwd) localStorage.setItem('localmind_project_cwd', selectedProjectCwd);
+        else localStorage.removeItem('localmind_project_cwd');
+      } catch (e) {}
+    }
+
+    function clearProjectFolder() {
+      setProjectFolder('');
+    }
+
     async function launchOmp() {
       const modelSel = document.getElementById('model-select');
       const model = modelSel ? modelSel.value : '';
-      await api.launchOmp(model);
+      await api.launchOmp(model, selectedProjectCwd);
     }
 
     async function launchPi() {
       const modelSel = document.getElementById('model-select');
       const model = modelSel ? modelSel.value : '';
-      await api.launchPi(model);
+      await api.launchPi(model, selectedProjectCwd);
     }
 
     function openModelsFolder() {
@@ -2428,6 +2471,10 @@
         if (configPathEl && settings.config_path) {
           configPathEl.textContent = 'config: ' + settings.config_path;
         }
+        try {
+          const savedCwd = localStorage.getItem('localmind_project_cwd');
+          if (savedCwd) setProjectFolder(savedCwd);
+        } catch (e) {}
       }
       if (!statusPollerStarted) {
         statusPollerStarted = true;

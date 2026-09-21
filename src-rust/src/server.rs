@@ -413,12 +413,26 @@ fn handle_request(
         return;
     }
 
+    if method == "POST" && url == "/api/select_folder" {
+        let folder = rfd::FileDialog::new()
+            .set_title("Selecciona la carpeta de tu proyecto")
+            .pick_folder();
+
+        if let Some(path) = folder {
+            let p_str = path.to_string_lossy().to_string();
+            let _ = req.respond(json_response(200, serde_json::json!({ "status": "ok", "path": p_str }).to_string()));
+        } else {
+            let _ = req.respond(json_response(200, serde_json::json!({ "status": "cancelled" }).to_string()));
+        }
+        return;
+    }
+
     if method == "POST" && url == "/api/launch_omp" {
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
-        let req_model = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("model").and_then(|m| m.as_str().map(str::to_string)));
+        let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
+        let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
+        let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
 
         let st = mgr.get_status();
         let active_model = st.model;
@@ -431,24 +445,36 @@ fn handle_request(
         };
 
         let port = if st.port > 0 { st.port } else { 8080 };
-        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}", port, omp_model);
+        let cd_prefix = if let Some(dir) = &req_dir {
+            format!("cd /d \"{}\" && ", dir)
+        } else {
+            String::new()
+        };
+        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}", cd_prefix, port, omp_model);
 
         let wt_path = std::env::var("LOCALAPPDATA")
             .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
             .ok();
 
         if let Some(wt) = wt_path.filter(|p| p.exists()) {
-            let _ = std::process::Command::new(wt)
-                .args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str])
-                .spawn();
+            let mut c = std::process::Command::new(wt);
+            c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+            if let Some(dir) = &req_dir {
+                c.current_dir(dir);
+            }
+            let _ = c.spawn();
         } else {
-            let _ = std::process::Command::new("cmd.exe")
-                .args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)])
-                .spawn();
+            let mut c = std::process::Command::new("cmd.exe");
+            c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
+            if let Some(dir) = &req_dir {
+                c.current_dir(dir);
+            }
+            let _ = c.spawn();
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal OMP lanzada (puerto :{}) conectada a {}.",
+            "[LocalMind] Terminal OMP lanzada en '{}' (puerto :{}) conectada a {}.",
+            req_dir.as_deref().unwrap_or("directorio default"),
             port, omp_model
         ));
         let _ = req.respond(json_response(
@@ -461,9 +487,9 @@ fn handle_request(
     if method == "POST" && url == "/api/launch_pi" {
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
-        let req_model = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("model").and_then(|m| m.as_str().map(str::to_string)));
+        let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
+        let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
+        let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
 
         let st = mgr.get_status();
         let active_model = st.model;
@@ -476,24 +502,36 @@ fn handle_request(
         };
 
         let port = if st.port > 0 { st.port } else { 8080 };
-        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --model {}", port, pi_model);
+        let cd_prefix = if let Some(dir) = &req_dir {
+            format!("cd /d \"{}\" && ", dir)
+        } else {
+            String::new()
+        };
+        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --model {}", cd_prefix, port, pi_model);
 
         let wt_path = std::env::var("LOCALAPPDATA")
             .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
             .ok();
 
         if let Some(wt) = wt_path.filter(|p| p.exists()) {
-            let _ = std::process::Command::new(wt)
-                .args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str])
-                .spawn();
+            let mut c = std::process::Command::new(wt);
+            c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+            if let Some(dir) = &req_dir {
+                c.current_dir(dir);
+            }
+            let _ = c.spawn();
         } else {
-            let _ = std::process::Command::new("cmd.exe")
-                .args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)])
-                .spawn();
+            let mut c = std::process::Command::new("cmd.exe");
+            c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
+            if let Some(dir) = &req_dir {
+                c.current_dir(dir);
+            }
+            let _ = c.spawn();
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal Pi lanzada conectada a {} (puerto :{}).",
+            "[LocalMind] Terminal Pi lanzada en '{}' conectada a {} (puerto :{}).",
+            req_dir.as_deref().unwrap_or("directorio default"),
             pi_model, port
         ));
         let _ = req.respond(json_response(
