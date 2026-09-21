@@ -59,6 +59,17 @@ pub struct EngineConfig {
     pub priority: String,
     #[serde(default = "default_batch")]
     pub batch: usize,
+    /// Prioridad de proceso (Windows): 0=bajo, 1=abajo-normal, 2=normal. "below_normal"
+    /// protege la interactividad del sistema en sesiones largas.
+    #[serde(default = "default_process_priority")]
+    pub process_priority: String,
+    /// Nivel de polling (llama-server --poll). 0 = sin spin-wait (CPU/PSU descansan);
+    /// 50 = default de llama.cpp (latencia mínima pero CPU 100% entre tokens).
+    #[serde(default = "default_poll")]
+    pub poll: u32,
+    /// threads_batch separado: batch de prompt es el pico máximo de CPU/VRAM.
+    #[serde(default = "default_true")]
+    pub limit_threads_batch: bool,
     #[serde(default)]
     pub extra_flags: Vec<String>,
     #[serde(default = "default_aliases")]
@@ -86,6 +97,9 @@ impl Default for EngineConfig {
             threads_batch: None,
             priority: "2".to_string(),
             batch: 2048,
+            process_priority: "below_normal".to_string(),
+            poll: 0,
+            limit_threads_batch: true,
             extra_flags: Vec::new(),
             aliases: default_aliases(),
             speculation: Some(SpeculationConfig::default()),
@@ -166,6 +180,12 @@ fn default_priority() -> String {
 }
 fn default_batch() -> usize {
     2048
+}
+fn default_process_priority() -> String {
+    "below_normal".to_string()
+}
+fn default_poll() -> u32 {
+    0
 }
 fn default_http_port() -> u16 {
     17860

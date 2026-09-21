@@ -350,12 +350,21 @@ impl ProcessManager {
         let threads_batch = cfg
             .engine
             .threads_batch
-            .unwrap_or(threads);
+            .unwrap_or(if cfg.engine.limit_threads_batch {
+                threads.min(4) // prompt batch: el pico de CPU; limitado para no disparar PSU/VRAM
+            } else {
+                threads
+            });
         let priority = req
             .priority
             .clone()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| cfg.engine.priority.clone());
+        let process_priority_class = match cfg.engine.process_priority.to_lowercase().as_str() {
+            "low" => 0x00000040u32, // IDLE_PRIORITY_CLASS
+            "normal" => 0x00000020, // NORMAL_PRIORITY_CLASS
+            _ => 0x00004000,        // BELOW_NORMAL_PRIORITY_CLASS
+        };
 
         let llama_bin = self.bin_dir.join("llama-server.exe");
         if !llama_bin.exists() {
@@ -370,7 +379,7 @@ impl ProcessManager {
 
         let mut cmd = Command::new(&llama_bin);
         cmd.current_dir(&self.base_dir);
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(CREATE_NO_WINDOW | process_priority_class);
 
         cmd.args([
             "-m",
@@ -392,8 +401,6 @@ impl ProcessManager {
             &threads_batch.to_string(),
             "--prio",
             &priority,
-            "--prio-batch",
-            &priority,
             "-b",
             &cfg.engine.batch.to_string(),
             "-ub",
@@ -408,8 +415,11 @@ impl ProcessManager {
             &llama_port.to_string(),
             "-np",
             "1",
+            "--poll",
+            &cfg.engine.poll.to_string(),
+            "--prio-batch",
+            &priority,
         ]);
-
         if cfg.engine.flash_attention {
             cmd.args(["-fa", "on"]);
         }
