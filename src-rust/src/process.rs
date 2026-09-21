@@ -37,6 +37,20 @@ pub struct ServerStatus {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuDevice {
+    pub id: String,
+    pub name: String,
+    pub vram: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HardwareInfo {
+    pub cpu_cores: usize,
+    pub cpu_name: String,
+    pub gpus: Vec<GpuDevice>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct StartRequest {
     pub model: Option<String>,
@@ -304,6 +318,71 @@ impl ProcessManager {
             }
         }
         st
+    }
+
+    pub fn detect_hardware(&self) -> HardwareInfo {
+        let cpu_cores = num_cpus();
+        let cpu_name = std::env::var("PROCESSOR_IDENTIFIER")
+            .unwrap_or_else(|_| format!("CPU x86_64 ({} hilos)", cpu_cores));
+
+        let mut gpus = Vec::new();
+        let llama_bin = self.bin_dir.join("llama-server.exe");
+        if llama_bin.exists() {
+            let mut cmd = Command::new(&llama_bin);
+            cmd.arg("--list-devices");
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            if let Ok(output) = cmd.output() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.contains(':') && !line.starts_with("Available") {
+                        let mut parts = line.splitn(2, ':');
+                        let dev_id = parts.next().unwrap_or("").trim().to_string();
+                        let rest = parts.next().unwrap_or("").trim();
+                        let (name, vram) = if let Some(idx) = rest.rfind('(') {
+                            let n = rest[..idx].trim().to_string();
+                            let v = rest[idx + 1..].trim_end_matches(')').trim().to_string();
+                            (n, v)
+                        } else {
+                            (rest.to_string(), "Desconocido".to_string())
+                        };
+                        gpus.push(GpuDevice {
+                            id: dev_id,
+                            name,
+                            vram,
+                        });
+                    }
+                }
+            }
+        }
+        HardwareInfo {
+            cpu_cores,
+            cpu_name,
+            gpus,
+        }
+    }
+
+    pub fn import_model_from_path(&self, source_path: &std::path::Path) -> Result<String, String> {
+        if !source_path.exists() {
+            return Err(format!("Archivo no encontrado: {:?}", source_path));
+        }
+        let filename = source_path
+            .file_name()
+            .ok_or_else(|| "Nombre de archivo inválido".to_string())?
+            .to_string_lossy()
+            .to_string();
+        if !filename.ends_with(".gguf") {
+            return Err("El archivo debe ser un modelo con extensión .gguf".to_string());
+        }
+        let dest = self.models_dir.join(&filename);
+        std::fs::copy(source_path, &dest)
+            .map_err(|e| format!("Error al copiar modelo: {}", e))?;
+        self.log(&format!("[LocalMind] Modelo importado: {}", filename));
+        Ok(filename)
+    }
+
+    pub fn models_dir(&self) -> &std::path::Path {
+        &self.models_dir
     }
 
     pub fn list_models(&self) -> Vec<ModelInfo> {

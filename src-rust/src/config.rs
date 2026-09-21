@@ -224,13 +224,13 @@ fn default_mmproj_files() -> Vec<String> {
     ]
 }
 
-/// Perfiles integrados (ajustados para RX 6800 XT 16GB). Sobrescribibles vía [[profiles]] en el TOML.
+/// Perfiles integrados universales. Sobrescribibles vía [[profiles]] en el TOML.
 pub fn built_in_profiles() -> Vec<HardwareProfile> {
     vec![
         HardwareProfile {
             id: "velocidad".to_string(),
             name: "Velocidad máxima · 32K contextos cortos".to_string(),
-            description: "Todo el modelo y su memoria de conversación (KV cache) viven en los 16 GB de la GPU. Es el modo más rápido: ~17 t/s. Ideal para chat, preguntas y código corto (sesiones de menos de ~30k palabras).".to_string(),
+            description: "Todo el modelo y su memoria de conversación (KV cache) viven íntegramente en la VRAM de la GPU. Es el modo más rápido con mínima latencia. Ideal para chat, preguntas y código corto (<30k palabras).".to_string(),
             context: 32768,
             cache_ram: 0,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
@@ -238,7 +238,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
         HardwareProfile {
             id: "multi_doc".to_string(),
             name: "Multi-documento · 64K (velocidad levemente menor)".to_string(),
-            description: "El modelo vive en VRAM y parte del KV cache pasa a RAM DDR5. Renuncia ~5% de velocidad para sostener ~60k palabras de contexto: varios documentos o un repo de código mediano en la misma conversación.".to_string(),
+            description: "El modelo reside en VRAM y parte del KV cache pasa a la memoria RAM del sistema. Cede ~5% de velocidad para sostener ~60k palabras de contexto: múltiples documentos o repositorios completos.".to_string(),
             context: 65536,
             cache_ram: 4096,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
@@ -246,7 +246,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
         HardwareProfile {
             id: "libros".to_string(),
             name: "Libros largos · 128K contexto extendido".to_string(),
-            description: "Modelo intacto en VRAM + KV cache ampliado en RAM DDR5: sostiene ~120k palabras (un libro entero, un repo mediano). La velocidad de respuesta baja ~15-20% frente a Velocidad máxima porque parte de la memoria del prompt viaja por DDR5.".to_string(),
+            description: "Modelo en VRAM + KV cache ampliado en RAM del sistema: sostiene ~120k palabras (un libro entero o proyecto grande). Velocidad moderada (~15-20% menor que Velocidad máxima) al cursar tráfico por el bus de memoria.".to_string(),
             context: 131072,
             cache_ram: 6144,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
@@ -254,7 +254,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
         HardwareProfile {
             id: "max_contexto".to_string(),
             name: "Máximo contexto · 262K (límite físico del modelo)".to_string(),
-            description: "Alcanza los 262,144 tokens que el modelo soporta nativamente (~200k palabras: biblia, code bases enormes). El más lento y el que más tensiona CPU/PSU: úsalo solo cuando necesites sujetar la obra completa en una sola conversación.".to_string(),
+            description: "Alcanza los 262,144 tokens que el modelo soporta nativamente (~200k palabras: bases de código masivas). Requiere memoria RAM compartida considerable; ideal para cargas analíticas profundas.".to_string(),
             context: 262144,
             cache_ram: 6144,
             extra_flags: vec![

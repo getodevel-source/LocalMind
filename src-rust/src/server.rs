@@ -237,6 +237,13 @@ fn handle_request(
         return;
     }
 
+    if method == "GET" && url == "/api/hardware" {
+        let hw = mgr.detect_hardware();
+        let json = serde_json::to_string(&hw).unwrap_or_else(|_| "{}".to_string());
+        let _ = req.respond(json_response(200, json));
+        return;
+    }
+
     if method == "GET" && url == "/api/profiles" {
         let profiles = crate::profiles::get_hardware_profiles(&cfg.get());
         let json = serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".to_string());
@@ -244,6 +251,68 @@ fn handle_request(
         return;
     }
 
+    if method == "GET" && url == "/api/profiles/export" {
+        let profiles = crate::profiles::get_hardware_profiles(&cfg.get());
+        let json = serde_json::to_string_pretty(&profiles).unwrap_or_else(|_| "[]".to_string());
+        let mut resp = json_response(200, json);
+        let cd = Header::from_bytes(&b"Content-Disposition"[..], &b"attachment; filename=\"localmind_profiles.json\""[..]).unwrap();
+        resp.add_header(cd);
+        let _ = req.respond(resp);
+        return;
+    }
+
+    if method == "POST" && url == "/api/profiles/import" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        match serde_json::from_str::<Vec<crate::config::HardwareProfile>>(&body) {
+            Ok(imported) if !imported.is_empty() => {
+                cfg.update(|c| {
+                    c.profiles = imported;
+                });
+                let _ = cfg.save();
+                let _ = req.respond(json_response(200, r#"{"status":"ok","message":"Perfiles actualizados"}"#.into()));
+            }
+            Ok(_) => {
+                let _ = req.respond(json_response(400, r#"{"error":"La lista de perfiles está vacía"}"#.into()));
+            }
+            Err(e) => {
+                let _ = req.respond(json_response(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string()));
+            }
+        }
+        return;
+    }
+
+    if method == "POST" && url == "/api/import_model" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let source_path_str = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("path").and_then(|p| p.as_str().map(str::to_string)));
+
+        if let Some(src) = source_path_str {
+            let p = std::path::Path::new(&src);
+            match mgr.import_model_from_path(p) {
+                Ok(filename) => {
+                    let _ = req.respond(json_response(200, serde_json::json!({ "status": "ok", "filename": filename }).to_string()));
+                }
+                Err(e) => {
+                    let _ = req.respond(json_response(400, serde_json::json!({ "error": e }).to_string()));
+                }
+            }
+        } else {
+            let _ = req.respond(json_response(400, r#"{"error":"Falta el parámetro 'path'"}"#.into()));
+        }
+        return;
+    }
+
+    if method == "POST" && url == "/api/open_models_dir" {
+        let p = mgr.models_dir();
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(p)
+            .spawn();
+        let _ = req.respond(json_response(200, r#"{"status":"ok"}"#.into()));
+        return;
+    }
     if method == "GET" && url == "/api/status" {
         let _ = req.respond(json_response(200, status_json(mgr.get_status())));
         return;
@@ -351,7 +420,8 @@ fn handle_request(
             .ok()
             .and_then(|v| v.get("model").and_then(|m| m.as_str().map(str::to_string)));
 
-        let active_model = mgr.get_status().model;
+        let st = mgr.get_status();
+        let active_model = st.model;
         let chosen = req_model.filter(|m| !m.is_empty()).unwrap_or(active_model);
 
         let omp_model = if chosen.to_lowercase().contains("bonsai") {
@@ -360,7 +430,8 @@ fn handle_request(
             "localmind/qwen3.8-27b"
         };
 
-        let cmd_str = format!("omp --model {}", omp_model);
+        let port = if st.port > 0 { st.port } else { 8080 };
+        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}", port, omp_model);
 
         let wt_path = std::env::var("LOCALAPPDATA")
             .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
@@ -372,17 +443,47 @@ fn handle_request(
                 .spawn();
         } else {
             let _ = std::process::Command::new("cmd.exe")
-                .args(["/c", &format!("start {}", cmd_str)])
+                .args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)])
                 .spawn();
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal OMP lanzada conectada a {}.",
-            omp_model
+            "[LocalMind] Terminal OMP lanzada (puerto :{}) conectada a {}.",
+            port, omp_model
         ));
         let _ = req.respond(json_response(
             200,
-            format!(r#"{{"status":"ok","model":"{}"}}"#, omp_model),
+            format!(r#"{{"status":"ok","model":"{}","port":{}}}"#, omp_model, port),
+        ));
+        return;
+    }
+
+    if method == "POST" && url == "/api/launch_pi" {
+        let st = mgr.get_status();
+        let port = if st.port > 0 { st.port } else { 8080 };
+        let cmd_str = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi", port);
+
+        let wt_path = std::env::var("LOCALAPPDATA")
+            .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
+            .ok();
+
+        if let Some(wt) = wt_path.filter(|p| p.exists()) {
+            let _ = std::process::Command::new(wt)
+                .args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str])
+                .spawn();
+        } else {
+            let _ = std::process::Command::new("cmd.exe")
+                .args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)])
+                .spawn();
+        }
+
+        mgr.log(&format!(
+            "[LocalMind] Terminal Pi lanzada conectada al motor local (puerto :{}).",
+            port
+        ));
+        let _ = req.respond(json_response(
+            200,
+            format!(r#"{{"status":"ok","port":{}}}"#, port),
         ));
         return;
     }
