@@ -457,43 +457,46 @@ fn handle_request(
             Some("medium") => " --thinking medium",
             Some("high") => " --thinking high",
             Some("max") => " --thinking max",
-            _ => "",
+            _ => " --thinking max",
         };
 
-        let cd_prefix = if let Some(dir) = &req_dir {
-            format!("cd /d \"{}\" && ", dir)
-        } else {
-            String::new()
+        let cd_prefix = match req_dir.as_deref() {
+            Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
+            _ => String::new(),
         };
         let inner_cmd = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}{}", cd_prefix, port, omp_model, effort_flag);
 
         let is_orca = req_target.as_deref() == Some("orca");
         if is_orca {
             let orca_path = std::env::var("LOCALAPPDATA")
-                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.cmd"))
-                .unwrap_or_else(|_| PathBuf::from("orca.cmd"));
-            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca.cmd".to_string() };
+                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.exe"))
+                .unwrap_or_else(|_| PathBuf::from("orca"));
+            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca".to_string() };
             let orca_title = format!("OMP - {}", omp_model);
-            let mut c = std::process::Command::new("cmd.exe");
-            c.args(["/c", &orca_bin, "terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
-            let _ = c.spawn();
+            let mut c = std::process::Command::new(&orca_bin);
+            c.args(["terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
+            mgr.log(&format!("[LocalMind] Orca cmd: {} terminal create --shell cmd.exe --title '{}' --command '{}'", orca_bin, orca_title, inner_cmd));
+            match c.spawn() {
+                Ok(ch) => mgr.log(&format!("[LocalMind] Orca spawn ok pid {:?} ({} terminal create)", ch.id(), orca_bin)),
+                Err(e) => mgr.log(&format!("[LocalMind] ERROR spawn orca ({}): {}", orca_bin, e)),
+            }
         } else {
             let wt_path = std::env::var("LOCALAPPDATA")
                 .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
                 .ok();
-            let cmd_str = format!("{}{}", cd_prefix, inner_cmd);
+            let cmd_str = inner_cmd.clone();
             if let Some(wt) = wt_path.filter(|p| p.exists()) {
                 let mut c = std::process::Command::new(wt);
                 c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
                 if let Some(dir) = &req_dir {
-                    c.current_dir(dir);
+                    if !dir.trim().is_empty() { c.current_dir(dir); }
                 }
                 let _ = c.spawn();
             } else {
                 let mut c = std::process::Command::new("cmd.exe");
                 c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
                 if let Some(dir) = &req_dir {
-                    c.current_dir(dir);
+                    if !dir.trim().is_empty() { c.current_dir(dir); }
                 }
                 let _ = c.spawn();
             }
@@ -542,43 +545,46 @@ fn handle_request(
             Some("medium") => " --thinking medium",
             Some("high") => " --thinking high",
             Some("max") => " --thinking max",
-            _ => "",
+            _ => " --thinking max",
         };
 
-        let cd_prefix = if let Some(dir) = &req_dir {
-            format!("cd /d \"{}\" && ", dir)
-        } else {
-            String::new()
+        let cd_prefix = match req_dir.as_deref() {
+            Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
+            _ => String::new(),
         };
         let inner_cmd = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}{}", cd_prefix, port, pi_model, effort_flag);
 
         let is_orca = req_target.as_deref() == Some("orca");
         if is_orca {
             let orca_path = std::env::var("LOCALAPPDATA")
-                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.cmd"))
-                .unwrap_or_else(|_| PathBuf::from("orca.cmd"));
-            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca.cmd".to_string() };
+                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.exe"))
+                .unwrap_or_else(|_| PathBuf::from("orca"));
+            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca".to_string() };
             let orca_title = format!("Pi - {}", pi_model);
-            let mut c = std::process::Command::new("cmd.exe");
-            c.args(["/c", &orca_bin, "terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
-            let _ = c.spawn();
+            let mut c = std::process::Command::new(&orca_bin);
+            c.args(["terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
+            mgr.log(&format!("[LocalMind] Orca cmd: {} terminal create --shell cmd.exe --title '{}' --command '{}'", orca_bin, orca_title, inner_cmd));
+            match c.spawn() {
+                Ok(ch) => mgr.log(&format!("[LocalMind] Orca spawn ok pid {:?} ({} terminal create)", ch.id(), orca_bin)),
+                Err(e) => mgr.log(&format!("[LocalMind] ERROR spawn orca ({}): {}", orca_bin, e)),
+            }
         } else {
             let wt_path = std::env::var("LOCALAPPDATA")
                 .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
                 .ok();
-            let cmd_str = format!("{}{}", cd_prefix, inner_cmd);
+            let cmd_str = inner_cmd.clone();
             if let Some(wt) = wt_path.filter(|p| p.exists()) {
                 let mut c = std::process::Command::new(wt);
                 c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
                 if let Some(dir) = &req_dir {
-                    c.current_dir(dir);
+                    if !dir.trim().is_empty() { c.current_dir(dir); }
                 }
                 let _ = c.spawn();
             } else {
                 let mut c = std::process::Command::new("cmd.exe");
                 c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
                 if let Some(dir) = &req_dir {
-                    c.current_dir(dir);
+                    if !dir.trim().is_empty() { c.current_dir(dir); }
                 }
                 let _ = c.spawn();
             }

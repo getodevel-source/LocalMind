@@ -466,11 +466,13 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 10px;
       cursor: pointer;
       transition: all 0.15s ease;
       color: var(--text);
       text-align: left;
       width: 100%;
+      min-width: 0;
     }
 
     .action-tile:hover:not(:disabled) {
@@ -483,14 +485,35 @@
       opacity: 0.4;
       cursor: not-allowed;
     }
+
+    /* Narrow-column: tile + Orca side button share one row without overflow */
+    .action-tile-group {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .action-tile-group + .action-tile-group,
+    .action-tile-group + .action-tile {
+      margin-top: 8px;
+    }
+
+    .action-tile-group .action-tile {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
     .action-tile-side {
       background: rgba(56, 189, 248, 0.08);
       border: 1px solid rgba(56, 189, 248, 0.25);
       border-radius: 8px;
-      padding: 0 16px;
+      padding: 0 12px;
       display: flex;
       align-items: center;
       justify-content: center;
+      align-self: stretch;
+      flex-shrink: 0;
       gap: 6px;
       cursor: pointer;
       transition: all 0.15s ease;
@@ -520,6 +543,9 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
     }
 
     .action-tile-title {
@@ -529,11 +555,27 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      min-width: 0;
+    }
+
+    .action-tile-title svg {
+      flex-shrink: 0;
+    }
+
+    .action-tile-title > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .action-tile-desc {
+      display: block;
       font-size: 11px;
       color: var(--text-subtle);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .action-tile-arrow {
@@ -975,17 +1017,152 @@
 
     .telemetry-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
     }
 
     .telemetry-grid .metric-box {
       padding: 10px 12px;
       gap: 2px;
+      min-width: 0;
+      overflow: hidden;
     }
 
     .telemetry-grid .metric-value {
       font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* CLI access box (right-bottom card): safe flex rows for narrow columns */
+    .cli-access-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .cli-row {
+      min-width: 0;
+    }
+
+    .cli-row-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+      min-width: 0;
+    }
+
+    .cli-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .cli-label svg {
+      flex-shrink: 0;
+    }
+
+    .cli-label-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .cli-folder-btn {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .cli-path-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .cli-path {
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: var(--font-mono);
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .cli-clear-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 2px;
+      flex-shrink: 0;
+    }
+
+    .cli-row-effort {
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .cli-effort-wrap {
+      width: 150px;
+      max-width: 100%;
+      flex-shrink: 0;
+    }
+
+    .cli-effort-select {
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+
+    /* Grid children must shrink: otherwise the 2-col dashboard overflows */
+    .dashboard-layout > .card {
+      min-width: 0;
+    }
+
+    /* Narrow window: stack columns so the right card gets full width */
+    @media (max-width: 900px) {
+      .dashboard-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+
+    /* Very narrow card: telemetry 3→2 cols, effort row stacks */
+    @media (max-width: 420px) {
+      .telemetry-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .cli-row-effort {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .cli-effort-wrap {
+        width: 100%;
+      }
     }
 
     /* Chat Message Meta Footer */
@@ -1066,6 +1243,12 @@
     }
     .strip-state.loading { color: #fbbf24; }
     .strip-state.loading .strip-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    .strip-state.starting { color: #fbbf24; }
+    .strip-state.starting .strip-dot {
       background: #f59e0b;
       box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
       animation: pulse 1.2s infinite ease-in-out;
@@ -1356,39 +1539,51 @@
                 <span class="metric-label">Solicitudes</span>
                 <span id="tel-requests" class="metric-value">—</span>
               </div>
+            </div><!-- /.telemetry-grid -->
+          </div><!-- /.card-body -->
+        </div><!-- /#telemetry-card -->
+
+        <!-- Right bottom: Accesos / CLI launchers -->
+        <div class="card" id="cli-access-card">
+          <div class="card-header">
+            <span class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              Accesos
+            </span>
+          </div>
           <div class="card-body">
             <!-- Configuración de Ejecución CLI: Carpeta y Nivel de Razonamiento -->
-            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+            <div class="cli-access-box">
               <!-- Fila 1: Carpeta de Proyecto -->
-              <div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
+              <div class="cli-row">
+                <div class="cli-row-top">
+                  <span class="cli-label">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                    Carpeta de Trabajo (Proyecto)
+                    <span class="cli-label-text">Carpeta de Trabajo (Proyecto)</span>
                   </span>
-                  <button class="tool-btn" type="button" onclick="selectProjectFolder()" title="Elegir directorio donde abrirán OMP y Pi">
+                  <button class="tool-btn cli-folder-btn" type="button" onclick="selectProjectFolder()" title="Elegir directorio donde abrirán OMP y Pi">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                     <span>Elegir Carpeta</span>
                   </button>
                 </div>
-                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                  <code id="project-folder-display" style="font-size: 11px; color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); max-width: 85%;">
+                <div class="cli-path-row">
+                  <code id="project-folder-display" class="cli-path" title="">
                     (Ubicación predeterminada)
                   </code>
-                  <button id="btn-clear-folder" type="button" onclick="clearProjectFolder()" style="display: none; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px;" title="Restablecer a default">
+                  <button id="btn-clear-folder" type="button" onclick="clearProjectFolder()" class="cli-clear-btn" style="display: none;" title="Restablecer a default">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>
                 </div>
               </div>
 
               <!-- Fila 2: Nivel de Razonamiento (Thinking Effort) -->
-              <div style="border-top: 1px solid var(--border-subtle); padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
+              <div class="cli-row cli-row-effort">
+                <span class="cli-label">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  Nivel de Razonamiento (Effort)
+                  <span class="cli-label-text">Nivel de Razonamiento (Effort)</span>
                 </span>
-                <div class="select-wrapper" style="width: 150px;">
-                  <select id="cli-effort-select" style="padding: 4px 8px; font-size: 11px;">
+                <div class="select-wrapper cli-effort-wrap">
+                  <select id="cli-effort-select" class="cli-effort-select">
                     <option value="max" selected>Max (Profundo)</option>
                     <option value="high">Alto (High)</option>
                     <option value="medium">Medio (Medium)</option>
@@ -1400,8 +1595,8 @@
             </div>
 
             <!-- OMP Action Tile con lanzador Orca embebido -->
-            <div class="action-tile-group" style="display: flex; gap: 6px; width: 100%;">
-              <button id="btn-omp" class="action-tile" style="flex: 1;" onclick="launchOmp('system')" disabled>
+            <div class="action-tile-group">
+              <button id="btn-omp" class="action-tile" onclick="launchOmp('system')" disabled>
                 <div class="action-tile-content">
                   <div class="action-tile-title">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -1417,8 +1612,8 @@
             </div>
 
             <!-- Pi Action Tile con lanzador Orca embebido -->
-            <div class="action-tile-group" style="display: flex; gap: 6px; width: 100%; margin-top: 8px;">
-              <button id="btn-pi" class="action-tile" style="flex: 1;" onclick="launchPi('system')" disabled>
+            <div class="action-tile-group">
+              <button id="btn-pi" class="action-tile" onclick="launchPi('system')" disabled>
                 <div class="action-tile-content">
                   <div class="action-tile-title">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
@@ -1433,17 +1628,6 @@
               </button>
             </div>
 
-            <button id="btn-webchat" class="action-tile" style="margin-top: 8px;" onclick="launchWebChat()" disabled>
-              <div class="action-tile-content">
-                <div class="action-tile-title">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                  <span>Interfaz Web Externa</span>
-                </div>
-                <span class="action-tile-desc">Abrir UI oficial de llama.cpp en tu navegador por defecto</span>
-              </div>
-              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-
             <button id="btn-webchat" class="action-tile" onclick="launchWebChat()" disabled>
               <div class="action-tile-content">
                 <div class="action-tile-title">
@@ -1454,6 +1638,7 @@
               </div>
               <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
+
           </div>
         </div>
 
@@ -1841,6 +2026,18 @@
           if (res.ok) return await res.json();
         } catch (e) {}
         return [];
+      },
+      async getHardware() {
+        try {
+          const res = await fetch('/api/hardware');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        return null;
+      },
+      async openBrowser() {
+        try {
+          await fetch('/api/open_browser', { method: 'POST' });
+        } catch (e) {}
       },
       async launchOmp(model, cwd, effort, target) {
         try {
