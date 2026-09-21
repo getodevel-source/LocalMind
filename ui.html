@@ -930,6 +930,60 @@
       font-family: var(--font-mono);
     }
 
+    /* Live Telemetry Grid */
+    .telemetry-title {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 2px;
+    }
+
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .telemetry-grid .metric-box {
+      padding: 10px 12px;
+      gap: 2px;
+    }
+
+    .telemetry-grid .metric-value {
+      font-size: 12px;
+    }
+
+    /* Chat Message Meta Footer */
+    .msg-meta {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      padding: 0 4px;
+    }
+
+    /* Stop Generation Button */
+    .chat-stop-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: rgba(239, 68, 68, 0.08);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      flex-shrink: 0;
+    }
+
+    .chat-stop-btn:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+
     /* Scrollbar Styling */
     ::-webkit-scrollbar {
       width: 6px;
@@ -1119,7 +1173,7 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               Accesos & Integraciones
             </span>
-            <span class="card-meta">127.0.0.1:8080</span>
+            <span id="endpoint-meta" class="card-meta">127.0.0.1:8080</span>
           </div>
 
           <div class="card-body">
@@ -1145,6 +1199,35 @@
               <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
 
+            <!-- Live Telemetry -->
+            <div class="telemetry-title">Telemetría en vivo</div>
+            <div class="telemetry-grid">
+              <div class="metric-box">
+                <span class="metric-label">Gen t/s</span>
+                <span id="tel-gen-tps" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Prompt t/s</span>
+                <span id="tel-prompt-tps" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Tokens</span>
+                <span id="tel-tokens" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Caché</span>
+                <span id="tel-cache-pct" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">MTP</span>
+                <span id="tel-mtp-pct" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Solicitudes</span>
+                <span id="tel-requests" class="metric-value">—</span>
+              </div>
+            </div>
+
             <!-- KPI Telemetry Grid -->
             <div class="metrics-grid">
               <div class="metric-box">
@@ -1161,7 +1244,7 @@
               </div>
               <div class="metric-box">
                 <span class="metric-label">Endpoint Local</span>
-                <span class="metric-value" style="font-size: 11.5px; font-family: var(--font-mono);">:8080/v1</span>
+                <span id="endpoint-port" class="metric-value" style="font-size: 11.5px; font-family: var(--font-mono);">:8080/v1</span>
               </div>
             </div>
           </div>
@@ -1197,6 +1280,9 @@
             <textarea id="chat-input" class="chat-textarea" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
             <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+            <button id="btn-stop-gen" class="chat-stop-btn" onclick="stopGeneration()" style="display: none;" title="Detener generación">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
             </button>
           </div>
           <div class="chat-dock-hints">
@@ -1280,7 +1366,7 @@
             Endpoints OpenAI Compatibles
           </h3>
           <p>
-            Cualquier herramienta compatible con la API de OpenAI (como Cursor, Continue, LangChain o OMP) puede conectarse directamente con la URL base <code>http://127.0.0.1:8080/v1</code> y el ID de modelo <code>localmind</code> o <code>bonsai-2-27b</code>.
+            Cualquier herramienta compatible con la API de OpenAI (como Cursor, Continue, LangChain o OMP) puede conectarse directamente con la URL base <code>http://127.0.0.1:8080/v1</code> y el ID de modelo <code>localmind</code> o <code>bonsai-2-27b</code>.<br><code id="config-path" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code>
           </p>
         </div>
       </div>
@@ -1291,6 +1377,109 @@
     let isServerRunning = false;
     let autoScrollTerminal = true;
     const chatHistory = [];
+    let activeAbort = null;
+    let isGenerating = false;
+    let lastLogSeq = 0;
+    let eventsSource = null;
+    let telemetryTimer = null;
+
+    // Chat Persistence
+    const CHAT_STORAGE_KEY = 'localmind_chat_v1';
+
+    function saveChatHistory() {
+      try {
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatHistory));
+      } catch (e) {}
+    }
+
+    function loadChatHistory() {
+      try {
+        const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || arr.length === 0) return;
+        chatHistory.length = 0;
+        chatHistory.push(...arr);
+        renderChatHistory();
+      } catch (e) {}
+    }
+
+    function renderChatHistory() {
+      const box = document.getElementById('chat-messages');
+      if (!box) return;
+      box.innerHTML = '';
+      for (const msg of chatHistory) {
+        const group = document.createElement('div');
+        group.className = 'msg-group ' + (msg.role === 'user' ? 'user' : 'assistant');
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble';
+        if (msg.role === 'user') {
+          bubble.textContent = msg.content;
+        } else {
+          bubble.innerHTML = renderMarkdown(msg.content);
+        }
+        group.appendChild(bubble);
+        box.appendChild(group);
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function appendLogLine(line) {
+      const box = document.getElementById('terminal-stream');
+      if (!box || !line) return;
+      box.textContent += line + '\n';
+      if (box.textContent.length > 200 * 1024) {
+        box.textContent = box.textContent.slice(box.textContent.length - 200 * 1024);
+      }
+      if (autoScrollTerminal) {
+        box.scrollTop = box.scrollHeight;
+      }
+    }
+
+    function connectEvents() {
+      if (eventsSource) {
+        try { eventsSource.close(); } catch (e) {}
+        eventsSource = null;
+      }
+      try {
+        eventsSource = new EventSource('/api/events');
+        eventsSource.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.type === 'log' && typeof data.seq === 'number' && data.seq > lastLogSeq) {
+              lastLogSeq = data.seq;
+              appendLogLine(data.line);
+            }
+          } catch (e) {}
+        };
+        eventsSource.onerror = () => {};
+      } catch (e) {}
+    }
+
+    async function pollTelemetry() {
+      const m = await api.getMetrics();
+      const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = v;
+      };
+      if (!m) {
+        set('tel-gen-tps', '—');
+        set('tel-prompt-tps', '—');
+        set('tel-tokens', '—');
+        set('tel-cache-pct', '—');
+        set('tel-mtp-pct', '—');
+        set('tel-requests', '—');
+        return;
+      }
+      const cacheTotal = (m.prompt_tokens_cached || 0) + (m.prompt_tokens_total || 0);
+      set('tel-gen-tps', m.gen_tps != null ? m.gen_tps.toFixed(1) : '—');
+      set('tel-prompt-tps', m.prompt_tps != null ? m.prompt_tps.toFixed(1) : '—');
+      set('tel-tokens', m.tokens_predicted != null ? m.tokens_predicted.toLocaleString() : '—');
+      set('tel-cache-pct', cacheTotal > 0 ? ((m.prompt_tokens_cached || 0) / cacheTotal * 100).toFixed(1) + '%' : '—');
+      set('tel-mtp-pct', m.spec_draft_tokens > 0 ? ((m.spec_accepted_tokens || 0) / m.spec_draft_tokens * 100).toFixed(1) + '%' : '—');
+      set('tel-requests', m.requests_processing != null ? String(m.requests_processing) : '—');
+    }
+
 
     // Tab Navigation
     function switchTab(name) {
@@ -1326,21 +1515,7 @@
       }
     }
 
-    // Python API Batched Log Receiver
-    window.onLogsReceived = function(lines) {
-      if (!Array.isArray(lines) || lines.length === 0) return;
-      const box = document.getElementById('terminal-stream');
-      if (!box) return;
-      box.textContent += lines.join('\n') + '\n';
-      if (autoScrollTerminal) {
-        box.scrollTop = box.scrollHeight;
-      }
-    };
 
-    // Fallback single line receiver
-    window.onLogReceived = function(line) {
-      window.onLogsReceived([line]);
-    };
 
     function onProfileChange() {
       const p = document.getElementById('profile-select').value;
@@ -1361,16 +1536,13 @@
       }
     }
 
-    // Universal Native API Client (Rust HTTP API with pywebview fallback)
+    // Pure Fetch API Client
     const api = {
       async getModels() {
         try {
           const res = await fetch('/api/models');
           if (res.ok) return await res.json();
         } catch (e) {}
-        if (window.pywebview && window.pywebview.api) {
-          try { return await window.pywebview.api.get_models(); } catch (e) {}
-        }
         return [];
       },
       async getStatus() {
@@ -1378,10 +1550,21 @@
           const res = await fetch('/api/status');
           if (res.ok) return await res.json();
         } catch (e) {}
-        if (window.pywebview && window.pywebview.api) {
-          try { return await window.pywebview.api.get_status(); } catch (e) {}
-        }
         return { status: 'stopped', is_healthy: false };
+      },
+      async getSettings() {
+        try {
+          const res = await fetch('/api/settings');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        return null;
+      },
+      async getMetrics() {
+        try {
+          const res = await fetch('/api/metrics');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        return null;
       },
       async startServer(config) {
         try {
@@ -1392,9 +1575,6 @@
           });
           return await res.json();
         } catch (e) {
-          if (window.pywebview && window.pywebview.api) {
-            try { return await window.pywebview.api.start_server(config); } catch (err) {}
-          }
           return { error: e.message };
         }
       },
@@ -1402,11 +1582,7 @@
         try {
           const res = await fetch('/api/stop', { method: 'POST' });
           return await res.json();
-        } catch (e) {
-          if (window.pywebview && window.pywebview.api) {
-            try { return await window.pywebview.api.stop_server(); } catch (err) {}
-          }
-        }
+        } catch (e) {}
       },
       async getLogs() {
         try {
@@ -1422,20 +1598,12 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: model || '' })
           });
-        } catch (e) {
-          if (window.pywebview && window.pywebview.api) {
-            try { await window.pywebview.api.launch_omp(); } catch (err) {}
-          }
-        }
+        } catch (e) {}
       },
       async openBrowser() {
         try {
           await fetch('/api/open_browser', { method: 'POST' });
-        } catch (e) {
-          if (window.pywebview && window.pywebview.api) {
-            try { await window.pywebview.api.open_browser_chat(); } catch (err) {}
-          }
-        }
+        } catch (e) {}
       }
     };
 
@@ -1550,11 +1718,11 @@
         isServerRunning = st.is_healthy;
 
         const badge = document.getElementById('status-badge');
-        const badgeText = document.getElementById('status-text');
-        const btnStart = document.getElementById('btn-start');
-        const btnStop = document.getElementById('btn-stop');
-        const btnOmp = document.getElementById('btn-omp');
-        const btnChat = document.getElementById('btn-webchat');
+        const port = st.port || 8080;
+        const endpointMeta = document.getElementById('endpoint-meta');
+        const endpointPort = document.getElementById('endpoint-port');
+        if (endpointMeta) endpointMeta.textContent = st.is_healthy ? ('127.0.0.1:' + port) : '127.0.0.1:—';
+        if (endpointPort) endpointPort.textContent = ':' + port + '/v1';
         const pidDisplay = document.getElementById('pid-display');
         const statState = document.getElementById('stat-state');
         const statTokens = document.getElementById('stat-tokens');
@@ -1564,7 +1732,7 @@
         if (st.is_healthy) {
           if (badge && badgeText) {
             badge.className = 'status-badge online';
-            badgeText.textContent = 'Activo (:8080)';
+            badgeText.textContent = 'Activo (:' + port + ')';
           }
           if (btnStart) {
             btnStart.disabled = true;
@@ -1578,16 +1746,8 @@
           if (btnChat) btnChat.disabled = false;
           if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || 'Activo');
 
-          if (st.stats && st.stats.is_processing) {
-            if (statState) statState.textContent = 'Procesando...';
-            if (chatHint) chatHint.textContent = 'Generando respuesta...';
-          } else {
-            if (statState) statState.textContent = 'Listo';
-            if (chatHint) chatHint.textContent = 'Listo para consultar';
-          }
-          if (st.stats && st.stats.n_decoded && statTokens) {
-            statTokens.textContent = st.stats.n_decoded.toLocaleString();
-          }
+          if (statState) statState.textContent = 'Listo';
+          if (chatHint) chatHint.textContent = 'Listo para consultar';
           if (errBanner) {
             errBanner.style.display = 'none';
           }
@@ -1767,6 +1927,7 @@
 
     function clearChat() {
       chatHistory.length = 0;
+      saveChatHistory();
       const box = document.getElementById('chat-messages');
       if (box) {
         box.innerHTML = `
@@ -1778,6 +1939,13 @@
         `;
       }
     }
+
+    function stopGeneration() {
+      if (activeAbort) {
+        try { activeAbort.abort(); } catch (e) {}
+      }
+    }
+
 
     async function sendChatMessage() {
       if (!isServerRunning) {
@@ -1837,34 +2005,60 @@
       messagesArea.scrollTop = messagesArea.scrollHeight;
 
       try {
-        const res = await fetch('http://127.0.0.1:8080/v1/chat/completions', {
+        activeAbort = new AbortController();
+        isGenerating = true;
+        const stopBtn = document.getElementById('btn-stop-gen');
+        if (stopBtn) stopBtn.style.display = 'flex';
+
+        const startedAt = performance.now();
+        const res = await fetch('/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: activeAbort.signal,
           body: JSON.stringify({
             model: 'localmind',
             messages: chatHistory,
             temperature: 0.7,
-            stream: true
+            stream: true,
+            stream_options: { include_usage: true }
           })
         });
+
+        if (!res.ok || !res.body) {
+          throw new Error('HTTP ' + res.status);
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let fullReply = '';
         let fullThought = '';
+        let sseBuffer = '';
+        let usage = null;
+        let aborted = false;
 
         while (true) {
-          const { done, value } = await reader.read();
+          let readResult;
+          try {
+            readResult = await reader.read();
+          } catch (readErr) {
+            if (readErr && readErr.name === 'AbortError') { aborted = true; break; }
+            throw readErr;
+          }
+          const { done, value } = readResult;
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop();
 
           for (const line of lines) {
             const trimmed = line.trim();
             if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
               try {
                 const parsed = JSON.parse(trimmed.slice(6));
+                if (parsed.usage) {
+                  usage = parsed.usage;
+                }
                 const delta = parsed.choices?.[0]?.delta;
                 if (delta?.reasoning_content) {
                   thinkingWrapper.style.display = 'block';
@@ -1880,44 +2074,88 @@
             }
           }
         }
-        chatHistory.push({ role: 'assistant', content: fullReply });
+
+        const elapsed = (performance.now() - startedAt) / 1000;
+        if (fullReply) {
+          chatHistory.push({ role: 'assistant', content: fullReply });
+        }
+        saveChatHistory();
+
+        // Meta footer: X.Xs · Y tokens · Z t/s
+        const genSeconds = elapsed;
+        const completionTokens = usage && usage.completion_tokens != null
+          ? usage.completion_tokens
+          : (fullReply ? fullReply.split(/\s+/).length : 0);
+        const tps = genSeconds > 0 && completionTokens > 0 ? (completionTokens / genSeconds).toFixed(1) : '—';
+        const secsTxt = genSeconds.toFixed(1) + 's';
+        const tokensTxt = usage && usage.completion_tokens != null ? String(usage.completion_tokens) : (completionTokens > 0 ? '~' + completionTokens : '—');
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'msg-meta';
+        let metaText = secsTxt + ' · ' + tokensTxt + ' tokens · ' + tps + ' t/s';
+        if (aborted) metaText += ' · detenido';
+        metaDiv.textContent = metaText;
+        botGroup.appendChild(metaDiv);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
       } catch (err) {
-        botBubble.innerHTML = `<span style="color: #f87171;">Error al comunicarse con el motor: ${escapeHtml(err.message)}</span>`;
+        if (err && err.name === 'AbortError') {
+          // Handled in the loop; nothing extra needed here.
+        } else {
+          botBubble.innerHTML = `<span style="color: #f87171;">Error al comunicarse con el motor: ${escapeHtml(err.message)}</span>`;
+        }
+      } finally {
+        isGenerating = false;
+        activeAbort = null;
+        const stopBtn = document.getElementById('btn-stop-gen');
+        if (stopBtn) stopBtn.style.display = 'none';
       }
     }
 
-    // Window pywebview Initialization
+    // App Initialization
     let statusPollerStarted = false;
-    function initApp() {
-      refreshModels();
-      if (!statusPollerStarted) {
-        statusPollerStarted = true;
-        setInterval(updateStatus, 800);
-        setInterval(pollLogs, 1000);
-        updateStatus();
-        pollLogs();
-      }
-    }
-
-    let lastLogsCount = 0;
-    async function pollLogs() {
-      try {
-        const logs = await api.getLogs();
-        if (logs && logs.length > 0 && logs.length !== lastLogsCount) {
-          lastLogsCount = logs.length;
-          const term = document.getElementById('terminal-stream');
-          if (term) {
-            term.textContent = logs.join('\n') + '\n';
-            if (autoScrollTerminal) {
-              term.scrollTop = term.scrollHeight;
+    async function initApp() {
+      await refreshModels();
+      const settings = await api.getSettings();
+      if (settings) {
+        const s = settings.last || {};
+        if (s.model) {
+          const modelSel = document.getElementById('model-select');
+          if (modelSel) {
+            for (const opt of modelSel.options) {
+              if (opt.value === s.model) { opt.selected = true; break; }
             }
           }
         }
-      } catch (e) {}
+        if (s.profile) {
+          const profileSel = document.getElementById('profile-select');
+          if (profileSel && profileSel.querySelector(`option[value="${s.profile}"]`)) {
+            profileSel.value = s.profile;
+            onProfileChange();
+          }
+        }
+        if (s.context) {
+          const ctxSel = document.getElementById('context-select');
+          if (ctxSel && ctxSel.querySelector(`option[value="${s.context}"]`)) {
+            ctxSel.value = String(s.context);
+          }
+        }
+        const configPathEl = document.getElementById('config-path');
+        if (configPathEl && settings.config_path) {
+          configPathEl.textContent = 'config: ' + settings.config_path;
+        }
+      }
+      if (!statusPollerStarted) {
+        statusPollerStarted = true;
+        loadChatHistory();
+        setInterval(updateStatus, 800);
+        setInterval(pollTelemetry, 2000);
+        updateStatus();
+        pollTelemetry();
+        connectEvents();
+      }
     }
 
-    window.addEventListener('pywebviewready', initApp);
     document.addEventListener('DOMContentLoaded', initApp);
+
   </script>
 </body>
 </html>

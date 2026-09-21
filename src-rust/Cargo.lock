@@ -1160,6 +1160,7 @@ dependencies = [
  "serde_json",
  "tao",
  "tiny_http",
+ "toml",
  "ureq",
  "wry",
 ]
