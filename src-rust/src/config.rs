@@ -236,7 +236,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             description: "Todo el modelo y su memoria de conversación (KV cache) viven íntegramente en la VRAM de la GPU. Es el modo más rápido con mínima latencia. Ideal para chat, preguntas y código corto (<30k palabras).".to_string(),
             context: 32768,
             cache_ram: 0,
-            extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
+            extra_flags: Vec::new(),
         },
         HardwareProfile {
             id: "multi_doc".to_string(),
@@ -244,7 +244,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             description: "El modelo reside en VRAM y parte del KV cache pasa a la memoria RAM del sistema. Cede ~5% de velocidad para sostener ~60k palabras de contexto: múltiples documentos o repositorios completos.".to_string(),
             context: 65536,
             cache_ram: 4096,
-            extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
+            extra_flags: Vec::new(),
         },
         HardwareProfile {
             id: "libros".to_string(),
@@ -252,7 +252,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             description: "Modelo en VRAM + KV cache ampliado en RAM del sistema: sostiene ~120k palabras (un libro entero o proyecto grande). Velocidad moderada (~15-20% menor que Velocidad máxima) al cursar tráfico por el bus de memoria.".to_string(),
             context: 131072,
             cache_ram: 6144,
-            extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
+            extra_flags: Vec::new(),
         },
         HardwareProfile {
             id: "max_contexto".to_string(),
@@ -260,11 +260,7 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             description: "Alcanza los 262,144 tokens que el modelo soporta nativamente (~200k palabras: bases de código masivas). Requiere memoria RAM compartida considerable; ideal para cargas analíticas profundas.".to_string(),
             context: 262144,
             cache_ram: 6144,
-            extra_flags: vec![
-                "-kvu".to_string(),
-                "--cache-reuse".to_string(),
-                "512".to_string(),
-            ],
+            extra_flags: vec!["-kvu".to_string()],
         },
     ]
 }
