@@ -543,9 +543,8 @@ impl ProcessManager {
         // Puerto dinámico del motor: preferido desde config; si está ocupado, +1 hasta libre.
         let llama_port = Self::find_free_port(cfg.engine.llama_port);
 
-        // Performance tuning: Use larger physical ubatch for pure VRAM profiles
-        let ubatch = if context <= 65536 { "1024" } else { "512" };
-
+        // Performance tuning: uBatch optimizado a 2048 para ingesta veloz de prompts masivos
+        let ubatch = if context <= 65536 { "2048" } else { "1024" };
         let mut cmd = Command::new(&llama_bin);
         cmd.current_dir(&self.base_dir);
         cmd.creation_flags(CREATE_NO_WINDOW | process_priority_class);
