@@ -292,6 +292,7 @@
       flex-direction: column;
       gap: 16px;
       flex: 1;
+      overflow-y: auto;
     }
 
     /* Form Fields */
@@ -1082,8 +1083,17 @@
     }
 
     details.advanced summary:hover { color: var(--text); }
-    details.advanced .fields-row { margin-top: 12px; }
-
+    details.advanced .fields-row {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    details.advanced .fields-subrow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
     /* Telemetry meta line */
     .telemetry-meta {
       display: flex;
@@ -1237,30 +1247,33 @@
                     </select>
                   </div>
                 </div>
-                <div class="field-group">
-                  <label class="field-label" for="threads-select">
-                    <span>Hilos de CPU (organización interna)</span>
-                    <span class="field-hint">No cambia la velocidad; afecta consumo eléctrico</span>
-                  </label>
-                  <div class="select-wrapper">
-                    <select id="threads-select">
-                      <option value="6" selected>6 hilos — recomendado (consumo moderado)</option>
-                      <option value="4">4 hilos — mínima CPU, para jugar con el modelo corriendo</option>
-                      <option value="12">12 hilos — innecesario; solo si mides benchmarks</option>
-                    </select>
-                  </div>
-                </div>
 
-                <div class="field-group">
-                  <label class="field-label" for="priority-select">
-                    <span>Prioridad de Ejecución</span>
-                    <span class="field-hint">Windows</span>
-                  </label>
-                  <div class="select-wrapper">
-                    <select id="priority-select">
-                      <option value="2" selected>Alta prioridad (Respuesta inmediata)</option>
-                      <option value="0">Normal (Equilibrado)</option>
-                    </select>
+                <div class="fields-subrow">
+                  <div class="field-group">
+                    <label class="field-label" for="threads-select">
+                      <span>Hilos de CPU (organización interna)</span>
+                      <span class="field-hint">Consumo eléctrico</span>
+                    </label>
+                    <div class="select-wrapper">
+                      <select id="threads-select">
+                        <option value="6" selected>6 hilos — recomendado</option>
+                        <option value="4">4 hilos — silencioso / juego</option>
+                        <option value="12">12 hilos — innecesario</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field-group">
+                    <label class="field-label" for="priority-select">
+                      <span>Prioridad de Ejecución</span>
+                      <span class="field-hint">Windows</span>
+                    </label>
+                    <div class="select-wrapper">
+                      <select id="priority-select">
+                        <option value="2" selected>Alta prioridad</option>
+                        <option value="0">Normal (Equilibrado)</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
