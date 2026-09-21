@@ -1746,7 +1746,9 @@
           if (btnChat) btnChat.disabled = false;
           if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || 'Activo');
 
-          if (statState) statState.textContent = 'Listo';
+          if (statState) statState.textContent = st.idle_remaining_secs != null
+            ? ('Listo · auto-stop en ' + Math.floor(st.idle_remaining_secs / 60) + 'm ' + (st.idle_remaining_secs % 60) + 's')
+            : 'Listo';
           if (chatHint) chatHint.textContent = 'Listo para consultar';
           if (errBanner) {
             errBanner.style.display = 'none';

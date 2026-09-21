@@ -405,6 +405,7 @@ fn handle_request(
     if method == "POST" && url == "/v1/chat/completions" {
         let mut body_bytes = Vec::new();
         let _ = req.as_reader().read_to_end(&mut body_bytes);
+        mgr.touch_activity();
         let payload_bytes = sanitize_payload(body_bytes);
 
         let st = mgr.get_status();

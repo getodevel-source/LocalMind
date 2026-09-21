@@ -32,6 +32,8 @@ pub struct ServerStatus {
     pub context: usize,
     pub profile: String,
     pub port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_remaining_secs: Option<u64>,
     pub last_error: Option<String>,
 }
 
@@ -57,6 +59,8 @@ pub struct ProcessManager {
     log_senders: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
     running_poll: Arc<AtomicBool>,
     log_seq: Arc<AtomicU64>,
+    /// UNIX-epoch secs de la última generación (chat request). Para auto-stop por inactividad.
+    last_activity: Arc<AtomicU64>,
     config: Arc<ConfigStore>,
     base_dir: PathBuf,
     bin_dir: PathBuf,
@@ -77,20 +81,27 @@ impl ProcessManager {
             context: 32768,
             profile: "turbo".to_string(),
             port: cfg.engine.llama_port,
+            idle_remaining_secs: None,
             last_error: None,
         }));
 
         let recent_logs: Arc<RwLock<VecDeque<LogEvent>>> = Arc::new(RwLock::new(VecDeque::new()));
-        let log_senders = Arc::new(Mutex::new(Vec::new()));
+        let log_senders: Arc<Mutex<Vec<mpsc::Sender<String>>>> = Arc::new(Mutex::new(Vec::new()));
         let child: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
         let running_poll = Arc::new(AtomicBool::new(true));
         let log_seq = Arc::new(AtomicU64::new(0));
+        let last_activity = Arc::new(AtomicU64::new(0));
 
         // Background poller: monitors health AND child process liveness
         let status_clone = Arc::clone(&status);
         let child_clone = Arc::clone(&child);
         let logs_for_err = Arc::clone(&recent_logs);
         let poll_flag = Arc::clone(&running_poll);
+        let cfg_poll = Arc::clone(&config);
+        let last_activity_poll = Arc::clone(&last_activity);
+        let recent_logs_clone = Arc::clone(&recent_logs);
+        let senders_clone = Arc::clone(&log_senders);
+        let seq_clone = Arc::clone(&log_seq);
 
         thread::spawn(move || {
             let mut consecutive_failures = 0u32;
@@ -105,6 +116,7 @@ impl ProcessManager {
                     }
                 };
 
+                let mut auto_stop = false;
                 if let Some(exit_status) = exited {
                     let mut st = status_clone.write();
                     if st.status == "starting" || st.status == "running" {
@@ -157,9 +169,42 @@ impl ProcessManager {
                             st.last_error =
                                 Some("El motor dejó de responder el endpoint /health".to_string());
                         }
+                        // Auto-stop por inactividad (solo si está running y healthy)
+                        let timeout = cfg_poll.get().engine.idle_timeout_secs;
+                        if timeout > 0 && st.status == "running" {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            let last = last_activity_poll.load(Ordering::Relaxed);
+                            if last > 0 && now.saturating_sub(last) >= timeout {
+                                st.status = "stopped".to_string();
+                                st.is_healthy = false;
+                                st.pid = None;
+                                auto_stop = true;
+                            }
+                        }
                     }
                 }
 
+                if auto_stop {
+                    // Kill del árbol del proceso desde el poller (no podemos usar &self aquí).
+                    let pid = {
+                        let mut cl = child_clone.lock();
+                        cl.as_ref().map(|c| c.id())
+                    };
+                    if let Some(pid) = pid {
+                        let mut tk = Command::new("taskkill");
+                        tk.args(["/F", "/T", "/PID", &pid.to_string()]);
+                        tk.creation_flags(CREATE_NO_WINDOW);
+                        let _ = tk.output();
+                        let _ = child_clone.lock().take().map(|mut c| { let _ = c.kill(); let _ = c.wait(); });
+                        let mut logs = recent_logs_clone.write();
+                        if logs.len() >= 250 { logs.pop_front(); }
+                        logs.push_back(LogEvent { seq: seq_clone.fetch_add(1, Ordering::Relaxed), line: "[LocalMind] Auto-stop: motor apagado por inactividad. VRAM y memoria liberadas.".to_string() });
+                        for tx in senders_clone.lock().iter() { let _ = tx.send("[LocalMind] Auto-stop: motor apagado por inactividad. VRAM y memoria liberadas.".to_string()); }
+                    }
+                }
                 thread::sleep(Duration::from_millis(500));
             }
         });
@@ -171,6 +216,7 @@ impl ProcessManager {
             log_senders,
             running_poll,
             log_seq,
+            last_activity: Arc::clone(&last_activity),
             config,
             base_dir,
             bin_dir,
@@ -196,6 +242,15 @@ impl ProcessManager {
             }
         }
         preferred
+    }
+
+    /// Marcar actividad de generación (llamado por el server en cada chat request).
+    pub fn touch_activity(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.last_activity.store(now, Ordering::Relaxed);
     }
 
     pub fn log(&self, msg: &str) {
@@ -235,7 +290,20 @@ impl ProcessManager {
     }
 
     pub fn get_status(&self) -> ServerStatus {
-        self.status.read().clone()
+        let mut st = self.status.read().clone();
+        let timeout = self.config.get().engine.idle_timeout_secs;
+        if timeout > 0 && st.status == "running" {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let last = self.last_activity.load(Ordering::Relaxed);
+            if last > 0 {
+                let elapsed = now.saturating_sub(last);
+                st.idle_remaining_secs = Some(timeout.saturating_sub(elapsed));
+            }
+        }
+        st
     }
 
     pub fn list_models(&self) -> Vec<ModelInfo> {
@@ -538,6 +606,9 @@ impl ProcessManager {
             st.port = llama_port;
             st.last_error = None;
         }
+
+        // Sembrar el timer de inactividad al arrancar el motor.
+        self.touch_activity();
 
         // Persistir "última configuración usada" para el próximo arranque.
         self.config.update(|c| {

@@ -70,6 +70,9 @@ pub struct EngineConfig {
     /// threads_batch separado: batch de prompt es el pico máximo de CPU/VRAM.
     #[serde(default = "default_true")]
     pub limit_threads_batch: bool,
+    /// Auto-stop del motor tras N segundos sin actividad de generación. 0 = desactivado.
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_secs: u64,
     #[serde(default)]
     pub extra_flags: Vec<String>,
     #[serde(default = "default_aliases")]
@@ -100,6 +103,7 @@ impl Default for EngineConfig {
             process_priority: "below_normal".to_string(),
             poll: 0,
             limit_threads_batch: true,
+            idle_timeout_secs: 900,
             extra_flags: Vec::new(),
             aliases: default_aliases(),
             speculation: Some(SpeculationConfig::default()),
@@ -186,6 +190,9 @@ fn default_process_priority() -> String {
 }
 fn default_poll() -> u32 {
     0
+}
+fn default_idle_timeout() -> u64 {
+    900 // 15 min
 }
 fn default_http_port() -> u16 {
     17860
