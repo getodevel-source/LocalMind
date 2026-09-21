@@ -1199,8 +1199,8 @@
               <div class="fields-row">
                 <div class="field-group">
                   <label class="field-label" for="context-select">
-                    <span>Memoria de conversación · máx. tokens retenidos</span>
-                    <span class="field-hint">El perfil la ajusta; afina solo si necesitas</span>
+                    <span>Contexto (tokens retenidos · 32K ≈ 50 págs.)</span>
+                    <span class="field-hint">Lo decide el perfil; afina solo si sabes qué haces</span>
                   </label>
                   <div class="select-wrapper">
                     <select id="context-select">
@@ -1213,14 +1213,14 @@
                 </div>
                 <div class="field-group">
                   <label class="field-label" for="threads-select">
-                    <span>Rendimiento CPU</span>
-                    <span class="field-hint">Ryzen 5 7600</span>
+                    <span>Hilos de CPU (organización interna)</span>
+                    <span class="field-hint">No cambia la velocidad; afecta consumo eléctrico</span>
                   </label>
                   <div class="select-wrapper">
                     <select id="threads-select">
-                      <option value="6" selected>6 núcleos físicos (Óptimo Zen 4)</option>
-                      <option value="12">12 hilos completos (SMT)</option>
-                      <option value="4">4 núcleos (Modo silencioso)</option>
+                      <option value="6" selected>6 hilos — recomendado (consumo moderado)</option>
+                      <option value="4">4 hilos — mínima CPU, para jugar con el modelo corriendo</option>
+                      <option value="12">12 hilos — innecesario; solo si mides benchmarks</option>
                     </select>
                   </div>
                 </div>
