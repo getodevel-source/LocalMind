@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalMind Chat · 27B</title>
+  <link rel="icon" type="image/x-icon" href="localmind.ico">
+  <style>
+    :root {
+      --bg-dark: #0f1117;
+      --bg-card: #181b24;
+      --bg-input: #1e2230;
+      --border: #2c3245;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --thought-bg: #1e2538;
+      --thought-border: #3b4261;
+      --user-bubble: #1e3a8a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header-title { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.05rem; }
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: #14532d;
+      color: #86efac;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .status-badge::before { content: ""; width: 7px; height: 7px; background: #4ade80; border-radius: 50%; }
+    .status-offline { background: #7f1d1d; color: #fca5a5; }
+    .status-offline::before { background: #f87171; }
+    .specs-badge { font-size: 0.8rem; color: var(--text-muted); }
+    #chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg-user {
+      align-self: flex-end;
+      background: var(--user-bubble);
+      color: #fff;
+    }
+    .msg-assistant {
+      align-self: flex-start;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+    }
+    .thought-box {
+      background: var(--thought-bg);
+      border: 1px solid var(--thought-border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .thought-box summary { font-weight: 500; outline: none; }
+    .thought-content { margin-top: 8px; font-style: italic; white-space: pre-wrap; }
+    .preview-img { max-width: 250px; max-height: 250px; border-radius: 8px; margin-bottom: 8px; display: block; }
+    footer {
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .input-row { display: flex; gap: 10px; align-items: flex-end; }
+    textarea {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      resize: none;
+      height: 52px;
+      max-height: 160px;
+      font-family: inherit;
+    }
+    textarea:focus { outline: none; border-color: var(--primary); }
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: 0.15s;
+    }
+    button:hover { background: var(--primary-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .attach-btn {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .attach-btn:hover { background: #2a3145; }
+    .img-preview-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .img-preview-bar img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title">
+      <span>⚡ LocalMind (27B)</span>
+      <span id="status-pill" class="status-badge">Conectado (GPU Vulkan · RX 6800 XT)</span>
+    </div>
+    <div class="specs-badge">Contexto: 65,536 tokens · KV 4-bit · Local</div>
+  </header>
+
+  <div id="chat-container">
+    <div class="msg msg-assistant">¡Hola! El motor local <b>LocalMind (27B)</b> ya está cargado 100% en tu <b>AMD Radeon RX 6800 XT</b> con 64K de contexto y aceleración Vulkan.
+
+Puedes escribirme, pedirme tareas complejas o arrastrar imágenes aquí directamente. ¿En qué te puedo ayudar?</div>
+  </div>
+
+  <footer>
+    <div id="preview-container" class="img-preview-bar" style="display: none;">
+      <img id="img-thumb" src="" alt="preview">
+      <span id="img-name">imagen.png</span>
+      <button onclick="clearImage()" style="padding: 2px 8px; font-size: 0.75rem; background: #ef4444;">Quitar</button>
+    </div>
+    <div class="input-row">
+      <input type="file" id="file-input" accept="image/*" style="display: none;" onchange="handleFile(event)">
+      <button class="attach-btn" title="Adjuntar imagen" onclick="document.getElementById('file-input').click()">📷</button>
+      <textarea id="prompt-input" placeholder="Escribe un mensaje... (Shift+Enter para nueva línea, Enter para enviar)" onkeydown="checkEnter(event)"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Enviar</button>
+    </div>
+  </footer>
+
+  <script>
+    const API_URL = "http://127.0.0.1:8080/v1/chat/completions";
+    const messages = [];
+    let currentImageBase64 = null;
+
+    async function checkServer() {
+      try {
+        const res = await fetch("http://127.0.0.1:8080/v1/models");
+        if (res.ok) {
+          document.getElementById("status-pill").className = "status-badge";
+          document.getElementById("status-pill").textContent = "Conectado (GPU Vulkan · RX 6800 XT)";
+        } else throw new Error();
+      } catch (e) {
+        document.getElementById("status-pill").className = "status-badge status-offline";
+        document.getElementById("status-pill").textContent = "Servidor desconectado";
+      }
+    }
+    setInterval(checkServer, 5000);
+    checkServer();
+
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        currentImageBase64 = evt.target.result;
+        document.getElementById("img-thumb").src = currentImageBase64;
+        document.getElementById("img-name").textContent = file.name;
+        document.getElementById("preview-container").style.display = "flex";
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearImage() {
+      currentImageBase64 = null;
+      document.getElementById("file-input").value = "";
+      document.getElementById("preview-container").style.display = "none";
+    }
+
+    function checkEnter(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById("prompt-input");
+      const text = input.value.trim();
+      if (!text && !currentImageBase64) return;
+
+      input.value = "";
+      const sendBtn = document.getElementById("send-btn");
+      sendBtn.disabled = true;
+
+      const chatContainer = document.getElementById("chat-container");
+
+      // User Bubble
+      const userDiv = document.createElement("div");
+      userDiv.className = "msg msg-user";
+      if (currentImageBase64) {
+        const img = document.createElement("img");
+        img.src = currentImageBase64;
+        img.className = "preview-img";
+        userDiv.appendChild(img);
+      }
+      if (text) {
+        const p = document.createElement("p");
+        p.textContent = text;
+        userDiv.appendChild(p);
+      }
+      chatContainer.appendChild(userDiv);
+
+      // Build payload content
+      let userMsgContent;
+      if (currentImageBase64) {
+        userMsgContent = [
+          { type: "text", text: text || "Describe esta imagen." },
+          { type: "image_url", image_url: { url: currentImageBase64 } }
+        ];
+      } else {
+        userMsgContent = text;
+      }
+      messages.push({ role: "user", content: userMsgContent });
+      clearImage();
+
+      // Assistant Bubble
+      const asstDiv = document.createElement("div");
+      asstDiv.className = "msg msg-assistant";
+      
+      const thoughtDetails = document.createElement("details");
+      thoughtDetails.className = "thought-box";
+      thoughtDetails.style.display = "none";
+      const summary = document.createElement("summary");
+      summary.textContent = "🧠 Razonamiento...";
+      const thoughtContent = document.createElement("div");
+      thoughtContent.className = "thought-content";
+      thoughtDetails.appendChild(summary);
+      thoughtDetails.appendChild(thoughtContent);
+      asstDiv.appendChild(thoughtDetails);
+
+      const contentSpan = document.createElement("span");
+      asstDiv.appendChild(contentSpan);
+      chatContainer.appendChild(asstDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: messages,
+            temperature: 0.7,
+            stream: true
+          })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let assistantReply = "";
+        let fullThought = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("data: ") && trimmed !== "data: [DONE]") {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6));
+                const delta = parsed.choices?.[0]?.delta;
+                if (delta?.reasoning_content) {
+                  thoughtDetails.style.display = "block";
+                  fullThought += delta.reasoning_content;
+                  thoughtContent.textContent = fullThought;
+                }
+                if (delta?.content) {
+                  assistantReply += delta.content;
+                  contentSpan.textContent = assistantReply;
+                }
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+              } catch (err) {}
+            }
+          }
+        }
+        messages.push({ role: "assistant", content: assistantReply });
+      } catch (e) {
+        contentSpan.textContent = "Error al conectar con el servidor local: " + e.message;
+      } finally {
+        sendBtn.disabled = false;
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    }
+  </script>
+</body>
+</html>

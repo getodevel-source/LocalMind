@@ -1,0 +1,1923 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalMind Studio</title>
+  <link rel="icon" type="image/x-icon" href="localmind.ico">
+  <style>
+    :root {
+      --bg: #000000;
+      --surface: #09090b;
+      --surface-elevated: #121215;
+      --surface-hover: #18181b;
+      --surface-active: #27272a;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.05);
+      --border-hover: rgba(255, 255, 255, 0.16);
+      --border-focus: rgba(255, 255, 255, 0.32);
+
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --text-subtle: #71717a;
+      --text-dim: #52525b;
+
+      --accent: #ffffff;
+      --accent-bg: #ffffff;
+      --accent-text: #000000;
+
+      --emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.15);
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.15);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.15);
+      --blue: #3b82f6;
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", sans-serif;
+      --font-mono: ui-monospace, "Cascadia Code", "Fira Code", "Geist Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* Top Navigation Header */
+    header {
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      background: linear-gradient(145deg, #18181b, #09090b);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+    }
+
+    .brand-titles {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .brand-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      padding: 1px 7px;
+      border-radius: 4px;
+      letter-spacing: 0.02em;
+    }
+
+    /* Tabs Segmented Control */
+    .tabs-nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 3px;
+      border-radius: 8px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      padding: 5px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .tab-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tab-btn.active {
+      background: var(--surface-active);
+      color: #ffffff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Right Header Badges */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-badge {
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.2s ease;
+    }
+
+    .status-badge.online {
+      color: #34d399;
+      border-color: rgba(52, 211, 153, 0.2);
+      background: rgba(52, 211, 153, 0.04);
+    }
+    .status-badge.online .status-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    }
+
+    .status-badge.loading {
+      color: #fbbf24;
+      border-color: rgba(251, 191, 36, 0.2);
+      background: rgba(251, 191, 36, 0.04);
+    }
+    .status-badge.loading .status-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+
+    .status-badge.error {
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.3);
+      background: rgba(248, 113, 113, 0.06);
+    }
+    .status-badge.error .status-dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+
+    /* Main Viewport */
+    main {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      position: relative;
+    }
+
+    .tab-panel {
+      display: none;
+      width: 100%;
+      height: 100%;
+      overflow-y: auto;
+      padding: 24px;
+      flex-direction: column;
+    }
+
+    .tab-panel.active {
+      display: flex;
+    }
+
+    /* Cards & Grids */
+    .dashboard-layout {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 20px;
+      height: 100%;
+      max-width: 1360px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: border-color 0.15s ease;
+    }
+
+    .card:hover {
+      border-color: var(--border-hover);
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-meta {
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: var(--font-mono);
+    }
+
+    .card-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      flex: 1;
+    }
+
+    /* Form Fields */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-label {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .field-hint {
+      color: var(--text-subtle);
+      font-weight: 400;
+    }
+
+    .select-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.12s ease;
+      cursor: pointer;
+      appearance: none;
+    }
+
+    .select-wrapper::after {
+      content: "";
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--text-subtle);
+      pointer-events: none;
+    }
+
+    select:hover, input[type="text"]:hover {
+      border-color: var(--border-hover);
+      background: var(--surface-hover);
+    }
+
+    select:focus, input[type="text"]:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 1px var(--border-focus);
+    }
+
+    .fields-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Feature List Badges */
+    .feature-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-top: 4px;
+    }
+
+    .feature-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+    .feature-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #10b981;
+    }
+
+    /* Error alert banner */
+    .error-banner {
+      display: none;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 11.5px;
+      color: #fca5a5;
+      line-height: 1.45;
+    }
+
+    /* Buttons */
+    .btn {
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 9px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+      border: 1px solid transparent;
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      filter: grayscale(0.5);
+    }
+
+    .btn-primary {
+      background: #ffffff;
+      color: #000000;
+      border-color: #ffffff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: #e4e4e7;
+      border-color: #e4e4e7;
+      transform: translateY(-0.5px);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.08);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.2);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+
+    .btn-secondary {
+      background: var(--surface-elevated);
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--surface-hover);
+      border-color: var(--border-hover);
+    }
+
+    /* Quick Action Cards */
+    .action-tile {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      color: var(--text);
+      text-align: left;
+      width: 100%;
+    }
+
+    .action-tile:hover:not(:disabled) {
+      border-color: var(--border-hover);
+      background: var(--surface-hover);
+      transform: translateY(-1px);
+    }
+
+    .action-tile:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .action-tile-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .action-tile-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .action-tile-desc {
+      font-size: 11px;
+      color: var(--text-subtle);
+    }
+
+    .action-tile-arrow {
+      color: var(--text-dim);
+      transition: transform 0.12s ease;
+    }
+
+    .action-tile:hover:not(:disabled) .action-tile-arrow {
+      transform: translateX(2px);
+      color: var(--text);
+    }
+
+    /* Telemetry KPI Cards */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: auto;
+    }
+
+    .metric-box {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .metric-label {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-value {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text);
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .metric-value.highlight {
+      color: #34d399;
+    }
+
+    /* Chat Tab */
+    .chat-container {
+      max-width: 980px;
+      margin: 0 auto;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .chat-header-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chat-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      user-select: text;
+    }
+
+    .msg-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 88%;
+    }
+
+    .msg-group.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .msg-group.assistant {
+      align-self: flex-start;
+      align-items: flex-start;
+      max-width: 94%;
+    }
+
+    .msg-bubble {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .msg-group.user .msg-bubble {
+      background: var(--surface-hover);
+      border: 1px solid var(--border);
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+
+    .msg-group.assistant .msg-bubble {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 100%;
+    }
+
+    /* Markdown Inside Chat */
+    .msg-bubble p {
+      margin-bottom: 10px;
+    }
+    .msg-bubble p:last-child {
+      margin-bottom: 0;
+    }
+    .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      margin: 12px 0 6px 0;
+    }
+    .msg-bubble ul, .msg-bubble ol {
+      margin: 8px 0 8px 18px;
+    }
+    .msg-bubble li {
+      margin-bottom: 4px;
+    }
+    .msg-bubble code {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #e4e4e7;
+    }
+    .code-block-wrapper {
+      position: relative;
+      margin: 10px 0;
+      border-radius: 6px;
+      background: #050507;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .code-block-header {
+      background: var(--surface-elevated);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: var(--font-mono);
+    }
+    .copy-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-subtle);
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .copy-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .code-block-wrapper pre {
+      padding: 12px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.45;
+      color: #38bdf8;
+    }
+
+    /* Thinking Process Accordion */
+    .thinking-wrapper {
+      margin-bottom: 10px;
+      border-left: 2px solid var(--border-hover);
+      padding-left: 12px;
+      font-size: 12px;
+      color: var(--text-subtle);
+    }
+
+    .thinking-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .thinking-toggle:hover {
+      color: var(--text);
+    }
+
+    .thinking-content {
+      font-style: italic;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      color: var(--text-subtle);
+    }
+
+    /* Chat Input Dock */
+    .chat-dock {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      transition: border-color 0.12s ease;
+    }
+
+    .input-row:focus-within {
+      border-color: var(--border-focus);
+    }
+
+    .chat-textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      resize: none;
+      height: 22px;
+      max-height: 120px;
+      outline: none;
+      line-height: 1.4;
+    }
+
+    .chat-send-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #000000;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      flex-shrink: 0;
+    }
+
+    .chat-send-btn:hover:not(:disabled) {
+      background: #e4e4e7;
+    }
+
+    .chat-send-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .chat-dock-hints {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-subtle);
+      padding: 0 4px;
+    }
+
+    /* Logs Terminal */
+    .terminal-container {
+      max-width: 1360px;
+      margin: 0 auto;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #050507;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .terminal-header {
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .terminal-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tool-btn {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tool-btn:hover {
+      color: var(--text);
+      border-color: var(--border-hover);
+    }
+
+    #terminal-stream {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: #a1a1aa;
+      white-space: pre-wrap;
+      word-break: break-all;
+      user-select: text;
+    }
+
+    /* Info Tab */
+    .info-layout {
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .info-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .info-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .info-card p {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.65;
+    }
+
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+
+    .spec-table th, .spec-table td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 12px;
+    }
+
+    .spec-table th {
+      color: var(--text-subtle);
+      font-weight: 500;
+      text-transform: uppercase;
+      font-size: 10.5px;
+    }
+
+    .spec-table td {
+      color: var(--text);
+      font-family: var(--font-mono);
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <header>
+    <div class="brand-section">
+      <div class="brand-logo" style="background: linear-gradient(145deg, #0284c7, #6366f1); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" fill="#ffffff"/>
+          <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/>
+          <path d="M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1M5.6 18.4l2.1-2.1m8.6-8.6l2.1-2.1"/>
+        </svg>
+      </div>
+      <div class="brand-titles">
+        <span class="brand-name">LocalMind Studio</span>
+        <span class="brand-badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.25);">27B Engine</span>
+      </div>
+    </div>
+
+    <!-- Segmented Navigation Tabs -->
+    <nav class="tabs-nav">
+      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Panel</span>
+      </button>
+      <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Chat</span>
+      </button>
+      <button class="tab-btn" data-tab="terminal" onclick="switchTab('terminal')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <span>Logs</span>
+      </button>
+      <button class="tab-btn" data-tab="info" onclick="switchTab('info')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span>Specs</span>
+      </button>
+    </nav>
+
+    <!-- Header Right Status -->
+    <div class="header-actions">
+      <div id="status-badge" class="status-badge">
+        <span class="status-dot"></span>
+        <span id="status-text">En reposo</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Viewport -->
+  <main>
+    <!-- TAB 1: DASHBOARD -->
+    <div id="tab-dashboard" class="tab-panel active">
+      <div class="dashboard-layout">
+        
+        <!-- Left: Configuration & Engine Control -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Configuración de Motor
+            </span>
+            <span id="pid-display" class="card-meta">PID: --</span>
+          </div>
+
+          <div class="card-body">
+            <div id="error-banner" class="error-banner"></div>
+
+            <div class="field-group">
+              <label class="field-label" for="model-select">
+                <span>Modelo de Inteligencia Artificial</span>
+                <span class="field-hint">Pesos GGUF</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="model-select">
+                  <option value="">Cargando modelo...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="profile-select">
+                <span>Perfil de Rendimiento (Hardware RX 6800 XT)</span>
+                <span class="field-hint">Tuning VRAM + RAM</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="profile-select" onchange="onProfileChange()">
+                  <option value="turbo" selected>⚡ Turbo VRAM (32K · Máxima Velocidad T/S)</option>
+                  <option value="balanced">⚖️ Equilibrado Pro (64K · Documentos y Código)</option>
+                  <option value="deep">📚 Extendido 128K (Libros y Repositorios)</option>
+                  <option value="ultra">🌌 Límite Hardware 262K (Máximo Contexto Físico)</option>
+                </select>
+              </div>
+              <div id="profile-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.4;">
+                100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia.
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="context-select">
+                <span>Capacidad de Contexto (Tokens Activos)</span>
+                <span class="field-hint">KV Cache 4-bit</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="context-select">
+                  <option value="32768" selected>32K tokens (32.768) — 100% VRAM GPU pura (~14.2 GB total)</option>
+                  <option value="65536">64K tokens (65.536) — Equilibrado (~15.2 GB VRAM)</option>
+                  <option value="131072">128K tokens (131.072) — Extendido (VRAM + RAM DDR5)</option>
+                  <option value="262144">262K tokens (262.144) — Límite Hardware (VRAM + RAM DDR5)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="fields-row">
+              <div class="field-group">
+                <label class="field-label" for="threads-select">
+                  <span>Rendimiento CPU</span>
+                  <span class="field-hint">Ryzen 5 7600</span>
+                </label>
+                <div class="select-wrapper">
+                  <select id="threads-select">
+                    <option value="6" selected>6 núcleos físicos (Óptimo Zen 4)</option>
+                    <option value="12">12 hilos completos (SMT)</option>
+                    <option value="4">4 núcleos (Modo silencioso)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label class="field-label" for="priority-select">
+                  <span>Prioridad de Ejecución</span>
+                  <span class="field-hint">Windows</span>
+                </label>
+                <div class="select-wrapper">
+                  <select id="priority-select">
+                    <option value="2" selected>Alta prioridad (Respuesta inmediata)</option>
+                    <option value="0">Normal (Equilibrado)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="feature-list">
+              <div class="feature-item">
+                <span class="feature-dot"></span>
+                <span>Vulkan 100% offload · Flash Attention activado (-fa on)</span>
+              </div>
+              <div class="feature-item">
+                <span class="feature-dot"></span>
+                <span>KV Cache cuantizado en 4-bit (q4_0) · Batch size 2048 / 512</span>
+              </div>
+            </div>
+
+            <!-- Start / Stop CTAs -->
+            <div style="display: flex; gap: 10px; margin-top: auto;">
+              <button id="btn-start" class="btn btn-primary" style="flex: 1;" onclick="startEngine()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Iniciar Motor</span>
+              </button>
+              <button id="btn-stop" class="btn btn-danger" style="flex: 1;" onclick="stopEngine()" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                <span>Detener & Liberar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Telemetry & Integrations -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              Accesos & Integraciones
+            </span>
+            <span class="card-meta">127.0.0.1:8080</span>
+          </div>
+
+          <div class="card-body">
+            <button id="btn-omp" class="action-tile" onclick="launchOmp()" disabled>
+              <div class="action-tile-content">
+                <div class="action-tile-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                  <span>Lanzar Terminal OMP</span>
+                </div>
+                <span id="omp-desc" class="action-tile-desc">Sesión CLI conectada a localmind/qwen3.8-27b</span>
+              </div>
+              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button id="btn-webchat" class="action-tile" onclick="launchWebChat()" disabled>
+              <div class="action-tile-content">
+                <div class="action-tile-title">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <span>Interfaz Web Externa</span>
+                </div>
+                <span class="action-tile-desc">Abrir UI oficial de llama.cpp en tu navegador por defecto</span>
+              </div>
+              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <!-- KPI Telemetry Grid -->
+            <div class="metrics-grid">
+              <div class="metric-box">
+                <span class="metric-label">GPU Offload</span>
+                <span class="metric-value highlight">RX 6800 XT</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Estado</span>
+                <span id="stat-state" class="metric-value">En reposo</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Tokens Decodificados</span>
+                <span id="stat-tokens" class="metric-value">0</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label">Endpoint Local</span>
+                <span class="metric-value" style="font-size: 11.5px; font-family: var(--font-mono);">:8080/v1</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 2: EMBEDDED CHAT -->
+    <div id="tab-chat" class="tab-panel">
+      <div class="chat-container">
+        <div class="chat-header">
+          <div class="chat-header-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>LocalMind Chat</span>
+          </div>
+          <button class="tool-btn" onclick="clearChat()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>Limpiar</span>
+          </button>
+        </div>
+
+        <div id="chat-messages" class="chat-scroll-area">
+          <div class="msg-group assistant">
+            <div class="msg-bubble">
+              Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con LocalMind.
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-dock">
+          <div class="input-row">
+            <textarea id="chat-input" class="chat-textarea" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
+            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+          </div>
+          <div class="chat-dock-hints">
+            <span>Presiona Shift + Enter para saltos de línea</span>
+            <span id="chat-status-hint">Motor en reposo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: TERMINAL LOGS -->
+    <div id="tab-terminal" class="tab-panel">
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <div class="card-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>Proceso llama-server.exe</span>
+          </div>
+          <div class="terminal-tools">
+            <button id="btn-scroll-toggle" class="tool-btn" onclick="toggleScroll()">Auto-scroll: ON</button>
+            <button class="tool-btn" onclick="copyTerminalLogs()">Copiar</button>
+            <button class="tool-btn" onclick="clearTerminalLogs()">Limpiar</button>
+          </div>
+        </div>
+        <div id="terminal-stream">LocalMind Studio inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.\n</div>
+      </div>
+    </div>
+
+    <!-- TAB 4: SPECS & ARCHITECTURE -->
+    <div id="tab-info" class="tab-panel">
+      <div class="info-layout">
+        <div class="info-card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+            Arquitectura Ternaria 27B (Ultra Baja Precisión)
+          </h3>
+          <p>
+            El motor implementa cuantización ternaria {-1, 0, +1} equivalente a 1.76 bits por parámetro. Esto permite almacenar un modelo masivo de 27 mil millones de parámetros en tan solo 5.54 GB de VRAM, ejecutándose íntegramente en la GPU AMD Radeon RX 6800 XT sin intercambio con la memoria del sistema.
+          </p>
+          <table class="spec-table">
+            <thead>
+              <tr>
+                <th>Parámetro</th>
+                <th>Valor</th>
+                <th>Optimización Hardware</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Arquitectura Base</td>
+                <td>Qwen 3.8 27B Ternary</td>
+                <td>Vulkan 100% Offload</td>
+              </tr>
+              <tr>
+                <td>Huella VRAM Base</td>
+                <td>5.54 GB</td>
+                <td>16 GB VRAM disponible</td>
+              </tr>
+              <tr>
+                <td>Capas Híbridas</td>
+                <td>48 Gated DeltaNet + 16 Transformers</td>
+                <td>Contexto sin degradación de memoria</td>
+              </tr>
+              <tr>
+                <td>KV Cache</td>
+                <td>Cuantizado q4_0 con Flash Attention</td>
+                <td>Máxima velocidad de inferencia</td>
+              </tr>
+              <tr>
+                <td>CPU Threads</td>
+                <td>6 núcleos físicos Zen 4</td>
+                <td>AVX-512 optimizado</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="info-card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Endpoints OpenAI Compatibles
+          </h3>
+          <p>
+            Cualquier herramienta compatible con la API de OpenAI (como Cursor, Continue, LangChain o OMP) puede conectarse directamente con la URL base <code>http://127.0.0.1:8080/v1</code> y el ID de modelo <code>localmind</code> o <code>bonsai-2-27b</code>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let isServerRunning = false;
+    let autoScrollTerminal = true;
+    const chatHistory = [];
+
+    // Tab Navigation
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === 'tab-' + name);
+      });
+    }
+
+    // Terminal Scrolling & Tools
+    function toggleScroll() {
+      autoScrollTerminal = !autoScrollTerminal;
+      const btn = document.getElementById('btn-scroll-toggle');
+      if (btn) btn.textContent = 'Auto-scroll: ' + (autoScrollTerminal ? 'ON' : 'OFF');
+    }
+
+    function clearTerminalLogs() {
+      const box = document.getElementById('terminal-stream');
+      if (box) box.textContent = '';
+    }
+
+    function copyTerminalLogs() {
+      const box = document.getElementById('terminal-stream');
+      if (!box) return;
+      navigator.clipboard.writeText(box.textContent);
+      const btn = event && event.currentTarget;
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = 'Copiado';
+        setTimeout(() => { btn.textContent = orig; }, 1200);
+      }
+    }
+
+    // Python API Batched Log Receiver
+    window.onLogsReceived = function(lines) {
+      if (!Array.isArray(lines) || lines.length === 0) return;
+      const box = document.getElementById('terminal-stream');
+      if (!box) return;
+      box.textContent += lines.join('\n') + '\n';
+      if (autoScrollTerminal) {
+        box.scrollTop = box.scrollHeight;
+      }
+    };
+
+    // Fallback single line receiver
+    window.onLogReceived = function(line) {
+      window.onLogsReceived([line]);
+    };
+
+    function onProfileChange() {
+      const p = document.getElementById('profile-select').value;
+      const ctxSel = document.getElementById('context-select');
+      const hint = document.getElementById('profile-hint');
+      if (p === 'turbo') {
+        if (ctxSel) ctxSel.value = '32768';
+        if (hint) hint.textContent = '100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia (pico de t/s).';
+      } else if (p === 'balanced') {
+        if (ctxSel) ctxSel.value = '65536';
+        if (hint) hint.textContent = 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.';
+      } else if (p === 'deep') {
+        if (ctxSel) ctxSel.value = '131072';
+        if (hint) hint.textContent = '128K tokens usando VRAM + RAM compartida optimizada.';
+      } else if (p === 'ultra') {
+        if (ctxSel) ctxSel.value = '262144';
+        if (hint) hint.textContent = 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.';
+      }
+    }
+
+    // Universal Native API Client (Rust HTTP API with pywebview fallback)
+    const api = {
+      async getModels() {
+        try {
+          const res = await fetch('/api/models');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        if (window.pywebview && window.pywebview.api) {
+          try { return await window.pywebview.api.get_models(); } catch (e) {}
+        }
+        return [];
+      },
+      async getStatus() {
+        try {
+          const res = await fetch('/api/status');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        if (window.pywebview && window.pywebview.api) {
+          try { return await window.pywebview.api.get_status(); } catch (e) {}
+        }
+        return { status: 'stopped', is_healthy: false };
+      },
+      async startServer(config) {
+        try {
+          const res = await fetch('/api/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          });
+          return await res.json();
+        } catch (e) {
+          if (window.pywebview && window.pywebview.api) {
+            try { return await window.pywebview.api.start_server(config); } catch (err) {}
+          }
+          return { error: e.message };
+        }
+      },
+      async stopServer() {
+        try {
+          const res = await fetch('/api/stop', { method: 'POST' });
+          return await res.json();
+        } catch (e) {
+          if (window.pywebview && window.pywebview.api) {
+            try { return await window.pywebview.api.stop_server(); } catch (err) {}
+          }
+        }
+      },
+      async getLogs() {
+        try {
+          const res = await fetch('/api/logs');
+          if (res.ok) return await res.json();
+        } catch (e) {}
+        return [];
+      },
+      async launchOmp(model) {
+        try {
+          await fetch('/api/launch_omp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: model || '' })
+          });
+        } catch (e) {
+          if (window.pywebview && window.pywebview.api) {
+            try { await window.pywebview.api.launch_omp(); } catch (err) {}
+          }
+        }
+      },
+      async openBrowser() {
+        try {
+          await fetch('/api/open_browser', { method: 'POST' });
+        } catch (e) {
+          if (window.pywebview && window.pywebview.api) {
+            try { await window.pywebview.api.open_browser_chat(); } catch (err) {}
+          }
+        }
+      }
+    };
+
+    async function refreshModels() {
+      try {
+        const models = await api.getModels();
+        const sel = document.getElementById('model-select');
+        if (!sel) return;
+        sel.innerHTML = '';
+        if (!models || models.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Buscando modelos...';
+          sel.appendChild(opt);
+          return;
+        }
+        models.forEach((m, idx) => {
+          const opt = document.createElement('option');
+          opt.value = m.filename;
+          opt.textContent = `${m.name} (${m.size_gb} GB)`;
+          if (idx === 0) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        const btnStart = document.getElementById('btn-start');
+        if (btnStart) btnStart.disabled = false;
+      } catch (err) {
+        console.error('refreshModels error:', err);
+      }
+    }
+
+    async function startEngine() {
+      const modelSel = document.getElementById('model-select');
+      const model = modelSel ? modelSel.value : '';
+      if (!model) {
+        alert('Por favor selecciona un modelo GGUF válido.');
+        return;
+      }
+
+      const profile = document.getElementById('profile-select') ? document.getElementById('profile-select').value : 'turbo';
+      const context = parseInt(document.getElementById('context-select').value);
+      const threads = parseInt(document.getElementById('threads-select').value);
+      const prioEl = document.getElementById('priority-select');
+      const priority = prioEl ? prioEl.value : '2';
+      const btnStart = document.getElementById('btn-start');
+      if (btnStart) {
+        btnStart.disabled = true;
+        btnStart.innerHTML = '<span>Cargando en VRAM...</span>';
+      }
+
+      const errBanner = document.getElementById('error-banner');
+      if (errBanner) {
+        errBanner.style.display = 'none';
+        errBanner.textContent = '';
+      }
+
+      const badge = document.getElementById('status-badge');
+      const badgeText = document.getElementById('status-text');
+      if (badge && badgeText) {
+        badge.className = 'status-badge loading';
+        badgeText.textContent = 'Iniciando GPU...';
+      }
+
+      const res = await api.startServer({ model, profile, context, threads: String(threads), priority: String(priority) });
+      if (res && res.error) {
+        if (errBanner) {
+          errBanner.textContent = 'Error al iniciar: ' + res.error;
+          errBanner.style.display = 'block';
+        }
+        if (badge && badgeText) {
+          badge.className = 'status-badge error';
+          badgeText.textContent = 'Error al iniciar';
+        }
+        if (btnStart) {
+          btnStart.disabled = false;
+          btnStart.innerHTML = '<span>Iniciar Motor</span>';
+        }
+      }
+    }
+
+    async function stopEngine() {
+      const btnStop = document.getElementById('btn-stop');
+      if (btnStop) {
+        btnStop.disabled = true;
+        btnStop.innerHTML = '<span>Deteniendo...</span>';
+      }
+      await api.stopServer();
+    }
+
+    async function launchOmp() {
+      const modelSel = document.getElementById('model-select');
+      const model = modelSel ? modelSel.value : '';
+      await api.launchOmp(model);
+    }
+
+    async function launchWebChat() {
+      await api.openBrowser();
+    }
+    // Status Poller
+    async function updateStatus() {
+      try {
+        const st = await api.getStatus();
+        if (!st) return;
+        const ompDesc = document.getElementById('omp-desc');
+        if (ompDesc) {
+          const active = (st.model || '').toLowerCase();
+          if (active.includes('bonsai')) {
+            ompDesc.textContent = 'Sesión CLI conectada a bonsai/bonsai-2-27b';
+          } else {
+            ompDesc.textContent = 'Sesión CLI conectada a localmind/qwen3.8-27b';
+          }
+        }
+        isServerRunning = st.is_healthy;
+
+        const badge = document.getElementById('status-badge');
+        const badgeText = document.getElementById('status-text');
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const btnOmp = document.getElementById('btn-omp');
+        const btnChat = document.getElementById('btn-webchat');
+        const pidDisplay = document.getElementById('pid-display');
+        const statState = document.getElementById('stat-state');
+        const statTokens = document.getElementById('stat-tokens');
+        const chatHint = document.getElementById('chat-status-hint');
+        const errBanner = document.getElementById('error-banner');
+
+        if (st.is_healthy) {
+          if (badge && badgeText) {
+            badge.className = 'status-badge online';
+            badgeText.textContent = 'Activo (:8080)';
+          }
+          if (btnStart) {
+            btnStart.disabled = true;
+            btnStart.innerHTML = '<span>Motor en ejecución</span>';
+          }
+          if (btnStop) {
+            btnStop.disabled = false;
+            btnStop.innerHTML = '<span>Detener & Liberar</span>';
+          }
+          if (btnOmp) btnOmp.disabled = false;
+          if (btnChat) btnChat.disabled = false;
+          if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || 'Activo');
+
+          if (st.stats && st.stats.is_processing) {
+            if (statState) statState.textContent = 'Procesando...';
+            if (chatHint) chatHint.textContent = 'Generando respuesta...';
+          } else {
+            if (statState) statState.textContent = 'Listo';
+            if (chatHint) chatHint.textContent = 'Listo para consultar';
+          }
+          if (st.stats && st.stats.n_decoded && statTokens) {
+            statTokens.textContent = st.stats.n_decoded.toLocaleString();
+          }
+          if (errBanner) {
+            errBanner.style.display = 'none';
+          }
+        } else if (st.status === 'starting') {
+          if (badge && badgeText) {
+            badge.className = 'status-badge loading';
+            badgeText.textContent = 'Cargando...';
+          }
+          if (btnStart) btnStart.disabled = true;
+          if (btnStop) btnStop.disabled = false;
+          if (btnOmp) btnOmp.disabled = true;
+          if (btnChat) btnChat.disabled = true;
+          if (pidDisplay) pidDisplay.textContent = 'PID: ' + (st.pid || '...');
+          if (statState) statState.textContent = 'Iniciando tensores';
+          if (chatHint) chatHint.textContent = 'Cargando tensores en GPU...';
+        } else if (st.status === 'error' || st.last_error) {
+          if (badge && badgeText) {
+            badge.className = 'status-badge error';
+            badgeText.textContent = 'Error al iniciar';
+          }
+          if (btnStart) {
+            btnStart.disabled = false;
+            btnStart.innerHTML = '<span>Reintentar Inicio</span>';
+          }
+          if (btnStop) {
+            btnStop.disabled = true;
+            btnStop.innerHTML = '<span>Detener & Liberar</span>';
+          }
+          if (btnOmp) btnOmp.disabled = true;
+          if (btnChat) btnChat.disabled = true;
+          if (pidDisplay) pidDisplay.textContent = 'PID: --';
+          if (statState) statState.textContent = 'Error';
+          if (chatHint) chatHint.textContent = 'Error en el motor';
+          if (errBanner && st.last_error) {
+            errBanner.textContent = st.last_error;
+            errBanner.style.display = 'block';
+          }
+        } else {
+          if (badge && badgeText) {
+            badge.className = 'status-badge';
+            badgeText.textContent = 'En reposo';
+          }
+          if (btnStart) {
+            btnStart.disabled = false;
+            btnStart.innerHTML = '<span>Iniciar Motor</span>';
+          }
+          if (btnStop) {
+            btnStop.disabled = true;
+            btnStop.innerHTML = '<span>Detener & Liberar</span>';
+          }
+          if (btnOmp) btnOmp.disabled = true;
+          if (btnChat) btnChat.disabled = true;
+          if (pidDisplay) pidDisplay.textContent = 'PID: --';
+          if (statState) statState.textContent = 'En reposo';
+          if (chatHint) chatHint.textContent = 'Motor en reposo';
+          if (errBanner) {
+            errBanner.style.display = 'none';
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Markdown Parser & Formatter
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      // Extract closed code blocks
+      const codeBlocks = [];
+      let processed = text.replace(/```([a-zA-Z0-9_\-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        const id = '___CODEBLOCK_' + codeBlocks.length + '___';
+        codeBlocks.push({ lang: lang || 'text', code: code });
+        return id;
+      });
+
+      // Handle unclosed code block at end of streaming message
+      processed = processed.replace(/```([a-zA-Z0-9_\-]*)\n([\s\S]*)$/g, (match, lang, code) => {
+        const id = '___CODEBLOCK_' + codeBlocks.length + '___';
+        codeBlocks.push({ lang: lang || 'text', code: code });
+        return id;
+      });
+
+      // Escape HTML on remainder
+      processed = escapeHtml(processed);
+
+      // Headers
+      processed = processed.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+      processed = processed.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+      processed = processed.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+      // Bold & Italic
+      processed = processed.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      processed = processed.replace(/\*(.*?)\*/g, '<i>$1</i>');
+
+      // Inline code
+      processed = processed.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Paragraphs & newlines
+      const lines = processed.split('\n');
+      const htmlLines = [];
+      let inList = false;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          if (!inList) {
+            htmlLines.push('<ul>');
+            inList = true;
+          }
+          htmlLines.push('<li>' + trimmed.slice(2) + '</li>');
+        } else {
+          if (inList) {
+            htmlLines.push('</ul>');
+            inList = false;
+          }
+          if (trimmed.length > 0) {
+            htmlLines.push('<p>' + line + '</p>');
+          }
+        }
+      }
+      if (inList) htmlLines.push('</ul>');
+      let finalHtml = htmlLines.join('');
+
+      // Restore code blocks with syntax wrapper and copy button
+      codeBlocks.forEach((b, i) => {
+        const placeholder = '___CODEBLOCK_' + i + '___';
+        const escapedCode = escapeHtml(b.code.trim());
+        const blockHtml = `
+          <div class="code-block-wrapper">
+            <div class="code-block-header">
+              <span>${escapeHtml(b.lang)}</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <span>Copiar</span>
+              </button>
+            </div>
+            <pre><code>${escapedCode}</code></pre>
+          </div>
+        `;
+        finalHtml = finalHtml.replace(placeholder, blockHtml);
+      });
+
+      return finalHtml;
+    }
+
+    function copyCode(btn) {
+      const pre = btn.closest('.code-block-wrapper').querySelector('pre code');
+      if (!pre) return;
+      navigator.clipboard.writeText(pre.textContent);
+      const span = btn.querySelector('span');
+      if (span) {
+        const orig = span.textContent;
+        span.textContent = 'Copiado';
+        setTimeout(() => { span.textContent = orig; }, 1200);
+      }
+    }
+
+    // Chat Logic
+    function handleChatKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    }
+
+    function autoResizeTextarea(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    function clearChat() {
+      chatHistory.length = 0;
+      const box = document.getElementById('chat-messages');
+      if (box) {
+        box.innerHTML = `
+          <div class="msg-group assistant">
+            <div class="msg-bubble">
+              Chat reiniciado. Escribe una pregunta para consultar con LocalMind.
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    async function sendChatMessage() {
+      if (!isServerRunning) {
+        alert('Debes iniciar el motor desde el Panel antes de enviar mensajes.');
+        return;
+      }
+      const input = document.getElementById('chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      input.style.height = '22px';
+
+      const messagesArea = document.getElementById('chat-messages');
+
+      // Add user message
+      const userGroup = document.createElement('div');
+      userGroup.className = 'msg-group user';
+      userGroup.innerHTML = `<div class="msg-bubble">${escapeHtml(text)}</div>`;
+      messagesArea.appendChild(userGroup);
+
+      chatHistory.push({ role: 'user', content: text });
+
+      // Add assistant response container
+      const botGroup = document.createElement('div');
+      botGroup.className = 'msg-group assistant';
+
+      // Thinking block
+      const thinkingWrapper = document.createElement('div');
+      thinkingWrapper.className = 'thinking-wrapper';
+      thinkingWrapper.style.display = 'none';
+
+      const thinkingToggle = document.createElement('div');
+      thinkingToggle.className = 'thinking-toggle';
+      thinkingToggle.innerHTML = `
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+        <span>Proceso de razonamiento</span>
+      `;
+
+      const thinkingContent = document.createElement('div');
+      thinkingContent.className = 'thinking-content';
+
+      thinkingToggle.onclick = () => {
+        const isHidden = thinkingContent.style.display === 'none';
+        thinkingContent.style.display = isHidden ? 'block' : 'none';
+      };
+
+      thinkingWrapper.appendChild(thinkingToggle);
+      thinkingWrapper.appendChild(thinkingContent);
+      botGroup.appendChild(thinkingWrapper);
+
+      const botBubble = document.createElement('div');
+      botBubble.className = 'msg-bubble';
+      botBubble.innerHTML = '<span style="color: var(--text-subtle);">Generando...</span>';
+      botGroup.appendChild(botBubble);
+
+      messagesArea.appendChild(botGroup);
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+
+      try {
+        const res = await fetch('http://127.0.0.1:8080/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'localmind',
+            messages: chatHistory,
+            temperature: 0.7,
+            stream: true
+          })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let fullReply = '';
+        let fullThought = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6));
+                const delta = parsed.choices?.[0]?.delta;
+                if (delta?.reasoning_content) {
+                  thinkingWrapper.style.display = 'block';
+                  fullThought += delta.reasoning_content;
+                  thinkingContent.textContent = fullThought;
+                }
+                if (delta?.content) {
+                  fullReply += delta.content;
+                  botBubble.innerHTML = renderMarkdown(fullReply);
+                }
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+              } catch (err) {}
+            }
+          }
+        }
+        chatHistory.push({ role: 'assistant', content: fullReply });
+      } catch (err) {
+        botBubble.innerHTML = `<span style="color: #f87171;">Error al comunicarse con el motor: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    // Window pywebview Initialization
+    let statusPollerStarted = false;
+    function initApp() {
+      refreshModels();
+      if (!statusPollerStarted) {
+        statusPollerStarted = true;
+        setInterval(updateStatus, 800);
+        setInterval(pollLogs, 1000);
+        updateStatus();
+        pollLogs();
+      }
+    }
+
+    let lastLogsCount = 0;
+    async function pollLogs() {
+      try {
+        const logs = await api.getLogs();
+        if (logs && logs.length > 0 && logs.length !== lastLogsCount) {
+          lastLogsCount = logs.length;
+          const term = document.getElementById('terminal-stream');
+          if (term) {
+            term.textContent = logs.join('\n') + '\n';
+            if (autoScrollTerminal) {
+              term.scrollTop = term.scrollHeight;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener('pywebviewready', initApp);
+    document.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>

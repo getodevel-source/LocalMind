@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalMind Control Center · AMD RX 6800 XT</title>
+  <link rel="icon" type="image/x-icon" href="localmind.ico">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #111827;
+      --card-border: #1f293d;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #10b981;
+      --success-hover: #059669;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --purple: #8b5cf6;
+      --purple-hover: #7c3aed;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --terminal-bg: #030712;
+      --terminal-border: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .badges {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .badge {
+      font-size: 0.78rem;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-gpu { background: #1e1b4b; color: #a5b4fc; border: 1px solid #3730a3; }
+    .badge-status-online { background: #064e3b; color: #6ee7b7; border: 1px solid #047857; }
+    .badge-status-online::before { content: ""; width: 8px; height: 8px; background: #34d399; border-radius: 50%; box-shadow: 0 0 8px #34d399; }
+    .badge-status-offline { background: #450a0a; color: #fca5a5; border: 1px solid #991b1b; }
+    .badge-status-offline::before { content: ""; width: 8px; height: 8px; background: #f87171; border-radius: 50%; }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 24px;
+      gap: 16px;
+      overflow: hidden;
+    }
+
+    .grid-top {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-group label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    select, input[type="text"] {
+      background: #1f293d;
+      border: 1px solid #334155;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    select:focus { border-color: var(--accent); }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .checkbox-row input { cursor: pointer; }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: auto;
+    }
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      filter: grayscale(0.5);
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover:not(:disabled) { background: var(--success-hover); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+    .btn-purple { background: var(--purple); color: #fff; }
+    .btn-purple:hover:not(:disabled) { background: var(--purple-hover); }
+    .btn-secondary { background: #1e293b; color: var(--text); border: 1px solid #334155; }
+    .btn-secondary:hover:not(:disabled) { background: #334155; }
+
+    .telemetry-box {
+      background: #0b1120;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      text-align: center;
+    }
+    .telemetry-item .label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .telemetry-item .val { font-size: 1.1rem; font-weight: 700; color: #fff; }
+
+    .terminal-container {
+      flex: 1;
+      background: var(--terminal-bg);
+      border: 1px solid var(--terminal-border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 220px;
+    }
+    .terminal-header {
+      background: #0f172a;
+      border-bottom: 1px solid var(--terminal-border);
+      padding: 8px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .terminal-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .terminal-actions button {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      background: #1e293b;
+      color: var(--text-muted);
+      border: 1px solid #334155;
+    }
+    .terminal-actions button:hover { color: #fff; background: #334155; }
+    #terminal-output {
+      flex: 1;
+      padding: 12px 16px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      color: #38bdf8;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log-line-system { color: #a78bfa; font-weight: 600; }
+    .log-line-warn { color: #fbbf24; }
+    .log-line-err { color: #f87171; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 8px;">
+        <circle cx="12" cy="12" r="3" fill="#38bdf8"/>
+        <path d="M12 3v3m0 12v3M3 12h3m12 0h3"/>
+        <path d="M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1M5.6 18.4l2.1-2.1m8.6-8.6l2.1-2.1"/>
+      </svg>
+      <span>LocalMind Control Center</span>
+    </div>
+    <div class="badges">
+      <span class="badge badge-gpu">GPU: AMD Radeon RX 6800 XT (16 GB VRAM)</span>
+      <span id="server-badge" class="badge badge-status-offline">Servidor Inactivo</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid-top">
+      <!-- Card 1: Controles del Modelo -->
+      <div class="card">
+        <div class="card-title">
+          <span>Configuración del Servidor</span>
+          <span id="active-pid-label" style="font-size: 0.8rem; color: var(--text-muted);">PID: --</span>
+        </div>
+
+        <div class="form-group">
+          <label for="model-select">Modelo Local (GGUF):</label>
+          <select id="model-select"></select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px;">
+          <div class="form-group">
+            <label for="context-select">Ventana de Contexto:</label>
+            <select id="context-select">
+              <option value="65536">65,536 tokens (64K) · Sobrado en VRAM</option>
+              <option value="131072" selected>131,072 tokens (128K) · 100% VRAM (Recomendado)</option>
+              <option value="262144">262,144 tokens (262K) · Máximo (VRAM + RAM)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="threads-input">Hilos CPU (Zen 4):</label>
+            <select id="threads-input">
+              <option value="6" selected>6 núcleos físicos (Recomendado)</option>
+              <option value="8">8 hilos</option>
+              <option value="12">12 hilos (SMT total)</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="mtp-checkbox" checked>
+          <span>Multi-Token Prediction (MTP n=2, aceleración especulativa)</span>
+        </label>
+
+        <div class="btn-row">
+          <button id="btn-start" class="btn-primary" onclick="startServer()">
+            <span>🚀 Cargar Modelo</span>
+          </button>
+          <button id="btn-stop" class="btn-danger" onclick="stopServer()" disabled>
+            <span>🛑 Detener y Liberar VRAM</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 2: Acciones OMP y Chat -->
+      <div class="card">
+        <div class="card-title">
+          <span>Lanzadores y Telemetría</span>
+          <span style="font-size: 0.8rem; color: #60a5fa;">Endpoint: :8080</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="btn-omp" class="btn-success" style="width: 100%; padding: 12px;" onclick="openOmp()" disabled>
+            <span>💻 Abrir OMP (Terminal Windows)</span>
+          </button>
+          <button id="btn-chat" class="btn-purple" style="width: 100%; padding: 12px;" onclick="openChat()" disabled>
+            <span>💬 Abrir Chat Web (Oficial :8080)</span>
+          </button>
+        </div>
+
+        <div class="telemetry-box" style="margin-top: auto;">
+          <div class="telemetry-item">
+            <div class="label">Estado GPU</div>
+            <div id="stat-gpu" class="val" style="color: #34d399;">Vulkan OK</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="label">Actividad</div>
+            <div id="stat-activity" class="val" style="font-size: 0.95rem;">En reposo</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="label">Tokens Generados</div>
+            <div id="stat-tokens" class="val" style="color: #60a5fa;">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal de Logs -->
+    <div class="terminal-container">
+      <div class="terminal-header">
+        <span>📟 Logs del Motor en Vivo (llama-server)</span>
+        <div class="terminal-actions">
+          <button onclick="toggleScroll()" id="btn-autoscroll">Auto-scroll: ON</button>
+          <button onclick="clearLogs()">Limpiar</button>
+        </div>
+      </div>
+      <div id="terminal-output"></div>
+    </div>
+  </main>
+
+  <script>
+    let autoScroll = true;
+    let isRunning = false;
+
+    function toggleScroll() {
+      autoScroll = !autoScroll;
+      document.getElementById('btn-autoscroll').textContent = 'Auto-scroll: ' + (autoScroll ? 'ON' : 'OFF');
+    }
+
+    function clearLogs() {
+      document.getElementById('terminal-output').textContent = '';
+    }
+
+    function appendLog(line) {
+      const out = document.getElementById('terminal-output');
+      const p = document.createElement('div');
+      if (line.startsWith('[System')) p.className = 'log-line-system';
+      else if (line.includes('ERR') || line.includes('error')) p.className = 'log-line-err';
+      else if (line.includes('WARN') || line.includes('warn')) p.className = 'log-line-warn';
+      p.textContent = line;
+      out.appendChild(p);
+
+      if (autoScroll) {
+        out.scrollTop = out.scrollHeight;
+      }
+    }
+
+    // Connect WebSocket
+    function connectWs() {
+      const ws = new WebSocket('ws://' + window.location.host + '/ws/logs');
+      ws.onmessage = (e) => appendLog(e.data);
+      ws.onclose = () => {
+        setTimeout(connectWs, 2000);
+      };
+    }
+    connectWs();
+
+    // Load available models
+    async function loadModels() {
+      try {
+        const res = await fetch('/api/models');
+        const data = await res.json();
+        const sel = document.getElementById('model-select');
+        sel.innerHTML = '';
+        data.models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.filename;
+          opt.textContent = `${m.name} (${m.size_gb} GB)`;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Error loading models', e);
+      }
+    }
+    loadModels();
+
+    // Poll status
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const st = await res.json();
+
+        isRunning = st.is_healthy;
+        const sBadge = document.getElementById('server-badge');
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const btnOmp = document.getElementById('btn-omp');
+        const btnChat = document.getElementById('btn-chat');
+        const pidLabel = document.getElementById('active-pid-label');
+
+        if (st.is_healthy) {
+          sBadge.className = 'badge badge-status-online';
+          sBadge.textContent = 'Servidor Online (Puerto 8080)';
+          btnStart.disabled = true;
+          btnStop.disabled = false;
+          btnOmp.disabled = false;
+          btnChat.disabled = false;
+          pidLabel.textContent = 'PID: ' + (st.pid || 'Activo');
+
+          if (st.stats) {
+            document.getElementById('stat-activity').textContent = st.stats.is_processing ? '⚡ Procesando' : 'En reposo';
+            document.getElementById('stat-activity').style.color = st.stats.is_processing ? '#f59e0b' : '#34d399';
+            if (st.stats.n_decoded) {
+              document.getElementById('stat-tokens').textContent = st.stats.n_decoded;
+            }
+          }
+        } else if (st.status === 'starting') {
+          sBadge.className = 'badge badge-status-offline';
+          sBadge.textContent = '⏳ Cargando en GPU...';
+          btnStart.disabled = true;
+          btnStop.disabled = false;
+          btnOmp.disabled = true;
+          btnChat.disabled = true;
+          pidLabel.textContent = 'PID: ' + (st.pid || 'Cargando');
+        } else {
+          sBadge.className = 'badge badge-status-offline';
+          sBadge.textContent = 'Servidor Inactivo (VRAM Libre)';
+          btnStart.disabled = false;
+          btnStop.disabled = true;
+          btnOmp.disabled = true;
+          btnChat.disabled = true;
+          pidLabel.textContent = 'PID: --';
+          document.getElementById('stat-activity').textContent = 'En reposo';
+          document.getElementById('stat-activity').style.color = 'inherit';
+        }
+      } catch (e) {}
+    }
+    setInterval(pollStatus, 1500);
+    pollStatus();
+
+    async function startServer() {
+      const model = document.getElementById('model-select').value;
+      const context = parseInt(document.getElementById('context-select').value);
+      const threads = parseInt(document.getElementById('threads-input').value);
+      const mtp = document.getElementById('mtp-checkbox').checked;
+
+      document.getElementById('btn-start').disabled = true;
+      try {
+        await fetch('/api/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, context, threads, mtp })
+        });
+      } catch (e) {
+        alert('Error al iniciar: ' + e);
+      }
+    }
+
+    async function stopServer() {
+      document.getElementById('btn-stop').disabled = true;
+      try {
+        await fetch('/api/stop', { method: 'POST' });
+      } catch (e) {
+        alert('Error al detener: ' + e);
+      }
+    }
+
+    async function openOmp() {
+      try {
+        await fetch('/api/open-omp', { method: 'POST' });
+      } catch (e) {
+        alert('Error abriendo OMP: ' + e);
+      }
+    }
+
+    async function openChat() {
+      try {
+        await fetch('/api/open-chat', { method: 'POST' });
+      } catch (e) {
+        alert('Error abriendo Chat: ' + e);
+      }
+    }
+  </script>
+</body>
+</html>

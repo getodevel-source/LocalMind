@@ -1,0 +1,13 @@
+# Build artifacts
+src-rust/target/
+LocalMind.exe
+
+# Runtime data
+LocalMind.exe.WebView2/
+*.log
+
+# Model weights (downloaded separately)
+models/
+
+# Third-party binaries (llama.cpp build)
+bin/
