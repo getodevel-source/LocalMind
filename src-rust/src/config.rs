@@ -103,7 +103,7 @@ impl Default for EngineConfig {
             process_priority: "below_normal".to_string(),
             poll: 0,
             limit_threads_batch: true,
-            idle_timeout_secs: 900,
+            idle_timeout_secs: 1500,
             extra_flags: Vec::new(),
             aliases: default_aliases(),
             speculation: Some(SpeculationConfig::default()),
@@ -119,7 +119,7 @@ impl Default for EngineConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MmprojConfig {
     /// true → detectar automáticamente el mmproj más afín al modelo cargado
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub auto: bool,
     /// Lista de candidatos (orden de prioridad) en models/
     #[serde(default = "default_mmproj_files")]
@@ -129,7 +129,7 @@ pub struct MmprojConfig {
 impl Default for MmprojConfig {
     fn default() -> Self {
         Self {
-            auto: true,
+            auto: false,
             files: default_mmproj_files(),
         }
     }
@@ -192,7 +192,10 @@ fn default_poll() -> u32 {
     0
 }
 fn default_idle_timeout() -> u64 {
-    900 // 15 min
+    1500 // 25 min
+}
+fn default_false() -> bool {
+    false
 }
 fn default_http_port() -> u16 {
     17860

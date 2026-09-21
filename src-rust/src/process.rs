@@ -186,16 +186,24 @@ impl ProcessManager {
                         // Auto-stop por inactividad (solo si está running y healthy)
                         let timeout = cfg_poll.get().engine.idle_timeout_secs;
                         if timeout > 0 && st.status == "running" {
+                            // Verificar si llama-server tiene slots procesando actualmente
+                            let is_busy = Self::check_slots_busy(port);
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
-                            let last = last_activity_poll.load(Ordering::Relaxed);
-                            if last > 0 && now.saturating_sub(last) >= timeout {
-                                st.status = "stopped".to_string();
-                                st.is_healthy = false;
-                                st.pid = None;
-                                auto_stop = true;
+
+                            if is_busy {
+                                // El motor está trabajando activamente: refrescar marca de actividad
+                                last_activity_poll.store(now, Ordering::Relaxed);
+                            } else {
+                                let last = last_activity_poll.load(Ordering::Relaxed);
+                                if last > 0 && now.saturating_sub(last) >= timeout {
+                                    st.status = "stopped".to_string();
+                                    st.is_healthy = false;
+                                    st.pid = None;
+                                    auto_stop = true;
+                                }
                             }
                         }
                     }
@@ -204,7 +212,7 @@ impl ProcessManager {
                 if auto_stop {
                     // Kill del árbol del proceso desde el poller (no podemos usar &self aquí).
                     let pid = {
-                        let mut cl = child_clone.lock();
+                        let cl = child_clone.lock();
                         cl.as_ref().map(|c| c.id())
                     };
                     if let Some(pid) = pid {
@@ -245,6 +253,20 @@ impl ProcessManager {
                 .call(),
             Ok(resp) if resp.status() == 200
         )
+    }
+
+    fn check_slots_busy(port: u16) -> bool {
+        let url = format!("http://127.0.0.1:{}/slots", port);
+        if let Ok(resp) = ureq::get(&url).timeout(Duration::from_millis(400)).call() {
+            if let Ok(slots) = resp.into_json::<Vec<serde_json::Value>>() {
+                return slots.iter().any(|s| {
+                    s.get("is_processing")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                });
+            }
+        }
+        false
     }
 
     /// Encontrar un puerto libre empezando en `preferred` (hasta +50 intentos).
