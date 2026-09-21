@@ -99,14 +99,14 @@ impl Default for EngineConfig {
             threads: None,
             threads_batch: None,
             priority: "2".to_string(),
-            batch: 2048,
+            batch: 1024,
             process_priority: "below_normal".to_string(),
             poll: 0,
             limit_threads_batch: true,
             idle_timeout_secs: 1500,
             extra_flags: Vec::new(),
             aliases: default_aliases(),
-            speculation: Some(SpeculationConfig::default()),
+            speculation: None,
             flash_attention: true,
             reasoning_preserve: true,
             metrics: true,
@@ -183,7 +183,7 @@ fn default_priority() -> String {
     "2".to_string()
 }
 fn default_batch() -> usize {
-    2048
+    1024
 }
 fn default_process_priority() -> String {
     "below_normal".to_string()
