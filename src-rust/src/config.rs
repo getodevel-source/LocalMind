@@ -228,35 +228,33 @@ fn default_mmproj_files() -> Vec<String> {
 pub fn built_in_profiles() -> Vec<HardwareProfile> {
     vec![
         HardwareProfile {
-            id: "turbo".to_string(),
-            name: "Turbo VRAM (32K · Máxima Velocidad T/S)".to_string(),
-            description: "100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia (pico de t/s)."
-                .to_string(),
+            id: "velocidad".to_string(),
+            name: "Velocidad máxima · 32K contextos cortos".to_string(),
+            description: "Todo el modelo y su memoria de conversación (KV cache) viven en los 16 GB de la GPU. Es el modo más rápido: ~17 t/s. Ideal para chat, preguntas y código corto (sesiones de menos de ~30k palabras).".to_string(),
             context: 32768,
             cache_ram: 0,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
         },
         HardwareProfile {
-            id: "balanced".to_string(),
-            name: "Equilibrado Pro (64K · Documentos y Código)".to_string(),
-            description: "Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.".to_string(),
+            id: "multi_doc".to_string(),
+            name: "Multi-documento · 64K (velocidad levemente menor)".to_string(),
+            description: "El modelo vive en VRAM y parte del KV cache pasa a RAM DDR5. Renuncia ~5% de velocidad para sostener ~60k palabras de contexto: varios documentos o un repo de código mediano en la misma conversación.".to_string(),
             context: 65536,
             cache_ram: 4096,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
         },
         HardwareProfile {
-            id: "deep".to_string(),
-            name: "Extendido 128K (Libros y Repositorios)".to_string(),
-            description: "128K tokens usando VRAM + RAM compartida optimizada.".to_string(),
+            id: "libros".to_string(),
+            name: "Libros largos · 128K contexto extendido".to_string(),
+            description: "Modelo intacto en VRAM + KV cache ampliado en RAM DDR5: sostiene ~120k palabras (un libro entero, un repo mediano). La velocidad de respuesta baja ~15-20% frente a Velocidad máxima porque parte de la memoria del prompt viaja por DDR5.".to_string(),
             context: 131072,
             cache_ram: 6144,
             extra_flags: vec!["--cache-reuse".to_string(), "256".to_string()],
         },
         HardwareProfile {
-            id: "ultra".to_string(),
-            name: "Límite Hardware 262K (Máximo Contexto Físico)".to_string(),
-            description: "Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura."
-                .to_string(),
+            id: "max_contexto".to_string(),
+            name: "Máximo contexto · 262K (límite físico del modelo)".to_string(),
+            description: "Alcanza los 262,144 tokens que el modelo soporta nativamente (~200k palabras: biblia, code bases enormes). El más lento y el que más tensiona CPU/PSU: úsalo solo cuando necesites sujetar la obra completa en una sola conversación.".to_string(),
             context: 262144,
             cache_ram: 6144,
             extra_flags: vec![
@@ -281,17 +279,27 @@ impl ConfigStore {
     pub fn load(base_dir: &Path) -> Self {
         let path = Self::config_path(base_dir);
         let raw = std::fs::read_to_string(&path).ok();
-        let cfg = raw
+        let mut cfg = raw
             .as_ref()
             .and_then(|r| toml::from_str::<AppConfig>(r).ok())
             .unwrap_or_default();
-        if raw.is_none() {
-            // Primera ejecución: materializar plantilla de defaults
-            if let Ok(text) = toml::to_string_pretty(&cfg) {
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+        // Migración: ids de perfiles de la era anterior → nombres actuales.
+        let legacy = ["turbo", "balanced", "deep", "ultra"];
+        if cfg.profiles.iter().any(|p| legacy.contains(&p.id.as_str())) {
+            let last = cfg.last.clone();
+            cfg = AppConfig::default();
+            cfg.last = last;
+        }
+        {
+            let migrated = raw.is_some() && cfg.profiles.iter().all(|p| !["turbo","balanced","deep","ultra"].contains(&p.id.as_str()));
+            if raw.is_none() || migrated {
+                // Primera ejecución o migración de perfiles: materializar plantilla
+                if let Ok(text) = toml::to_string_pretty(&cfg) {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&path, text);
                 }
-                let _ = std::fs::write(&path, text);
             }
         }
         Self {

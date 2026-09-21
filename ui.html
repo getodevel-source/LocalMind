@@ -1186,37 +1186,28 @@
 
             <div class="field-group">
               <label class="field-label" for="profile-select">
-                <span>Perfil de Rendimiento (Hardware RX 6800 XT)</span>
-                <span class="field-hint">Tuning VRAM + RAM</span>
+                <span>Perfil de uso · ¿qué vas a hacer?</span>
+                <span class="field-hint">Elige la forma de trabajar</span>
               </label>
               <div class="select-wrapper">
-                <select id="profile-select" onchange="onProfileChange()">
-                  <option value="turbo" selected>⚡ Turbo VRAM (32K · Máxima Velocidad T/S)</option>
-                  <option value="balanced">⚖️ Equilibrado Pro (64K · Documentos y Código)</option>
-                  <option value="deep">📚 Extendido 128K (Libros y Repositorios)</option>
-                  <option value="ultra">🌌 Límite Hardware 262K (Máximo Contexto Físico)</option>
-                </select>
+                <select id="profile-select" onchange="onProfileChange()"></select>
               </div>
-              <div id="profile-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 5px; line-height: 1.4;">
-                100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia.
-              </div>
+              <div id="profile-hint" class="profile-hint"></div>
             </div>
-
             <div class="field-group">
               <label class="field-label" for="context-select">
-                <span>Capacidad de Contexto (Tokens Activos)</span>
-                <span class="field-hint">KV Cache 4-bit</span>
+                <span>Memoria de conversación · máx. de tokens retenidos</span>
+                <span class="field-hint">Más contexto = más memoria en GPU/RAM</span>
               </label>
               <div class="select-wrapper">
                 <select id="context-select">
-                  <option value="32768" selected>32K tokens (32.768) — 100% VRAM GPU pura (~14.2 GB total)</option>
-                  <option value="65536">64K tokens (65.536) — Equilibrado (~15.2 GB VRAM)</option>
-                  <option value="131072">128K tokens (131.072) — Extendido (VRAM + RAM DDR5)</option>
-                  <option value="262144">262K tokens (262.144) — Límite Hardware (VRAM + RAM DDR5)</option>
+                  <option value="32768" selected>32K — chat normal (~50 páginas) · el más rápido</option>
+                  <option value="65536">64K — varios documentos (~100 páginas) · levemente más lento</option>
+                  <option value="131072">128K — un libro entero (~200 páginas) · notoriamente más lento</option>
+                  <option value="262144">262K — colecciones enormes (~400 páginas) · el más lento</option>
                 </select>
               </div>
             </div>
-
             <details class="advanced">
               <summary>Opciones avanzadas</summary>
               <div class="fields-row">
@@ -1611,13 +1602,20 @@
 
     // Known static fallback profiles (used if /api/profiles is unavailable/empty)
     const PROFILE_FALLBACK = [
-      { id: 'turbo', label: '⚡ Turbo VRAM (32K · Máxima Velocidad T/S)', context: 32768, hint: '100% en VRAM (RX 6800 XT). Máximo rendimiento y mínima latencia (pico de t/s).', description: 'Máxima velocidad: 100% en VRAM (RX 6800 XT), mínima latencia.' },
-      { id: 'balanced', label: '⚖️ Equilibrado Pro (64K · Documentos y Código)', context: 65536, hint: 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.', description: 'Pesos en VRAM + KV Cache extendido en VRAM/RAM DDR5.' },
-      { id: 'deep', label: '📚 Extendido 128K (Libros y Repositorios)', context: 131072, hint: '128K tokens usando VRAM + RAM compartida optimizada.', description: '128K tokens usando VRAM + RAM compartida optimizada.' },
-      { id: 'ultra', label: '🌌 Límite Hardware 262K (Máximo Contexto Físico)', context: 262144, hint: 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.', description: 'Ventana nativa máxima (262,144 tokens) combinando 100% VRAM + RAM DDR5 segura.' }
+      { id: 'velocidad', context: 32768,
+        label: '⚡ Chat diario — el más rápido (32K, todo en GPU)',
+        hint: 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).' },
+      { id: 'multi_doc', context: 65536,
+        label: '📚 Multi-documento — varios PDFs y archivos (64K)',
+        hint: 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.' },
+      { id: 'libros', context: 131072,
+        label: '📖 Libros y repos largos — 128K de contexto',
+        hint: 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.' },
+      { id: 'max_contexto', context: 262144,
+        label: '🌌 Máximo contexto físico — 262K (el límite del modelo)',
+        hint: 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.' }
     ];
     let profilesIndex = {};
-
     async function refreshProfiles() {
       const sel = document.getElementById('profile-select');
       if (!sel) return;
@@ -1626,21 +1624,21 @@
         const res = await fetch('/api/profiles');
         if (res.ok) profiles = await res.json() || [];
       } catch (e) {}
+
       if (!Array.isArray(profiles) || profiles.length === 0) profiles = PROFILE_FALLBACK;
-      profiles = profiles.map(p => (typeof p === 'string') ? (PROFILE_FALLBACK.find(f => f.id === p) || { id: p, label: p, context: null, hint: 'Perfil dinámico: ' + p, description: 'Perfil dinámico: ' + p }) : p);
+      profiles = profiles.map(p => (typeof p === 'string') ? (PROFILE_FALLBACK.find(f => f.id === p) || { id: p, label: p, context: null, hint: 'Perfil dinámico: ' + p }) : p);
       profilesIndex = {};
       sel.innerHTML = '';
       profiles.forEach((p, idx) => {
         profilesIndex[p.id] = p;
         const opt = document.createElement('option');
         opt.value = p.id;
-        opt.textContent = p.label || p.id;
+        opt.textContent = p.label || p.name || p.id;
         if (idx === 0) opt.selected = true;
         sel.appendChild(opt);
       });
       onProfileChange();
     }
-
     function onProfileChange() {
       const sel = document.getElementById('profile-select');
       if (!sel) return;
