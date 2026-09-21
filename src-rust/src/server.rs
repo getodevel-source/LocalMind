@@ -465,20 +465,17 @@ fn handle_request(
         } else {
             String::new()
         };
-        let inner_cmd = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}{}", port, omp_model, effort_flag);
+        let inner_cmd = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}{}", cd_prefix, port, omp_model, effort_flag);
 
         let is_orca = req_target.as_deref() == Some("orca");
         if is_orca {
-            let mut c = std::process::Command::new("orca.cmd");
+            let orca_path = std::env::var("LOCALAPPDATA")
+                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.cmd"))
+                .unwrap_or_else(|_| PathBuf::from("orca.cmd"));
+            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca.cmd".to_string() };
             let orca_title = format!("OMP - {}", omp_model);
-            let mut args = vec!["terminal", "create", "--focus", "--title", &orca_title, "--command", &inner_cmd];
-            let dir_arg;
-            if let Some(dir) = &req_dir {
-                dir_arg = format!("path:{}", dir);
-                args.push("--worktree");
-                args.push(&dir_arg);
-            }
-            c.args(&args);
+            let mut c = std::process::Command::new("cmd.exe");
+            c.args(["/c", &orca_bin, "terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
             let _ = c.spawn();
         } else {
             let wt_path = std::env::var("LOCALAPPDATA")
@@ -553,20 +550,17 @@ fn handle_request(
         } else {
             String::new()
         };
-        let inner_cmd = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}{}", port, pi_model, effort_flag);
+        let inner_cmd = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}{}", cd_prefix, port, pi_model, effort_flag);
 
         let is_orca = req_target.as_deref() == Some("orca");
         if is_orca {
-            let mut c = std::process::Command::new("orca.cmd");
+            let orca_path = std::env::var("LOCALAPPDATA")
+                .map(|l| PathBuf::from(l).join("Programs/orca/resources/bin/orca.cmd"))
+                .unwrap_or_else(|_| PathBuf::from("orca.cmd"));
+            let orca_bin = if orca_path.exists() { orca_path.to_string_lossy().to_string() } else { "orca.cmd".to_string() };
             let orca_title = format!("Pi - {}", pi_model);
-            let mut args = vec!["terminal", "create", "--focus", "--title", &orca_title, "--command", &inner_cmd];
-            let dir_arg;
-            if let Some(dir) = &req_dir {
-                dir_arg = format!("path:{}", dir);
-                args.push("--worktree");
-                args.push(&dir_arg);
-            }
-            c.args(&args);
+            let mut c = std::process::Command::new("cmd.exe");
+            c.args(["/c", &orca_bin, "terminal", "create", "--shell", "cmd.exe", "--focus", "--title", &orca_title, "--command", &inner_cmd]);
             let _ = c.spawn();
         } else {
             let wt_path = std::env::var("LOCALAPPDATA")
