@@ -1194,23 +1194,23 @@
               </div>
               <div id="profile-hint" class="profile-hint"></div>
             </div>
-            <div class="field-group">
-              <label class="field-label" for="context-select">
-                <span>Memoria de conversación · máx. de tokens retenidos</span>
-                <span class="field-hint">Más contexto = más memoria en GPU/RAM</span>
-              </label>
-              <div class="select-wrapper">
-                <select id="context-select">
-                  <option value="32768" selected>32K — chat normal (~50 páginas) · el más rápido</option>
-                  <option value="65536">64K — varios documentos (~100 páginas) · levemente más lento</option>
-                  <option value="131072">128K — un libro entero (~200 páginas) · notoriamente más lento</option>
-                  <option value="262144">262K — colecciones enormes (~400 páginas) · el más lento</option>
-                </select>
-              </div>
-            </div>
             <details class="advanced">
               <summary>Opciones avanzadas</summary>
               <div class="fields-row">
+                <div class="field-group">
+                  <label class="field-label" for="context-select">
+                    <span>Memoria de conversación · máx. tokens retenidos</span>
+                    <span class="field-hint">El perfil la ajusta; afina solo si necesitas</span>
+                  </label>
+                  <div class="select-wrapper">
+                    <select id="context-select">
+                      <option value="32768">32K tokens (~50 páginas)</option>
+                      <option value="65536">64K tokens (~100 páginas)</option>
+                      <option value="131072">128K tokens (~200 páginas)</option>
+                      <option value="262144">262K tokens (~400 páginas)</option>
+                    </select>
+                  </div>
+                </div>
                 <div class="field-group">
                   <label class="field-label" for="threads-select">
                     <span>Rendimiento CPU</span>
