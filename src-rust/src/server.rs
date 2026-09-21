@@ -445,6 +445,10 @@ fn handle_request(
         };
 
         let port = if st.port > 0 { st.port } else { 8080 };
+        let context = if st.context > 0 { st.context } else { 262144 };
+
+        sync_cli_configs(port, context);
+
         let cd_prefix = if let Some(dir) = &req_dir {
             format!("cd /d \"{}\" && ", dir)
         } else {
@@ -473,13 +477,13 @@ fn handle_request(
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal OMP lanzada en '{}' (puerto :{}) conectada a {}.",
+            "[LocalMind] Terminal OMP lanzada en '{}' (puerto :{}, ctx: {}) conectada a {}.",
             req_dir.as_deref().unwrap_or("directorio default"),
-            port, omp_model
+            port, context, omp_model
         ));
         let _ = req.respond(json_response(
             200,
-            format!(r#"{{"status":"ok","model":"{}","port":{}}}"#, omp_model, port),
+            format!(r#"{{"status":"ok","model":"{}","port":{},"context":{}}}"#, omp_model, port, context),
         ));
         return;
     }
@@ -496,18 +500,22 @@ fn handle_request(
         let chosen = req_model.filter(|m| !m.is_empty()).unwrap_or(active_model);
 
         let pi_model = if chosen.to_lowercase().contains("bonsai") {
-            "bonsai-2-27b"
+            "localmind/bonsai-2-27b"
         } else {
-            "localmind"
+            "localmind/localmind"
         };
 
         let port = if st.port > 0 { st.port } else { 8080 };
+        let context = if st.context > 0 { st.context } else { 262144 };
+
+        sync_cli_configs(port, context);
+
         let cd_prefix = if let Some(dir) = &req_dir {
             format!("cd /d \"{}\" && ", dir)
         } else {
             String::new()
         };
-        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --model {}", cd_prefix, port, pi_model);
+        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}", cd_prefix, port, pi_model);
 
         let wt_path = std::env::var("LOCALAPPDATA")
             .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
@@ -530,13 +538,13 @@ fn handle_request(
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal Pi lanzada en '{}' conectada a {} (puerto :{}).",
+            "[LocalMind] Terminal Pi lanzada en '{}' conectada a {} (puerto :{}, ctx: {}).",
             req_dir.as_deref().unwrap_or("directorio default"),
-            pi_model, port
+            pi_model, port, context
         ));
         let _ = req.respond(json_response(
             200,
-            format!(r#"{{"status":"ok","model":"{}","port":{}}}"#, pi_model, port),
+            format!(r#"{{"status":"ok","model":"{}","port":{},"context":{}}}"#, pi_model, port, context),
         ));
         return;
     }
@@ -599,6 +607,107 @@ fn handle_request(
     }
 
     let _ = req.respond(json_response(404, "{\"error\":\"not_found\"}".into()));
+}
+
+fn sync_cli_configs(port: u16, context: usize) {
+    // 1. Sincronizar pi: %USERPROFILE%/.pi/agent/models.json
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let pi_models_path = PathBuf::from(&userprofile).join(".pi").join("agent").join("models.json");
+        if pi_models_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&pi_models_path) {
+                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(obj) = json_val.as_object_mut() {
+                        let providers = obj.entry("providers").or_insert_with(|| serde_json::json!({}));
+                        if let Some(p_obj) = providers.as_object_mut() {
+                            let max_toks = (context / 2).min(16384);
+                            p_obj.insert("localmind".to_string(), serde_json::json!({
+                                "name": "LocalMind",
+                                "baseUrl": format!("http://127.0.0.1:{}/v1", port),
+                                "api": "openai-completions",
+                                "models": [
+                                    {
+                                        "id": "localmind",
+                                        "name": "LocalMind Active Model",
+                                        "contextWindow": context,
+                                        "maxTokens": max_toks,
+                                        "reasoning": true
+                                    },
+                                    {
+                                        "id": "qwen3.8-27b",
+                                        "name": "Qwen 3.8 27B (LocalMind)",
+                                        "contextWindow": context,
+                                        "maxTokens": max_toks,
+                                        "reasoning": true
+                                    },
+                                    {
+                                        "id": "bonsai-2-27b",
+                                        "name": "Ternary Bonsai 2 27B (LocalMind)",
+                                        "contextWindow": context,
+                                        "maxTokens": max_toks,
+                                        "reasoning": true
+                                    }
+                                ]
+                            }));
+                        }
+                    }
+                    let _ = std::fs::write(&pi_models_path, serde_json::to_string_pretty(&json_val).unwrap_or_default());
+                }
+            }
+        }
+
+        // 2. Sincronizar omp: %USERPROFILE%/.omp/agent/models.yml
+        let omp_models_path = PathBuf::from(&userprofile).join(".omp").join("agent").join("models.yml");
+        let yml_content = format!(r#"providers:
+  localmind:
+    baseUrl: http://127.0.0.1:{}/v1
+    auth: none
+    api: openai-completions
+    models:
+      - id: qwen3.8-27b
+        name: Qwen 3.8 27B (LocalMind)
+        reasoning: true
+        input: [text, image]
+        contextWindow: {}
+        maxTokens: 16384
+        compat:
+          supportsReasoningEffort: false
+          reasoningContentField: reasoning_content
+      - id: localmind
+        name: LocalMind Active Model
+        reasoning: true
+        input: [text, image]
+        contextWindow: {}
+        maxTokens: 16384
+        compat:
+          supportsReasoningEffort: false
+          reasoningContentField: reasoning_content
+
+  bonsai:
+    baseUrl: http://127.0.0.1:{}/v1
+    auth: none
+    api: openai-completions
+    models:
+      - id: qwen3.8-27b
+        name: Qwen 3.8 27B (LocalMind)
+        reasoning: true
+        input: [text, image]
+        contextWindow: {}
+        maxTokens: 16384
+        compat:
+          supportsReasoningEffort: false
+          reasoningContentField: reasoning_content
+      - id: bonsai-2-27b
+        name: Ternary Bonsai 2 27B (Legacy)
+        reasoning: true
+        input: [text, image]
+        contextWindow: {}
+        maxTokens: 16384
+        compat:
+          supportsReasoningEffort: false
+          reasoningContentField: reasoning_content
+"#, port, context, context, port, context, context);
+        let _ = std::fs::write(&omp_models_path, yml_content);
+    }
 }
 
 fn sse_headers() -> Vec<Header> {
