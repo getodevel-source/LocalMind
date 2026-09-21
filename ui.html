@@ -484,6 +484,34 @@
       cursor: not-allowed;
     }
 
+    .action-tile-side {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      color: var(--text-muted);
+      font-size: 11.5px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .action-tile-side:hover:not(:disabled) {
+      border-color: var(--border-hover);
+      background: var(--surface-hover);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+
+    .action-tile-side:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     .action-tile-content {
       display: flex;
       flex-direction: column;
@@ -1324,58 +1352,90 @@
                 <span class="metric-label">Solicitudes</span>
                 <span id="tel-requests" class="metric-value">—</span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right bottom: Accesos -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-              Accesos
-            </span>
-          </div>
           <div class="card-body">
-            <!-- Selector de Carpeta de Proyecto para CLI -->
-            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px;">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                  Carpeta de Trabajo (Proyecto)
-                </span>
-                <button class="tool-btn" type="button" onclick="selectProjectFolder()" title="Elegir directorio donde abrirán OMP y Pi">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  <span>Elegir Carpeta</span>
-                </button>
+            <!-- Configuración de Ejecución CLI: Carpeta y Nivel de Razonamiento -->
+            <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;">
+              <!-- Fila 1: Carpeta de Proyecto -->
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    Carpeta de Trabajo (Proyecto)
+                  </span>
+                  <button class="tool-btn" type="button" onclick="selectProjectFolder()" title="Elegir directorio donde abrirán OMP y Pi">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <span>Elegir Carpeta</span>
+                  </button>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                  <code id="project-folder-display" style="font-size: 11px; color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); max-width: 85%;">
+                    (Ubicación predeterminada)
+                  </code>
+                  <button id="btn-clear-folder" type="button" onclick="clearProjectFolder()" style="display: none; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px;" title="Restablecer a default">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
               </div>
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                <code id="project-folder-display" style="font-size: 11px; color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); max-width: 85%;">
-                  (Ubicación predeterminada)
-                </code>
-                <button id="btn-clear-folder" type="button" onclick="clearProjectFolder()" style="display: none; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px;" title="Restablecer a default">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
+
+              <!-- Fila 2: Nivel de Razonamiento (Thinking Effort) -->
+              <div style="border-top: 1px solid var(--border-subtle); padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Nivel de Razonamiento (Effort)
+                </span>
+                <div class="select-wrapper" style="width: 150px;">
+                  <select id="cli-effort-select" style="padding: 4px 8px; font-size: 11px;">
+                    <option value="max" selected>Max (Profundo)</option>
+                    <option value="high">Alto (High)</option>
+                    <option value="medium">Medio (Medium)</option>
+                    <option value="low">Bajo (Rápido)</option>
+                    <option value="off">Desactivado (Off)</option>
+                  </select>
+                </div>
               </div>
             </div>
-            <button id="btn-omp" class="action-tile" onclick="launchOmp()" disabled>
-              <div class="action-tile-content">
-                <div class="action-tile-title">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                  <span>Lanzar Terminal OMP</span>
-                </div>
-                <span id="omp-desc" class="action-tile-desc">Sesión CLI conectada a localmind/qwen3.8-27b</span>
-              </div>
-              <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
 
-            <button id="btn-pi" class="action-tile" onclick="launchPi()" disabled>
+            <!-- OMP Action Tile con lanzador Orca embebido -->
+            <div class="action-tile-group" style="display: flex; gap: 6px; width: 100%;">
+              <button id="btn-omp" class="action-tile" style="flex: 1;" onclick="launchOmp('system')" disabled>
+                <div class="action-tile-content">
+                  <div class="action-tile-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                    <span>Lanzar Terminal OMP</span>
+                  </div>
+                  <span id="omp-desc" class="action-tile-desc">Sesión CLI conectada a localmind</span>
+                </div>
+                <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button id="btn-omp-orca" class="action-tile-side" onclick="launchOmp('orca')" title="Abrir OMP en terminal de Orca" disabled>
+                <span>🐋 Orca</span>
+              </button>
+            </div>
+
+            <!-- Pi Action Tile con lanzador Orca embebido -->
+            <div class="action-tile-group" style="display: flex; gap: 6px; width: 100%; margin-top: 8px;">
+              <button id="btn-pi" class="action-tile" style="flex: 1;" onclick="launchPi('system')" disabled>
+                <div class="action-tile-content">
+                  <div class="action-tile-title">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                    <span>Lanzar Pi Normal</span>
+                  </div>
+                  <span id="pi-desc" class="action-tile-desc">Sesión interactiva CLI conectada a localmind</span>
+                </div>
+                <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <button id="btn-pi-orca" class="action-tile-side" onclick="launchPi('orca')" title="Abrir Pi en terminal de Orca" disabled>
+                <span>🐋 Orca</span>
+              </button>
+            </div>
+
+            <button id="btn-webchat" class="action-tile" style="margin-top: 8px;" onclick="launchWebChat()" disabled>
               <div class="action-tile-content">
                 <div class="action-tile-title">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
-                  <span>Lanzar Pi Normal</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <span>Interfaz Web Externa</span>
                 </div>
-                <span id="pi-desc" class="action-tile-desc">Sesión interactiva CLI conectada al modelo activo</span>
+                <span class="action-tile-desc">Abrir UI oficial de llama.cpp en tu navegador por defecto</span>
               </div>
               <svg class="action-tile-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
@@ -1778,21 +1838,31 @@
         } catch (e) {}
         return [];
       },
-      async launchOmp(model, cwd) {
+      async launchOmp(model, cwd, effort, target) {
         try {
           await fetch('/api/launch_omp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: model || '', cwd: cwd || '' })
+            body: JSON.stringify({
+              model: model || '',
+              cwd: cwd || '',
+              effort: effort || 'max',
+              target: target || 'system'
+            })
           });
         } catch (e) {}
       },
-      async launchPi(model, cwd) {
+      async launchPi(model, cwd, effort, target) {
         try {
           await fetch('/api/launch_pi', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: model || '', cwd: cwd || '' })
+            body: JSON.stringify({
+              model: model || '',
+              cwd: cwd || '',
+              effort: effort || 'max',
+              target: target || 'system'
+            })
           });
         } catch (e) {}
       },
@@ -1897,17 +1967,23 @@
     function clearProjectFolder() {
       setProjectFolder('');
     }
-
-    async function launchOmp() {
-      const modelSel = document.getElementById('model-select');
-      const model = modelSel ? modelSel.value : '';
-      await api.launchOmp(model, selectedProjectCwd);
+    function getSelectedCliEffort() {
+      const sel = document.getElementById('cli-effort-select');
+      return sel ? sel.value : 'max';
     }
 
-    async function launchPi() {
+    async function launchOmp(target = 'system') {
       const modelSel = document.getElementById('model-select');
       const model = modelSel ? modelSel.value : '';
-      await api.launchPi(model, selectedProjectCwd);
+      const effort = getSelectedCliEffort();
+      await api.launchOmp(model, selectedProjectCwd, effort, target);
+    }
+
+    async function launchPi(target = 'system') {
+      const modelSel = document.getElementById('model-select');
+      const model = modelSel ? modelSel.value : '';
+      const effort = getSelectedCliEffort();
+      await api.launchPi(model, selectedProjectCwd, effort, target);
     }
 
     function openModelsFolder() {
@@ -2104,10 +2180,14 @@
 
       // Action tiles enabled only when healthy
       const omp = document.getElementById('btn-omp');
+      const ompOrca = document.getElementById('btn-omp-orca');
       const pi = document.getElementById('btn-pi');
+      const piOrca = document.getElementById('btn-pi-orca');
       const web = document.getElementById('btn-webchat');
       if (omp) omp.disabled = !healthy;
+      if (ompOrca) ompOrca.disabled = !healthy;
       if (pi) pi.disabled = !healthy;
+      if (piOrca) piOrca.disabled = !healthy;
       if (web) web.disabled = !healthy;
       // OMP y Pi descriptions según modelo activo
       const active = (st.model || '').toLowerCase();

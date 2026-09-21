@@ -433,6 +433,8 @@ fn handle_request(
         let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
         let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
         let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
+        let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
+        let req_target = body_val.get("target").and_then(|t| t.as_str().map(str::to_string));
 
         let st = mgr.get_status();
         let active_model = st.model;
@@ -449,35 +451,60 @@ fn handle_request(
 
         sync_cli_configs(port, context);
 
+        let effort_flag = match req_effort.as_deref() {
+            Some("off") => " --thinking off",
+            Some("low") => " --thinking low",
+            Some("medium") => " --thinking medium",
+            Some("high") => " --thinking high",
+            Some("max") => " --thinking max",
+            _ => "",
+        };
+
         let cd_prefix = if let Some(dir) = &req_dir {
             format!("cd /d \"{}\" && ", dir)
         } else {
             String::new()
         };
-        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}", cd_prefix, port, omp_model);
+        let inner_cmd = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && omp --model {}{}", port, omp_model, effort_flag);
 
-        let wt_path = std::env::var("LOCALAPPDATA")
-            .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
-            .ok();
-
-        if let Some(wt) = wt_path.filter(|p| p.exists()) {
-            let mut c = std::process::Command::new(wt);
-            c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+        let is_orca = req_target.as_deref() == Some("orca");
+        if is_orca {
+            let mut c = std::process::Command::new("orca.cmd");
+            let orca_title = format!("OMP - {}", omp_model);
+            let mut args = vec!["terminal", "create", "--focus", "--title", &orca_title, "--command", &inner_cmd];
+            let dir_arg;
             if let Some(dir) = &req_dir {
-                c.current_dir(dir);
+                dir_arg = format!("path:{}", dir);
+                args.push("--worktree");
+                args.push(&dir_arg);
             }
+            c.args(&args);
             let _ = c.spawn();
         } else {
-            let mut c = std::process::Command::new("cmd.exe");
-            c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
-            if let Some(dir) = &req_dir {
-                c.current_dir(dir);
+            let wt_path = std::env::var("LOCALAPPDATA")
+                .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
+                .ok();
+            let cmd_str = format!("{}{}", cd_prefix, inner_cmd);
+            if let Some(wt) = wt_path.filter(|p| p.exists()) {
+                let mut c = std::process::Command::new(wt);
+                c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+                if let Some(dir) = &req_dir {
+                    c.current_dir(dir);
+                }
+                let _ = c.spawn();
+            } else {
+                let mut c = std::process::Command::new("cmd.exe");
+                c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
+                if let Some(dir) = &req_dir {
+                    c.current_dir(dir);
+                }
+                let _ = c.spawn();
             }
-            let _ = c.spawn();
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal OMP lanzada en '{}' (puerto :{}, ctx: {}) conectada a {}.",
+            "[LocalMind] Terminal OMP lanzada ({}) en '{}' (puerto :{}, ctx: {}) conectada a {}.",
+            if is_orca { "Orca" } else { "Sistema" },
             req_dir.as_deref().unwrap_or("directorio default"),
             port, context, omp_model
         ));
@@ -494,6 +521,8 @@ fn handle_request(
         let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
         let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
         let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
+        let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
+        let req_target = body_val.get("target").and_then(|t| t.as_str().map(str::to_string));
 
         let st = mgr.get_status();
         let active_model = st.model;
@@ -510,35 +539,60 @@ fn handle_request(
 
         sync_cli_configs(port, context);
 
+        let effort_flag = match req_effort.as_deref() {
+            Some("off") => " --thinking off",
+            Some("low") => " --thinking low",
+            Some("medium") => " --thinking medium",
+            Some("high") => " --thinking high",
+            Some("max") => " --thinking max",
+            _ => "",
+        };
+
         let cd_prefix = if let Some(dir) = &req_dir {
             format!("cd /d \"{}\" && ", dir)
         } else {
             String::new()
         };
-        let cmd_str = format!("{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}", cd_prefix, port, pi_model);
+        let inner_cmd = format!("set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && pi --provider localmind --model {}{}", port, pi_model, effort_flag);
 
-        let wt_path = std::env::var("LOCALAPPDATA")
-            .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
-            .ok();
-
-        if let Some(wt) = wt_path.filter(|p| p.exists()) {
-            let mut c = std::process::Command::new(wt);
-            c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+        let is_orca = req_target.as_deref() == Some("orca");
+        if is_orca {
+            let mut c = std::process::Command::new("orca.cmd");
+            let orca_title = format!("Pi - {}", pi_model);
+            let mut args = vec!["terminal", "create", "--focus", "--title", &orca_title, "--command", &inner_cmd];
+            let dir_arg;
             if let Some(dir) = &req_dir {
-                c.current_dir(dir);
+                dir_arg = format!("path:{}", dir);
+                args.push("--worktree");
+                args.push(&dir_arg);
             }
+            c.args(&args);
             let _ = c.spawn();
         } else {
-            let mut c = std::process::Command::new("cmd.exe");
-            c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
-            if let Some(dir) = &req_dir {
-                c.current_dir(dir);
+            let wt_path = std::env::var("LOCALAPPDATA")
+                .map(|l| PathBuf::from(l).join("Microsoft/WindowsApps/wt.exe"))
+                .ok();
+            let cmd_str = format!("{}{}", cd_prefix, inner_cmd);
+            if let Some(wt) = wt_path.filter(|p| p.exists()) {
+                let mut c = std::process::Command::new(wt);
+                c.args(["-w", "0", "new-tab", "cmd.exe", "/k", &cmd_str]);
+                if let Some(dir) = &req_dir {
+                    c.current_dir(dir);
+                }
+                let _ = c.spawn();
+            } else {
+                let mut c = std::process::Command::new("cmd.exe");
+                c.args(["/c", &format!("start cmd.exe /k \"{}\"", cmd_str)]);
+                if let Some(dir) = &req_dir {
+                    c.current_dir(dir);
+                }
+                let _ = c.spawn();
             }
-            let _ = c.spawn();
         }
 
         mgr.log(&format!(
-            "[LocalMind] Terminal Pi lanzada en '{}' conectada a {} (puerto :{}, ctx: {}).",
+            "[LocalMind] Terminal Pi lanzada ({}) en '{}' conectada a {} (puerto :{}, ctx: {}).",
+            if is_orca { "Orca" } else { "Sistema" },
             req_dir.as_deref().unwrap_or("directorio default"),
             pi_model, port, context
         ));
