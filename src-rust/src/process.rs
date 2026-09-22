@@ -615,6 +615,10 @@ impl ProcessManager {
             cmd.args(["--cache-ram", &profile.cache_ram.to_string()]);
         }
 
+        if cfg.engine.cache_reuse > 0 {
+            cmd.args(["--cache-reuse", &cfg.engine.cache_reuse.to_string()]);
+        }
+
         for flag in &profile.extra_flags {
             cmd.arg(flag);
         }
@@ -634,8 +638,8 @@ impl ProcessManager {
         self.log(&format!("[LocalMind] Cargando modelo: {}", model_filename));
         self.log(&format!("[LocalMind] Perfil: {}", profile.name));
         self.log(&format!(
-            "[LocalMind] Contexto: {} tokens | Hilos: {} | uBatch: {} | Puerto: {}",
-            context, threads, ubatch, llama_port
+            "[LocalMind] Contexto: {} tokens | Hilos: {} | uBatch: {} | Puerto: {} | cache-reuse: {}",
+            context, threads, ubatch, llama_port, cfg.engine.cache_reuse
         ));
         self.log("================================================================");
 

@@ -90,6 +90,10 @@ pub struct EngineConfig {
     /// Puerto preferido del motor (llama-server). Si está ocupado se busca el siguiente libre.
     #[serde(default = "default_llama_port")]
     pub llama_port: u16,
+    /// Reutilización de prefijos de prompt en KV cache (--cache-reuse N).
+    /// 0 = desactivado (default upstream). 256 = global LocalMind.
+    #[serde(default = "default_cache_reuse")]
+    pub cache_reuse: usize,
 }
 
 impl Default for EngineConfig {
@@ -112,6 +116,7 @@ impl Default for EngineConfig {
             metrics: true,
             http_port: 17860,
             llama_port: 8080,
+            cache_reuse: default_cache_reuse(),
         }
     }
 }
@@ -202,6 +207,9 @@ fn default_http_port() -> u16 {
 }
 fn default_llama_port() -> u16 {
     8080
+}
+fn default_cache_reuse() -> usize {
+    256
 }
 fn default_spec_type() -> String {
     "draft-mtp".to_string()
