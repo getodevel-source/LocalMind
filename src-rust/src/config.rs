@@ -57,6 +57,11 @@ pub struct EngineConfig {
     pub threads_batch: Option<usize>,
     #[serde(default = "default_priority")]
     pub priority: String,
+    /// Prioridad de hilos batch (--prio-batch). Desdoblada de --prio: batch en alta
+    /// prioridad eleva hilos de cómputo por encima de foreground y satura la GPU
+    /// (tirones); "0" = hilos batch sin elevar, --prio interactivo intacto.
+    #[serde(default = "default_priority_batch")]
+    pub priority_batch: String,
     #[serde(default = "default_batch")]
     pub batch: usize,
     /// Prioridad de proceso (Windows): 0=bajo, 1=abajo-normal, 2=normal. "below_normal"
@@ -103,6 +108,7 @@ impl Default for EngineConfig {
             threads: None,
             threads_batch: None,
             priority: "2".to_string(),
+            priority_batch: "0".to_string(),
             batch: 1024,
             process_priority: "below_normal".to_string(),
             poll: 0,
@@ -186,6 +192,9 @@ fn default_device() -> String {
 }
 fn default_priority() -> String {
     "2".to_string()
+}
+fn default_priority_batch() -> String {
+    "0".to_string()
 }
 fn default_batch() -> usize {
     1024

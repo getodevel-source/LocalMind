@@ -586,7 +586,7 @@ impl ProcessManager {
             "--poll",
             &cfg.engine.poll.to_string(),
             "--prio-batch",
-            &priority,
+            &cfg.engine.priority_batch,
         ]);
         if cfg.engine.flash_attention {
             cmd.args(["-fa", "on"]);
