@@ -1,0 +1,90 @@
+{
+  "tool": "tests/bench.mjs",
+  "started_at": "2026-09-25T02:14:13.854Z",
+  "finished_at": "2026-09-25T02:15:26.195Z",
+  "base_url": "http://127.0.0.1:17860",
+  "key_source": "gateway.key",
+  "config": {
+    "profiles": [
+      "32k",
+      "64k"
+    ],
+    "prompt_tokens_requested": 512,
+    "prompt_tokens_estimated": 512,
+    "runs": 1,
+    "max_tokens": 256,
+    "stop_after": true
+  },
+  "settings": {
+    "config_path": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\localmind.toml",
+    "http_port": 17860,
+    "last": {
+      "context": 32768,
+      "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+      "profile": "velocidad"
+    },
+    "llama_port": 8080
+  },
+  "rows": [
+    {
+      "profile": "32k",
+      "engine_profile_id": "velocidad",
+      "context": 32768,
+      "load_secs": 24.459,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "engine_gen_tps": 30.1656,
+      "engine_prompt_tps": 0,
+      "acceptance_decode_tps": 34.088972217487644,
+      "acceptance_ok": true,
+      "error": null,
+      "last_error": null
+    },
+    {
+      "profile": "64k",
+      "engine_profile_id": "multi_doc",
+      "context": 65536,
+      "load_secs": 22.313,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "engine_gen_tps": 30.0722,
+      "engine_prompt_tps": 0,
+      "acceptance_decode_tps": 33.96739130434783,
+      "acceptance_ok": true,
+      "error": null,
+      "last_error": null
+    }
+  ],
+  "samples": [
+    {
+      "profile": "32k",
+      "run": 1,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_secs": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "chunks": 259,
+      "ended_at": "2026-09-25T02:14:50.120Z"
+    },
+    {
+      "profile": "64k",
+      "run": 1,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_secs": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "chunks": 259,
+      "ended_at": "2026-09-25T02:15:25.227Z"
+    }
+  ]
+}

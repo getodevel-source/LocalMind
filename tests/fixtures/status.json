@@ -1,0 +1,16 @@
+{
+  "status": "stopped",
+  "is_healthy": false,
+  "pid": null,
+  "model": "",
+  "context": 32768,
+  "profile": "velocidad",
+  "port": 8080,
+  "last_error": null,
+  "verifying": false,
+  "starting_for_secs": 0,
+  "eta_secs": 0,
+  "decode_tps": null,
+  "acceptance_ok": null,
+  "acceptance_error": null
+}

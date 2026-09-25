@@ -1,0 +1,60 @@
+{
+  "tool": "tests/bench.mjs",
+  "started_at": "2026-09-25T02:15:37.875Z",
+  "finished_at": "2026-09-25T02:16:17.360Z",
+  "base_url": "http://127.0.0.1:17860",
+  "key_source": "gateway.key",
+  "config": {
+    "profiles": [
+      "128k"
+    ],
+    "prompt_tokens_requested": 512,
+    "prompt_tokens_estimated": 512,
+    "runs": 1,
+    "max_tokens": 256,
+    "stop_after": true
+  },
+  "settings": {
+    "config_path": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\localmind.toml",
+    "http_port": 17860,
+    "last": {
+      "context": 65536,
+      "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+      "profile": "multi_doc"
+    },
+    "llama_port": 8080
+  },
+  "rows": [
+    {
+      "profile": "128k",
+      "engine_profile_id": "libros",
+      "context": 131072,
+      "load_secs": 26.176,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "engine_gen_tps": 29.4473,
+      "engine_prompt_tps": 0,
+      "acceptance_decode_tps": 32.467532467532465,
+      "acceptance_ok": true,
+      "error": null,
+      "last_error": null
+    }
+  ],
+  "samples": [
+    {
+      "profile": "128k",
+      "run": 1,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "decode_secs": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "chunks": 259,
+      "ended_at": "2026-09-25T02:16:16.143Z"
+    }
+  ]
+}

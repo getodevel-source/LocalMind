@@ -1,0 +1,112 @@
+{
+  "tool": "tests/bench.mjs",
+  "started_at": "2026-09-25T02:44:37.509Z",
+  "finished_at": "2026-09-25T02:45:39.594Z",
+  "base_url": "http://127.0.0.1:17860",
+  "key_source": "gateway.key",
+  "config": {
+    "profiles": [
+      "262k"
+    ],
+    "prompt_tokens_requested": 512,
+    "prompt_tokens_estimated": 512,
+    "runs": 1,
+    "max_tokens": 256,
+    "stop_after": true
+  },
+  "settings": {
+    "config_path": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\localmind.toml",
+    "http_port": 17860,
+    "last": {
+      "context": 262144,
+      "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+      "profile": "max_contexto"
+    },
+    "llama_port": 8080
+  },
+  "rows": [
+    {
+      "profile": "262k",
+      "engine_profile_id": "max_contexto",
+      "context": 262144,
+      "load_secs": null,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "last_token_ms": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "buffered": false,
+      "engine_gen_tps": 12.9106,
+      "engine_prompt_tps": 136.801,
+      "acceptance_decode_tps": 14.022295449765126,
+      "acceptance_ok": true,
+      "error": null,
+      "last_error": null
+    }
+  ],
+  "samples": [
+    {
+      "profile": "262k",
+      "run": 1,
+      "prompt_tokens": 726,
+      "completion_tokens": 256,
+      "ttft_ms": null,
+      "last_token_ms": null,
+      "decode_secs": null,
+      "decode_tps": null,
+      "prefill_tps": null,
+      "buffered": false,
+      "reads": 9,
+      "samples_truncated": false,
+      "samples": [
+        {
+          "t_ms": 7241,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 10072,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 13073,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 16077,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 18193,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 20313,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 23840,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 26582,
+          "bytes": 8192,
+          "has_delta": false
+        },
+        {
+          "t_ms": 26583,
+          "bytes": 701,
+          "has_delta": false
+        }
+      ],
+      "ended_at": "2026-09-25T02:45:38.255Z"
+    }
+  ]
+}

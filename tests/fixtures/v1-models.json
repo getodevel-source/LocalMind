@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "localmind",
+      "object": "model",
+      "owned_by": "localmind"
+    },
+    {
+      "id": "qwen3.8-27b",
+      "object": "model",
+      "owned_by": "localmind"
+    }
+  ],
+  "object": "list"
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "filename": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "name": "Qwen3.8-27B-IQ4_XS_4BPW",
+    "path": "C:\\PROYECTOS\\LocalMind\\models\\Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "rel": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "sha256": null,
+    "size_bytes": 13905649312,
+    "size_gb": 12.95,
+    "source": "local",
+    "verified": false
+  }
+]

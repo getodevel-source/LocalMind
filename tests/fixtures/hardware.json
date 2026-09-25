@@ -1,0 +1,16 @@
+{
+  "cpu_cores": 12,
+  "cpu_name": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "gpus": [
+    {
+      "id": "Vulkan0",
+      "name": "AMD Radeon RX 6800 XT",
+      "vram": "16368 MiB, 15569 MiB free"
+    },
+    {
+      "id": "Vulkan1",
+      "name": "AMD Radeon(TM) Graphics",
+      "vram": "7988 MiB, 7589 MiB free"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "config_path": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\localmind.toml",
+  "http_port": 17860,
+  "last": {
+    "context": 32768,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "profile": "velocidad"
+  },
+  "llama_port": 8080
+}
