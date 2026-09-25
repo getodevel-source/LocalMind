@@ -431,20 +431,13 @@ fn handle_request(
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
         let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
-        let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
         let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
         let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
         let req_target = body_val.get("target").and_then(|t| t.as_str().map(str::to_string));
 
         let st = mgr.get_status();
-        let active_model = st.model;
-        let chosen = req_model.filter(|m| !m.is_empty()).unwrap_or(active_model);
 
-        let omp_model = if chosen.to_lowercase().contains("bonsai") {
-            "bonsai/bonsai-2-27b"
-        } else {
-            "localmind/qwen3.8-27b"
-        };
+        let omp_model = "localmind/qwen3.8-27b";
 
         let port = if st.port > 0 { st.port } else { 8080 };
         let context = if st.context > 0 { st.context } else { 262144 };
@@ -519,20 +512,13 @@ fn handle_request(
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
         let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
-        let req_model = body_val.get("model").and_then(|m| m.as_str().map(str::to_string));
         let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
         let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
         let req_target = body_val.get("target").and_then(|t| t.as_str().map(str::to_string));
 
         let st = mgr.get_status();
-        let active_model = st.model;
-        let chosen = req_model.filter(|m| !m.is_empty()).unwrap_or(active_model);
 
-        let pi_model = if chosen.to_lowercase().contains("bonsai") {
-            "localmind/bonsai-2-27b"
-        } else {
-            "localmind/localmind"
-        };
+        let pi_model = "localmind/localmind";
 
         let port = if st.port > 0 { st.port } else { 8080 };
         let context = if st.context > 0 { st.context } else { 262144 };
@@ -692,13 +678,6 @@ fn sync_cli_configs(port: u16, context: usize) {
                                         "contextWindow": context,
                                         "maxTokens": max_toks,
                                         "reasoning": true
-                                    },
-                                    {
-                                        "id": "bonsai-2-27b",
-                                        "name": "Ternary Bonsai 2 27B (LocalMind)",
-                                        "contextWindow": context,
-                                        "maxTokens": max_toks,
-                                        "reasoning": true
                                     }
                                 ]
                             }));
@@ -735,31 +714,7 @@ fn sync_cli_configs(port: u16, context: usize) {
         compat:
           supportsReasoningEffort: false
           reasoningContentField: reasoning_content
-
-  bonsai:
-    baseUrl: http://127.0.0.1:{}/v1
-    auth: none
-    api: openai-completions
-    models:
-      - id: qwen3.8-27b
-        name: Qwen 3.8 27B (LocalMind)
-        reasoning: true
-        input: [text, image]
-        contextWindow: {}
-        maxTokens: 16384
-        compat:
-          supportsReasoningEffort: false
-          reasoningContentField: reasoning_content
-      - id: bonsai-2-27b
-        name: Ternary Bonsai 2 27B (Legacy)
-        reasoning: true
-        input: [text, image]
-        contextWindow: {}
-        maxTokens: 16384
-        compat:
-          supportsReasoningEffort: false
-          reasoningContentField: reasoning_content
-"#, port, context, context, port, context, context);
+"#, port, context, context);
         let _ = std::fs::write(&omp_models_path, yml_content);
     }
 }

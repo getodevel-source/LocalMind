@@ -1768,7 +1768,7 @@
             Endpoints OpenAI Compatibles
           </h3>
           <p>
-            Cualquier herramienta compatible con la API de OpenAI (como Cursor, Continue, LangChain o OMP) puede conectarse directamente con la URL base <code>http://127.0.0.1:8080/v1</code> y el ID de modelo <code>localmind</code> o <code>bonsai-2-27b</code>.<br><code id="config-path" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code>
+            Cualquier herramienta compatible con la API de OpenAI (como Cursor, Continue, LangChain o OMP) puede conectarse directamente con la URL base <code>http://127.0.0.1:8080/v1</code> y el ID de modelo <code>localmind</code> o <code>qwen3.8-27b</code>.<br><code id="config-path" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code>
           </p>
         </div>
       </div>
@@ -2391,12 +2391,11 @@
       if (piOrca) piOrca.disabled = !healthy;
       if (web) web.disabled = !healthy;
       // OMP y Pi descriptions según modelo activo
-      const active = (st.model || '').toLowerCase();
-      const isBonsai = active.includes('bonsai');
-      const activeModelName = st.model ? (isBonsai ? 'bonsai-2-27b' : 'qwen3.8-27b') : 'localmind';
+      const active = (st.model || '');
+      const activeModelName = active ? active.split('/').pop() : 'localmind';
       const ompDesc = document.getElementById('omp-desc');
       if (ompDesc) {
-        ompDesc.textContent = 'Sesión CLI conectada a ' + (isBonsai ? 'bonsai/bonsai-2-27b' : 'localmind/qwen3.8-27b');
+        ompDesc.textContent = 'Sesión CLI conectada a ' + ('localmind/' + activeModelName);
       }
       const piDesc = document.getElementById('pi-desc');
       if (piDesc) {

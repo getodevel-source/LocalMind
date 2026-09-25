@@ -233,14 +233,12 @@ fn default_aliases() -> Vec<String> {
     vec![
         "localmind".to_string(),
         "qwen3.8-27b".to_string(),
-        "bonsai-2-27b".to_string(),
     ]
 }
 fn default_mmproj_files() -> Vec<String> {
     vec![
         "mmproj-BF16.gguf".to_string(),
         "mmproj-F16.gguf".to_string(),
-        "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf".to_string(),
     ]
 }
 
