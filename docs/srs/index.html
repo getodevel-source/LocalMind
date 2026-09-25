@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalMind · SRS v1.0 — Cuestionario P1–P32</title>
+<meta name="description" content="Cuestionario interactivo de decisiones abiertas del SRS de LocalMind: 32 preguntas P1–P32, una por paso, con opción recomendada y exportación de respuestas.">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#131619; --panel2:#181c20; --line:#262c33;
+    --text:#e8edf2; --muted:#93a1b0; --accent:#e9ff55; --accent-ink:#12160a;
+    --ok:#34e08a; --warn:#ffb454; --r:14px; --r-sm:10px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  a{color:var(--accent)}
+  body{max-width:1120px;margin:0 auto;padding:26px 20px 64px}
+  header.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;gap:12px;align-items:center}
+  .logo{width:44px;height:44px;border-radius:13px;background:linear-gradient(135deg,var(--accent),#8fd0ff);display:grid;place-items:center;font-weight:800;color:var(--accent-ink);font-size:18px;font-family:var(--mono)}
+  h1{font-size:20px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .badge{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);white-space:nowrap}
+  .prog{margin:18px 0 6px}
+  .prog-meta{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px;gap:10px;flex-wrap:wrap}
+  .bar{height:8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+  .bar > i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#8fd0ff);transition:width .18s ease}
+  .layout{display:grid;grid-template-columns:250px 1fr;gap:14px;margin-top:14px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r)}
+  .idx{padding:14px;max-height:72vh;overflow:auto;position:sticky;top:16px}
+  .idx h3{font-size:12px;margin:12px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .idx h3:first-child{margin-top:0}
+  .idx ol{list-style:none;display:flex;flex-wrap:wrap;gap:6px;padding:0;margin:0}
+  .idx button{min-width:42px;padding:7px 6px;border-radius:var(--r-sm);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);font-size:12.5px;font-weight:700;cursor:pointer;font-family:var(--mono)}
+  .idx button.done{background:rgba(52,224,138,.14);color:var(--ok);border-color:rgba(52,224,138,.4)}
+  .idx button.current{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+  .qwrap{padding:22px}
+  .qmeta{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em}
+  .qmeta .chip{border:1px solid var(--line);border-radius:999px;padding:3px 9px}
+  h2#qtext{font-size:19px;margin:12px 0 8px;line-height:1.35}
+  .why{font-size:13.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r-sm);padding:11px 13px;margin:0 0 14px}
+  .opt{display:block;width:100%;text-align:left;margin:9px 0;padding:13px 15px;border-radius:var(--r-sm);border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);font:inherit;cursor:pointer}
+  .opt:hover{background:rgba(255,255,255,.07)}
+  .opt .head{display:flex;gap:10px;align-items:center;font-weight:600}
+  .opt .k{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;border:1px solid var(--line);font-weight:800;font-size:12.5px;color:var(--muted);font-family:var(--mono);flex:none}
+  .opt .desc{color:var(--muted);font-size:13px;margin-top:6px}
+  .opt .star{margin-left:auto;font-size:12px;color:var(--accent);border:1px solid rgba(233,255,85,.4);border-radius:999px;padding:2px 8px;white-space:nowrap}
+  .opt[aria-checked="true"]{border-color:var(--accent);background:rgba(233,255,85,.09)}
+  .opt[aria-checked="true"] .k{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+  .note{display:block;margin-top:14px;font-size:13px;color:var(--muted)}
+  textarea{width:100%;margin-top:6px;min-height:62px;resize:vertical;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--text);font:13.5px/1.5 var(--mono);padding:10px}
+  .nav{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+  button.btn{background:var(--accent);color:var(--accent-ink);border:none;border-radius:var(--r-sm);padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer}
+  button.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 16px;font-weight:600;font-size:13.5px;cursor:pointer}
+  button.btn:disabled,button.btn-ghost:disabled{opacity:.45;cursor:not-allowed}
+  button.btn-ghost:hover:not(:disabled){background:rgba(255,255,255,.06)}
+  .hint{font-size:12.5px;color:var(--muted);margin-top:10px}
+  .review{padding:22px;margin-top:14px}
+  table.rev{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  table.rev th,table.rev td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.rev th{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+  table.rev td.ans{color:var(--ok)}
+  table.rev td.pend{color:var(--warn)}
+  .out{width:100%;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--text);font:12.5px/1.5 var(--mono);padding:12px;white-space:pre-wrap;word-break:break-word;min-height:90px}
+  .foot{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .status{font-size:12.5px;color:var(--ok);min-height:18px;margin-top:8px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important}}
+  @media(max-width:820px){
+    .layout{grid-template-columns:1fr}
+    .idx{position:static;max-height:none}
+    .nav button{flex:1 1 45%}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">LM</div>
+    <div>
+      <h1>LocalMind · SRS v1.0 — Decisiones abiertas</h1>
+      <div class="sub">32 preguntas (P1–P32) sobre lo que queremos que LocalMind sea. Una por paso, con recomendación técnica. Se guarda sólo en este navegador.</div>
+    </div>
+  </div>
+  <div class="badge" id="src-badge">docs/SRS.md · base 1120228</div>
+</header>
+
+<div class="prog" role="group" aria-label="Progreso">
+  <div class="prog-meta">
+    <span id="prog-text">0 de 32 respondidas</span>
+    <span id="prog-pct">0%</span>
+  </div>
+  <div class="bar"><i id="prog-bar"></i></div>
+</div>
+
+<div class="layout">
+  <nav class="idx panel" id="index" aria-label="Índice de preguntas"></nav>
+
+  <section class="qwrap panel" aria-labelledby="qtext">
+    <div class="qmeta">
+      <span class="chip" id="qid">P1</span>
+      <span class="chip" id="qsec">Producto</span>
+      <span class="chip" id="qpos">1 / 32</span>
+    </div>
+    <h2 id="qtext">—</h2>
+    <p class="why" id="qwhy"></p>
+    <div id="qopts" role="radiogroup" aria-labelledby="qtext"></div>
+    <label class="note" for="qnote">Comentario (opcional: matices, límites, ideas)
+      <textarea id="qnote" rows="2" placeholder="Ej.: sí, pero sólo si no cuesta VRAM"></textarea>
+    </label>
+    <div class="nav">
+      <button class="btn-ghost" id="btn-prev" type="button">← Anterior</button>
+      <button class="btn-ghost" id="btn-next" type="button">Siguiente →</button>
+      <button class="btn-ghost" id="btn-rec" type="button">Usar recomendada ★</button>
+      <button class="btn" id="btn-review" type="button">Revisar y exportar</button>
+    </div>
+    <div class="hint" id="kbhint">Atajos: <span class="mono">1–4</span> elige opción · <span class="mono">← →</span> navega · <span class="mono">R</span> usa la recomendada</div>
+  </section>
+</div>
+
+<section class="review panel" id="review" hidden aria-labelledby="revtitle">
+  <h2 id="revtitle" style="font-size:18px;margin:0">Revisión final</h2>
+  <div class="sub" id="rev-summary">—</div>
+  <div style="margin-top:12px">
+    <table class="rev">
+      <thead><tr><th style="width:52px">ID</th><th>Pregunta</th><th>Tu respuesta</th><th style="width:26%">Comentario</th></tr></thead>
+      <tbody id="rev-body"></tbody>
+    </table>
+  </div>
+  <div class="foot">
+    <button class="btn-ghost" id="btn-copy" type="button">Copiar resumen</button>
+    <button class="btn-ghost" id="btn-md" type="button">Descargar .md</button>
+    <button class="btn-ghost" id="btn-json" type="button">Descargar .json</button>
+    <button class="btn-ghost" id="btn-reset" type="button">Reiniciar respuestas</button>
+    <button class="btn" id="btn-back" type="button">Volver al cuestionario</button>
+  </div>
+  <div class="status" id="copy-status" role="status" aria-live="polite"></div>
+  <label class="note" for="out-md">Resumen compacto (para pegar en el chat)</label>
+  <textarea class="out" id="out-md" rows="10" readonly></textarea>
+  <label class="note" for="out-json">JSON</label>
+  <textarea class="out" id="out-json" rows="6" readonly></textarea>
+</section>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ datos */
+const SECTIONS = [
+  { name: "Producto y alcance", qs: [
+    { id:"P1", sec:"Producto", q:"¿Para quién es LocalMind?",
+      why:"Hoy está calibrado como app personal en esta PC: device Vulkan0 y 6 hilos fijos (config.rs:190-208), 4 perfiles pensados para RX 6800 XT + DDR5 y config en %APPDATA% (config.rs:316-321).",
+      opts:[
+        { t:"Sólo para mí, en esta PC", d:"Mantiene el diseño actual: todo el esfuerzo va a que funcione perfecto en este hardware.", rec:true },
+        { t:"Para mí y mi equipo (pocas PCs)", d:"Exige detección real de hardware y presets automáticos (hoy device/threads están fijos en la config)." },
+        { t:"Producto para terceros", d:"Suma instalador, onboarding, perfiles por hardware y soporte; multiplica Fase 2/3." }
+      ]},
+    { id:"P2", sec:"Producto", q:"¿Cuántos modelos cargados a la vez?",
+      why:"El 27B IQ4_XS ocupa ~13 GB de 16 GB de VRAM; el motor se lanza con -np 1 y --split-mode none (process.rs:552-590) y el manager tiene un único proceso hijo.",
+      opts:[
+        { t:"Uno por vez (actual)", d:"Simple y predecible; cambiar de modelo implica reiniciar el motor.", rec:true },
+        { t:"Dos (uno rápido + uno grande) intercambiables", d:"Requiere liberar/cargar VRAM (~13 GB) o correr dos motores con modelos chicos." },
+        { t:"Varios simultáneos", d:"No entra en 16 GB de VRAM: obligaría a modelos reducidos y gestión de memoria propia." }
+      ]},
+    { id:"P3", sec:"Producto", q:"¿En qué plataformas corre?",
+      why:"Hoy es Windows-only por dependencias reales: WebView2 (wry), taskkill (process.rs:219), explorer.exe (server.rs:310) y PowerShell para enfocar la ventana (main.rs:64-76); bin/ es un build MSVC x64.",
+      opts:[
+        { t:"Sólo Windows", d:"Es lo que el runtime y los binarios soportan hoy.", rec:true },
+        { t:"Windows + Linux", d:"Hay que abstraer taskkill/explorer/foco y traer binarios de llama.cpp para Linux." },
+        { t:"Sumar macOS", d:"Sin Vulkan en Mac: cambia backend y binarios." }
+      ]},
+    { id:"P4", sec:"Producto", q:"¿Backend de GPU?",
+      why:"Corre Vulkan (bin/ggml-vulkan.dll, --device Vulkan0) y el dueño ya preguntó por ROCm para t/s.",
+      opts:[
+        { t:"Medir ROCm vs Vulkan y decidir con números", d:"Antes de comprometer trabajo: benchmark real con el mismo modelo y contexto.", rec:true },
+        { t:"Vulkan y listo", d:"Funciona hoy y sirve para AMD/Intel/NVIDIA." },
+        { t:"Añadir CUDA (NVIDIA)", d:"Sólo tiene sentido si LocalMind se distribuye a terceros." }
+      ]},
+    { id:"P5", sec:"Producto", q:"¿Cómo se entrega?",
+      why:"Hoy es una carpeta: LocalMind.exe (3,0 MB) + bin/ (106 MB, 103 archivos) + models/ (14 GB) + WebView2 junto al exe. No hay versión visible ni updates, y no hay marcador del build de llama.cpp (D-15).",
+      opts:[
+        { t:"Instalador con versión visible", d:"Inno Setup o MSI + versión en la UI; los modelos se instalan aparte.", rec:true },
+        { t:"Portable (copiar carpeta)", d:"Cero instalación; ideal si sólo la usás vos." },
+        { t:"Instalador + auto-update", d:"Suma hosting de releases, firma y lógica de actualización." }
+      ]},
+  ]},
+  { name: "Modelos", qs: [
+    { id:"P6", sec:"Modelos", q:"¿Gestión de modelos dentro de la app?",
+      why:"Importar copia un .gguf a models/ (server.rs:285-306) pero la UI pide la ruta absoluta con prompt() porque WebView2 no la expone (ui.html:2202-2210). No hay descarga.",
+      opts:[
+        { t:"Descarga integrada desde HuggingFace con progreso y checksum", d:"Resuelve el flujo roto de importación y evita manejar archivos a mano.", rec:true },
+        { t:"Importar carpeta como hoy", d:"Lo mínimo; el usuario sigue copiando archivos de 13 GB manualmente." },
+        { t:"Descarga sólo de una lista curada de modelos recomendados", d:"Menos errores de compatibilidad, menos libertad." }
+      ]},
+    { id:"P7", sec:"Modelos", q:"¿Visión y voz en el chat?",
+      why:"mmproj está apagado por defecto (config.rs:131-149) y bin/ ya trae mtmd.dll, llama-tts.exe y llama-mtmd-cli.exe sin uso. El chat embebido hoy es sólo texto.",
+      opts:[
+        { t:"Sólo texto (actual)", d:"Menos VRAM/RAM y menos superficie de fallos.", rec:true },
+        { t:"Texto + imagen (activar mmproj)", d:"Ojo: sumar mmproj en perfiles de 128K/262K fue justo lo que ya dio problemas de carga." },
+        { t:"Texto + imagen + voz (TTS/ASR)", d:"Máximo alcance; exige modelos extra y trabajo de UI/audio." }
+      ]},
+    { id:"P8", sec:"Modelos", q:"¿Un modelo para todo o varios por caso de uso?",
+      why:"Hoy un único modelo activo, publicado a los CLIs como localmind y qwen3.8-27b (config.rs:232-236).",
+      opts:[
+        { t:"Un modelo para todo (actual)", d:"Un solo peso en disco y una sola cosa que mantener.", rec:true },
+        { t:"Dos: uno chico para CLIs y el grande para el chat", d:"Más rápido para agentes, pero duplica VRAM/gestión." }
+      ]},
+    { id:"P9", sec:"Modelos", q:"¿Política de cuantización?",
+      why:"Hoy IQ4_XS_4BPW (13 GB) y el perfil velocidad declara ~17 t/s a 32K. No hay medición registrada en el repo.",
+      opts:[
+        { t:"Fijar IQ4_XS y documentar el trade-off", d:"Un solo camino probado; evita prometer velocidad irreal.", rec:true },
+        { t:"Permitir Q4/Q5/Q6 con benchmark automático por perfil", d:"Más control y honestidad de números, más trabajo." }
+      ]},
+  ]},
+  { name: "Rendimiento y energía", qs: [
+    { id:"P10", sec:"Rendimiento", q:"¿Meta dura de t/s por perfil?",
+      why:"Objetivo declarado por el dueño: 30 t/s a 262K (2026-09-18). El perfil velocidad declara ~17 t/s a 32K. Hoy no hay números medidos ni registrados.",
+      opts:[
+        { t:"Definir metas por perfil y medirlas con llama-bench", d:"Fija el criterio de éxito con números, no con impresiones.", rec:true },
+        { t:"Sin metas; optimizar cuando moleste", d:"Menos trabajo, riesgo de volver a discutir lo mismo sin datos." },
+        { t:"Aceptar el rendimiento actual y priorizar estabilidad", d:"Cierra la búsqueda de performance y enfoca en confiabilidad." }
+      ]},
+    { id:"P11", sec:"Rendimiento", q:"MTP y cache-reuse: ¿velocidad o estabilidad?",
+      why:"Hoy activos: draft-mtp con n=2 y cache-reuse 256. El commit 10f122a midió 72-78% de aceptación y el 151d1d0 bajó priority_batch para eliminar tirones.",
+      opts:[
+        { t:"Estabilidad primero, con MTP/cache-reuse por perfil y visibles", d:"El usuario ve qué sacrifica y por qué.", rec:true },
+        { t:"Velocidad primero: medir y activar todo lo que rinda", d:"Riesgo de tirones en multitarea." },
+        { t:"Dejar los valores actuales fijos", d:"Cero trabajo, cero control." }
+      ]},
+    { id:"P12", sec:"Energía", q:"¿Política anti-apagón?",
+      why:"Diseño actual: prioridad below_normal, --prio 2 interactivo, --prio-batch 0 y -ub 512 para no generar transitorios (config.rs:60-77, process.rs:545-547). El dueño fue explícito: un apagón «no es permisible».",
+      opts:[
+        { t:"Mantener y hacerlo visible en la UI", d:"El usuario entiende qué límites protegen la máquina.", rec:true },
+        { t:"Añadir perfil 'eco' con límite de potencia más bajo", d:"Útil para sesiones largas; requiere medir consumo real." },
+        { t:"Permitir modo 'máximo' temporal", d:"Más velocidad a riesgo del usuario; el apagón sigue prohibido." }
+      ]},
+    { id:"P13", sec:"Energía", q:"¿Auto-stop por inactividad?",
+      why:"Hoy fijo en 1500 s (25 min) en el TOML, sin control en la UI; el countdown se muestra si el backend lo envía (ui.html:2316-2349).",
+      opts:[
+        { t:"Configurable desde la UI", d:"El usuario decide el balance entre liberar VRAM y recargar el modelo.", rec:true },
+        { t:"Fijo 25 min como hoy", d:"Simple; ya está probado." },
+        { t:"Configurable + aviso antes de apagar", d:"Evita perder la carga del modelo por sorpresa." }
+      ]},
+    { id:"P14", sec:"Energía", q:"¿Arranque del motor al abrir la app?",
+      why:"Hoy el motor se inicia a mano desde la franja de estado; la última selección (modelo, perfil, contexto) ya se recuerda en last.* del TOML.",
+      opts:[
+        { t:"Manual (actual)", d:"La máquina no trabaja si no se la pide.", rec:true },
+        { t:"Reanudar la última sesión automáticamente", d:"Carga 13 GB al abrir; conveniente pero pesado." },
+        { t:"Opción configurable «arrancar con la app»", d:"Cada uno elige; más control en UI." }
+      ]},
+  ]},
+  { name: "Interfaz", qs: [
+    { id:"P15", sec:"Interfaz", q:"¿Qué hacemos con dashboard.html y chat.html?",
+      why:"Son archivos muertos: llaman rutas que ya no existen (/api/open-omp, /ws/logs) y fijan 127.0.0.1:8080 (dashboard.html:457-490, chat.html:174-176). El servidor sólo sirve / → ui.html (server.rs:198-212).",
+      opts:[
+        { t:"Eliminarlos", d:"Saca código que ya no está en el contrato y confunde auditorías.", rec:true },
+        { t:"Rescatar ideas (chat con imagen) y después borrarlos", d:"Conserva lo útil, elimina el resto." },
+        { t:"Mantenerlos como referencia", d:"Siguen divergiendo del contrato real." }
+      ]},
+    { id:"P16", sec:"Interfaz", q:"¿Parámetros de generación ajustables?",
+      why:"Hoy temperature está fijo en 0.7 y no hay top_p, max_tokens ni seed en la UI (ui.html:2634-2644).",
+      opts:[
+        { t:"Panel avanzado con preset por perfil", d:"Control real sin romper la simplicidad por defecto.", rec:true },
+        { t:"Sólo temperatura y max_tokens", d:"Mínimo útil para chat y código." },
+        { t:"Dejarlos fijos", d:"Menos superficie, menos control." }
+      ]},
+    { id:"P17", sec:"Interfaz", q:"¿Accesibilidad e idioma?",
+      why:"Todo el texto está hardcodeado en español; hay un solo aria-label y user-select:none global (ui.html:55, ui.html:2363).",
+      opts:[
+        { t:"Español + accesibilidad básica (roles, foco, sin alert bloqueante)", d:"Uso por teclado y lectores de pantalla sin rehacer todo.", rec:true },
+        { t:"Español, sin prioridad de accesibilidad", d:"Cero trabajo extra." },
+        { t:"Bilingüe es/en con conmutador", d:"Duplica textos y pruebas." }
+      ]},
+    { id:"P18", sec:"Interfaz", q:"¿Estética?",
+      why:"Cita del dueño: «esa UI es horrible quiero algo mas premium no hecho por un niño» (2026-09-18).",
+      opts:[
+        { t:"Rediseño premium sobre la estructura actual", d:"Mejora real de percepción sin reescribir la UI entera.", rec:true },
+        { t:"Sólo pulir detalles (espaciado, tipografía, estados)", d:"Rápido, cambio visible moderado." },
+        { t:"Rediseño completo con sistema de diseño propio", d:"Máxima calidad, mucho más trabajo." }
+      ]},
+    { id:"P19", sec:"Interfaz", q:"¿Adjuntos en el chat embebido?",
+      why:"Hoy el chat es sólo texto (ui.html:1672) mientras el legacy chat.html soporta imágenes base64 (chat.html:174). Depende de P7.",
+      opts:[
+        { t:"Texto + imágenes del portapapeles", d:"Lo más útil sin manejar archivos; requiere mmproj (P7).", rec:true },
+        { t:"Texto, imágenes y archivos de texto/código", d:"Máximo alcance; hay que definir contexto y coste de tokens." },
+        { t:"Sólo texto", d:"Mantiene el diseño actual." }
+      ]},
+    { id:"P20", sec:"Interfaz", q:"¿Notificaciones del sistema?",
+      why:"Hoy todo se ve sólo dentro de la ventana; el modelo tarda minutos en cargar y hay auto-stop a los 25 min.",
+      opts:[
+        { t:"Avisar al quedar listo y antes del auto-stop", d:"Lo importante, sin ruido.", rec:true },
+        { t:"Avisar en todos los eventos relevantes (listo, error, crash, auto-stop)", d:"Máxima información; puede molestar." },
+        { t:"Sin notificaciones", d:"Nada fuera de la ventana." }
+      ]},
+  ]},
+  { name: "Lanzadores y CLIs", qs: [
+    { id:"P21", sec:"Lanzadores", q:"¿Cómo tocamos las configs de OMP y Pi?",
+      why:"Pi se actualiza con merge que preserva el resto del JSON, sólo si el archivo existe (server.rs:652-687). OMP se sobrescribe con plantilla fija: hoy borra providers del usuario (server.rs:689-716).",
+      opts:[
+        { t:"Merge no destructivo + backup antes de escribir", d:"Nunca perdés configuración propia por abrir LocalMind.", rec:true },
+        { t:"No tocar archivos de terceros (inyectar por variables de entorno)", d:"Cero riesgo, pero depende de que cada CLI acepte todo por env." },
+        { t:"Seguir sobrescribiendo como hoy", d:"Simple y peligroso: ya rompió providers." }
+      ]},
+    { id:"P22", sec:"Lanzadores", q:"¿Qué puerto ven los CLIs?",
+      why:"El motor usa puerto dinámico desde 8080. Hoy las configs quedan con un puerto viejo (verificado: 8081) y sólo se reescriben al lanzar; si el motor está apagado el lanzador inventa 8080/262144 (server.rs:443-444).",
+      opts:[
+        { t:"Puerto estable reservado para CLIs, reescrito al arrancar el motor", d:"Los CLIs siempre apuntan a algo vivo.", rec:true },
+        { t:"Reescribir configs sólo al lanzar (actual)", d:"Ya genera configs stale entre sesiones (D-6)." },
+        { t:"Descubrimiento dinámico por variable de entorno", d:"Sin archivos stale; requiere que el CLI se lance siempre desde LocalMind." }
+      ]},
+    { id:"P23", sec:"Lanzadores", q:"¿El modelo elegido en la UI se respeta al lanzar?",
+      why:"El body del request acepta model, pero el comando usa IDs fijos: localmind/qwen3.8-27b para OMP y localmind/localmind para Pi (server.rs:441, server.rs:527).",
+      opts:[
+        { t:"Sí, respetar el modelo seleccionado", d:"Lo que el usuario ve es lo que se ejecuta.", rec:true },
+        { t:"No: fijar siempre el modelo activo del motor", d:"Evita desincronización, menos control." },
+        { t:"Preguntar cada vez al lanzar", d:"Explícito pero tedioso." }
+      ]},
+    { id:"P24", sec:"Lanzadores", q:"¿Cuántos CLIs soportamos?",
+      why:"Hoy OMP y Pi, cada uno en modo sistema y Orca (server.rs:430-590). Todo está hardcodeado por CLI.",
+      opts:[
+        { t:"OMP, Pi y Orca alcanzan", d:"Es lo que el usuario usa hoy.", rec:true },
+        { t:"Sumar Claude Code / Codex", d:"Más cobertura de agentes, más mantenimiento." },
+        { t:"Perfiles de CLI configurables (comando + args editables)", d:"Generaliza sin hardcodear; requiere editor en la UI." }
+      ]},
+    { id:"P25", sec:"Lanzadores", q:"¿Qué debe abrir «Interfaz Web Externa»?",
+      why:"El botón se presenta como «Abrir UI oficial de llama.cpp en tu navegador» (ui.html:1631-1646) pero abre el puerto del motor (server.rs:592-605). Si la intención era la UI de LocalMind, hoy abre otra cosa.",
+      opts:[
+        { t:"La UI de llama.cpp (intención actual)", d:"Coherente con el texto del botón y útil para diagnóstico.", rec:true },
+        { t:"La UI de LocalMind en el navegador", d:"Útil para pantalla secundaria; ojo con exponer /api/* al navegador." },
+        { t:"Ambos: dos botones separados", d:"Sin ambigüedad." }
+      ]},
+  ]},
+  { name: "Configuración", qs: [
+    { id:"P26", sec:"Configuración", q:"¿Se editan los perfiles desde la UI?",
+      why:"Hoy se editan a mano en el TOML o se importan por JSON (server.rs:264-283). Además el fallback de perfil apunta a un id inexistente: «turbo» (D-1).",
+      opts:[
+        { t:"Editor de perfiles en la UI (crear, duplicar, validar)", d:"Contexto, cache_ram y flags sin abrir archivos; cierra D-1 de paso.", rec:true },
+        { t:"Editor + presets automáticos según el hardware detectado", d:"Máxima comodidad; más trabajo y riesgo de presets malos." },
+        { t:"Sólo import/export como hoy", d:"Cero trabajo nuevo." }
+      ]},
+    { id:"P27", sec:"Configuración", q:"¿Dónde vive la configuración?",
+      why:"Hoy %APPDATA%/LocalMind/localmind.toml, con fallback a la carpeta del exe si no hay APPDATA (config.rs:316-321).",
+      opts:[
+        { t:"APPDATA (actual) + opción portable", d:"Sobrevive a reinstalaciones y permite llevar la app en un pendrive.", rec:true },
+        { t:"Sólo APPDATA", d:"Es lo que hay; D-15 y reinstalaciones quedan cubiertas." },
+        { t:"Sólo portable junto al exe", d:"Todo en una carpeta, pero se pierde al reinstalar." }
+      ]},
+    { id:"P28", sec:"Configuración", q:"¿Qué pasa si la config está corrupta?",
+      why:"Un TOML con error de sintaxis cae en silencio a los valores por defecto (config.rs:293-299): el usuario cree que corre con su configuración y no es así.",
+      opts:[
+        { t:"Avisar en la UI y ofrecer reparar (con backup del archivo roto)", d:"El usuario entiende qué pasó y puede arreglarlo.", rec:true },
+        { t:"Reparar automáticamente y seguir", d:"Menos fricción, posibilidad de perder ajustes sin aviso." },
+        { t:"Frenar el arranque mostrando el error", d:"Máxima seguridad, más molesto." }
+      ]},
+  ]},
+  { name: "Seguridad y mantenimiento", qs: [
+    { id:"P29", sec:"Seguridad", q:"¿La API local lleva autenticación y CORS restringido?",
+      why:"Hoy CORS permite cualquier origen y no hay token (server.rs:15-28): cualquier página web abierta en la máquina puede iniciar el motor o consumir tokens contra /v1/*.",
+      opts:[
+        { t:"Token simple para /api/* y CORS restringido a loopback", d:"Corta el riesgo sin complicar la vida al usuario.", rec:true },
+        { t:"Dejarlo abierto (sólo escucha en 127.0.0.1)", d:"Cómodo para scripts locales; el riesgo es el navegador." },
+        { t:"Token opcional configurable en el TOML", d:"Flexible; el default decide el riesgo real." }
+      ]},
+    { id:"P30", sec:"Datos", q:"¿Los logs se guardan en disco?",
+      why:"Hoy viven en memoria con tope de 250 líneas y se pierden al cerrar (process.rs:292-326); sólo viajan por SSE a la pestaña Logs.",
+      opts:[
+        { t:"Persistir a archivo con rotación y botón de exportar", d:"Permite diagnosticar crashes después de que pasan.", rec:true },
+        { t:"Persistir sólo cuando hay error o crash", d:"Menos disco, cubre el caso crítico." },
+        { t:"Mantener sólo en memoria", d:"Cero trabajo; sin evidencia post-mortem." }
+      ]},
+    { id:"P31", sec:"Mantenibilidad", q:"¿Tests, CI y remoto git?",
+      why:"No hay tests automatizados ni CI, y el repo no tiene remoto (git remote -v vacío): hoy todo el proyecto vive en un solo disco.",
+      opts:[
+        { t:"Suite mínima (arranque, API, config, launchers) + CI + publicar remoto", d:"Es la diferencia entre app casera y producto mantenible.", rec:true },
+        { t:"Sólo publicar remoto como respaldo", d:"Protege el trabajo; sin red de seguridad de comportamiento." },
+        { t:"Sin tests por ahora", d:"Todo el riesgo cae en pruebas manuales." }
+      ]},
+    { id:"P32", sec:"Mantenibilidad", q:"¿El SRS es la fuente de verdad versionada?",
+      why:"Este documento (docs/SRS.md) y este cuestionario. Sin una regla de actualización, en semanas queda desactualizado y vuelve el problema que lo originó.",
+      opts:[
+        { t:"Sí: versionado en el repo y actualizado al cerrar cada fase", d:"Estado ✅/🟡/⬜ y deuda D-# siempre reflejan la realidad.", rec:true },
+        { t:"Documento aparte, se actualiza cuando haga falta", d:"Menos disciplina, riesgo de deriva." },
+        { t:"Sólo este SRS inicial; después no mantenerlo", d:"Se degrada a historia." }
+      ]},
+  ]},
+];
+
+const QUESTIONS = SECTIONS.flatMap(s => s.qs);
+const TOTAL = QUESTIONS.length;
+const STORE_KEY = "localmind_srs_v1";
+
+/* ------------------------------------------------------------------ estado */
+let answers = {};     // { P1: {opt: 0, note: ""} }
+let current = 0;
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data && typeof data === "object" && data.answers && typeof data.answers === "object") {
+      answers = data.answers;
+    }
+  } catch (e) { /* almacenamiento corrupto: empezar de cero */ }
+}
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, updated: new Date().toISOString(), answers }));
+    return true;
+  } catch (e) { return false; }
+}
+const answeredCount = () => QUESTIONS.filter(q => answers[q.id] && typeof answers[q.id].opt === "number").length;
+
+/* ------------------------------------------------------------------ índice */
+function buildIndex() {
+  const nav = document.getElementById("index");
+  nav.innerHTML = "";
+  SECTIONS.forEach(sec => {
+    const h = document.createElement("h3");
+    h.textContent = sec.name;
+    nav.appendChild(h);
+    const ol = document.createElement("ol");
+    sec.qs.forEach(q => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = q.id;
+      b.title = q.q;
+      b.dataset.qid = q.id;
+      b.addEventListener("click", () => { goTo(QUESTIONS.findIndex(x => x.id === q.id)); });
+      li.appendChild(b);
+      ol.appendChild(li);
+    });
+    nav.appendChild(ol);
+  });
+}
+function paintIndex() {
+  document.querySelectorAll("#index button").forEach(b => {
+    const qid = b.dataset.qid;
+    b.classList.toggle("done", !!(answers[qid] && typeof answers[qid].opt === "number"));
+    b.classList.toggle("current", QUESTIONS[current] && QUESTIONS[current].id === qid);
+  });
+}
+
+/* ---------------------------------------------------------------- progreso */
+function paintProgress() {
+  const n = answeredCount();
+  const pct = Math.round((n / TOTAL) * 100);
+  document.getElementById("prog-text").textContent = n + " de " + TOTAL + " respondidas";
+  document.getElementById("prog-pct").textContent = pct + "%";
+  document.getElementById("prog-bar").style.width = pct + "%";
+}
+
+/* -------------------------------------------------------------- preguntas */
+function render() {
+  const q = QUESTIONS[current];
+  const saved = answers[q.id] || {};
+  document.getElementById("qid").textContent = q.id;
+  document.getElementById("qsec").textContent = q.sec;
+  document.getElementById("qpos").textContent = (current + 1) + " / " + TOTAL;
+  document.getElementById("qtext").textContent = q.q;
+  document.getElementById("qwhy").textContent = q.why;
+
+  const box = document.getElementById("qopts");
+  box.innerHTML = "";
+  q.opts.forEach((opt, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "opt";
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", saved.opt === i ? "true" : "false");
+    b.dataset.idx = String(i);
+
+    const head = document.createElement("span");
+    head.className = "head";
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = String(i + 1);
+    const label = document.createElement("span");
+    label.textContent = opt.t;
+    head.append(k, label);
+    if (opt.rec) {
+      const star = document.createElement("span");
+      star.className = "star";
+      star.textContent = "★ recomendada";
+      head.appendChild(star);
+    }
+    b.appendChild(head);
+
+    if (opt.d) {
+      const d = document.createElement("span");
+      d.className = "desc";
+      d.textContent = opt.d;
+      b.appendChild(d);
+    }
+    b.addEventListener("click", () => choose(i));
+    box.appendChild(b);
+  });
+
+  document.getElementById("qnote").value = saved.note || "";
+  document.getElementById("btn-prev").disabled = current === 0;
+  document.getElementById("btn-next").disabled = current === TOTAL - 1;
+  document.getElementById("btn-rec").disabled = !q.opts.some(o => o.rec);
+
+  paintIndex();
+  paintProgress();
+}
+
+function choose(i) {
+  const q = QUESTIONS[current];
+  const prev = answers[q.id] || {};
+  answers[q.id] = { opt: i, note: prev.note || "" };
+  save();
+  render();
+  const el = document.querySelector('#qopts .opt[data-idx="' + i + '"]');
+  if (el) el.focus({ preventScroll: true });
+}
+function noteChanged() {
+  const q = QUESTIONS[current];
+  const prev = answers[q.id] || {};
+  answers[q.id] = { opt: typeof prev.opt === "number" ? prev.opt : undefined, note: document.getElementById("qnote").value };
+  if (typeof answers[q.id].opt !== "number") delete answers[q.id].opt;
+  save();
+  paintIndex();
+  paintProgress();
+}
+function goTo(i) {
+  if (i < 0 || i >= TOTAL) return;
+  current = i;
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* ---------------------------------------------------------------- revisión */
+function mdSummary() {
+  const lines = [];
+  lines.push("# LocalMind — respuestas SRS (P1–P32)");
+  lines.push("");
+  lines.push("- Fecha: " + new Date().toLocaleString());
+  lines.push("- Respondidas: " + answeredCount() + "/" + TOTAL);
+  lines.push("");
+  SECTIONS.forEach(sec => {
+    lines.push("## " + sec.name);
+    sec.qs.forEach(q => {
+      const a = answers[q.id];
+      const txt = (a && typeof a.opt === "number") ? q.opts[a.opt].t : "_(sin responder)_";
+      lines.push("- **" + q.id + "** " + q.q + " → " + txt);
+      if (a && a.note && a.note.trim()) lines.push("  - nota: " + a.note.trim().replace(/\n+/g, " "));
+    });
+    lines.push("");
+  });
+  const pend = QUESTIONS.filter(q => !(answers[q.id] && typeof answers[q.id].opt === "number")).map(q => q.id);
+  lines.push(pend.length ? "Pendientes: " + pend.join(", ") : "Sin pendientes: las 32 decisiones están tomadas.");
+  lines.push("");
+  lines.push("Compacto: " + QUESTIONS.map(q => {
+    const a = answers[q.id];
+    return q.id + ":" + ((a && typeof a.opt === "number") ? String.fromCharCode(65 + a.opt) : "-");
+  }).join(" "));
+  return lines.join("\n");
+}
+
+function renderReview() {
+  const body = document.getElementById("rev-body");
+  body.innerHTML = "";
+  QUESTIONS.forEach(q => {
+    const a = answers[q.id];
+    const has = a && typeof a.opt === "number";
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td"); td1.textContent = q.id;
+    const td2 = document.createElement("td"); td2.textContent = q.q;
+    const td3 = document.createElement("td"); td3.className = has ? "ans" : "pend";
+    td3.textContent = has ? q.opts[a.opt].t : "sin responder";
+    const td4 = document.createElement("td"); td4.textContent = (a && a.note) ? a.note : "—";
+    tr.append(td1, td2, td3, td4);
+    body.appendChild(tr);
+  });
+  const pend = TOTAL - answeredCount();
+  document.getElementById("rev-summary").textContent = pend === 0
+    ? "Las " + TOTAL + " decisiones están tomadas. Copiá el resumen y pegalo en el chat."
+    : "Faltan " + pend + " respuestas. Podés volver y completarlas, o exportar lo que ya elegiste.";
+  document.getElementById("out-md").value = mdSummary();
+  document.getElementById("out-json").value = JSON.stringify({ v: 1, updated: new Date().toISOString(), answers }, null, 2);
+}
+function showReview() {
+  renderReview();
+  document.getElementById("review").hidden = false;
+  document.querySelector(".layout").style.display = "none";
+  document.getElementById("review").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function showQuestions() {
+  document.getElementById("review").hidden = true;
+  document.querySelector(".layout").style.display = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* -------------------------------------------------------------- utilidades */
+function setStatus(msg) {
+  const el = document.getElementById("copy-status");
+  el.textContent = msg;
+  if (msg) setTimeout(() => { el.textContent = ""; }, 2600);
+}
+async function copyText(text, okMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus(okMsg);
+  } catch (e) {
+    const ta = document.getElementById("out-md");
+    ta.removeAttribute("readonly");
+    ta.focus(); ta.select();
+    const done = document.execCommand && document.execCommand("copy");
+    ta.setAttribute("readonly", "readonly");
+    setStatus(done ? okMsg + " (vía selección)" : "No se pudo copiar: seleccioná el texto y usá Ctrl+C");
+  }
+}
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  setStatus("Descargado: " + name);
+}
+
+/* ------------------------------------------------------------------ eventos */
+document.getElementById("btn-prev").addEventListener("click", () => goTo(current - 1));
+document.getElementById("btn-next").addEventListener("click", () => goTo(current + 1));
+document.getElementById("btn-rec").addEventListener("click", () => {
+  const q = QUESTIONS[current];
+  const idx = q.opts.findIndex(o => o.rec);
+  if (idx >= 0) choose(idx);
+});
+document.getElementById("btn-review").addEventListener("click", showReview);
+document.getElementById("btn-back").addEventListener("click", showQuestions);
+document.getElementById("btn-copy").addEventListener("click", () => copyText(mdSummary(), "Resumen copiado al portapapeles"));
+document.getElementById("btn-md").addEventListener("click", () => download("localmind-srs-respuestas.md", mdSummary(), "text/markdown;charset=utf-8"));
+document.getElementById("btn-json").addEventListener("click", () => download("localmind-srs-respuestas.json", document.getElementById("out-json").value, "application/json;charset=utf-8"));
+let resetArmed = false;
+let resetTimer = null;
+document.getElementById("btn-reset").addEventListener("click", () => {
+  const btn = document.getElementById("btn-reset");
+  // Confirmación en página (dos pasos): evita diálogos nativos bloqueantes.
+  if (!resetArmed) {
+    resetArmed = true;
+    btn.textContent = "¿Seguro? Clic de nuevo";
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => {
+      resetArmed = false;
+      btn.textContent = "Reiniciar respuestas";
+    }, 4000);
+    return;
+  }
+  clearTimeout(resetTimer);
+  resetArmed = false;
+  btn.textContent = "Reiniciar respuestas";
+  answers = {};
+  save(); render(); renderReview();
+  setStatus("Respuestas reiniciadas");
+});
+document.getElementById("qnote").addEventListener("input", noteChanged);
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target && e.target.tagName) || "";
+  if (tag === "TEXTAREA" || tag === "INPUT") return;
+  if (document.getElementById("review").hidden === false) {
+    if (e.key === "Escape") showQuestions();
+    return;
+  }
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= 4 && QUESTIONS[current].opts[n - 1]) { choose(n - 1); e.preventDefault(); return; }
+  if (e.key === "ArrowRight") { goTo(current + 1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { goTo(current - 1); e.preventDefault(); }
+  else if (e.key === "r" || e.key === "R") {
+    const idx = QUESTIONS[current].opts.findIndex(o => o.rec);
+    if (idx >= 0) choose(idx);
+  }
+});
+
+/* -------------------------------------------------------------------- init */
+load();
+buildIndex();
+render();
+</script>
+</body>
+</html>

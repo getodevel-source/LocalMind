@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-rust/Cargo.toml
+
+      - name: Node 20+
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bench harness self-test (offline)
+        run: node tests/bench.mjs --self-test
+
+      - name: UI render harness (offline)
+        run: node tests/ui-render.mjs
+
+      - name: Syntax gate for all Node harnesses
+        shell: pwsh
+        run: Get-ChildItem tests/*.mjs | ForEach-Object { node --check $_.FullName }
+
+      # NOTE: tests/smoke.mjs and tests/e2e.mjs are intentionally NOT run here.
+      # They need the live app on 127.0.0.1:17860 and exit non-zero without it.

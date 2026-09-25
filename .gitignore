@@ -11,3 +11,15 @@ models/
 
 # Third-party binaries (llama.cpp build)
 bin/
+
+# Portable packaging output
+dist/
+
+# Backup executables
+*.bak-*
+
+# HIP/ROCm third-party binaries (llama.cpp build variant)
+bin-hip/
+
+# Agent tooling scratch
+.atl/
