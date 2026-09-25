@@ -1,10 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agents;
+mod auth;
 mod config;
+mod filelog;
+mod launcher;
+mod meta;
+mod models;
+mod notify;
 mod process;
 mod profiles;
 mod server;
-
+mod translate;
+mod usage;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -14,7 +14,9 @@ ureq = { version = "2.10", features = ["json"] }
 toml = "0.8"
 image = { version = "0.25", default-features = false, features = ["ico", "png"] }
 rfd = "0.17.2"
-
+# sha256 de verificación de descargas (P6/P9): una sola crate pequeña, sin
+# runtime extra; la alternativa sería ~300 líneas de SHA-256 propio.
+sha2 = "0.10"
 [profile.release]
 opt-level = 3
 lto = true

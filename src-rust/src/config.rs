@@ -145,6 +145,121 @@ impl Default for MmprojConfig {
         }
     }
 }
+/// Id de perfil por defecto: siempre uno real de `built_in_profiles()` (D-1:
+/// el fantasma `turbo` nunca debe asomar en el estado ni en `last.profile`).
+pub const DEFAULT_PROFILE_ID: &str = "velocidad";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationsConfig {
+    /// Interruptor general de avisos de escritorio (P20).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Avisar cuando el motor pasa la puerta de aceptación.
+    #[serde(default = "default_true")]
+    pub on_ready: bool,
+    /// Avisar cuando el motor falla (puerta o crash).
+    #[serde(default = "default_true")]
+    pub on_failure: bool,
+    /// Avisar cuando el auto-stop apaga el motor.
+    #[serde(default = "default_true")]
+    pub on_autostop: bool,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            on_ready: true,
+            on_failure: true,
+            on_autostop: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationConfig {
+    /// Temperatura de muestreo (0..=2). Base para exponer en la API (P16).
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
+    /// Top-p (0..=1).
+    #[serde(default = "default_top_p")]
+    pub top_p: f64,
+    /// Máximo de tokens a generar (1..=32768).
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: usize,
+    /// Semilla (>= 0).
+    #[serde(default)]
+    pub seed: i64,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            temperature: 0.7,
+            top_p: 1.0,
+            max_tokens: 2048,
+            seed: 0,
+        }
+    }
+}
+
+/// Validadores de la API de ajustes (`GET/POST /api/config`, `POST
+/// `/api/profiles/save|delete`). Sin pánicos: la UI envía parciales y el
+/// servidor responde `400 {"error":"<mensaje español nombrando el campo>"}`.
+/// (Antes `allow(dead_code)`: ahora los consume `server.rs`.)
+pub fn gen_temperature_ok(v: f64) -> bool {
+    v.is_finite() && (0.0..=2.0).contains(&v)
+}
+pub fn gen_top_p_ok(v: f64) -> bool {
+    v.is_finite() && (0.0..=1.0).contains(&v)
+}
+pub fn gen_max_tokens_ok(v: usize) -> bool {
+    (1..=32768).contains(&v)
+}
+pub fn gen_seed_ok(v: i64) -> bool {
+    v >= 0
+}
+/// `idle_timeout_secs`: 0 = desactivado; si no, 60 s..7 días.
+pub fn engine_idle_timeout_ok(v: u64) -> bool {
+    v == 0 || (60..=604800).contains(&v)
+}
+/// `threads`: None = auto (núcleos físicos); si se fija, 1..=256.
+pub fn engine_threads_ok(v: usize) -> bool {
+    (1..=256).contains(&v)
+}
+/// Prioridad de hilos del motor (`--prio`): la UI ofrece `2` (alta) y `0`.
+pub fn engine_priority_ok(v: &str) -> bool {
+    v == "2" || v == "0"
+}
+/// Id de perfil: `^[a-z0-9_-]{1,32}$` (lo que la UI usa como clave).
+pub fn profile_id_ok(id: &str) -> bool {
+    if id.is_empty() || id.len() > 32 {
+        return false;
+    }
+    id.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+}
+/// Contexto de perfil: 1024..=1048576 en pasos de 1024.
+pub fn profile_context_ok(v: usize) -> bool {
+    (1024..=1048576).contains(&v) && v % 1024 == 0
+}
+/// `cache_ram` (MB): 0..=65536.
+pub fn profile_cache_ram_ok(v: usize) -> bool {
+    v <= 65536
+}
+/// Una flag extra: ≤64 chars, charset `[A-Za-z0-9 _.=:/-]`.
+pub fn profile_flag_ok(f: &str) -> bool {
+    if f.is_empty() || f.len() > 64 {
+        return false;
+    }
+    f.bytes().all(|b| {
+        b.is_ascii_alphanumeric() || matches!(b, b' ' | b'_' | b'.' | b'=' | b':' | b'/' | b'-')
+    })
+}
+/// La lista completa de flags: ≤8 entradas.
+pub fn profile_flags_ok(flags: &[String]) -> bool {
+    flags.len() <= 8 && flags.iter().all(|f| profile_flag_ok(f))
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LastSettings {
@@ -167,6 +282,12 @@ pub struct AppConfig {
     pub profiles: Vec<HardwareProfile>,
     #[serde(default)]
     pub last: LastSettings,
+    /// Avisos de escritorio (P20). `default` para TOMLs viejos sin sección.
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+    /// Parámetros de generación (P16). La puerta usa temperature 0 fijo.
+    #[serde(default)]
+    pub generation: GenerationConfig,
 }
 
 impl Default for AppConfig {
@@ -176,6 +297,8 @@ impl Default for AppConfig {
             mmproj: MmprojConfig::default(),
             profiles: built_in_profiles(),
             last: LastSettings::default(),
+            notifications: NotificationsConfig::default(),
+            generation: GenerationConfig::default(),
         }
     }
 }
@@ -229,6 +352,15 @@ fn default_spec_n() -> usize {
 fn default_spec_p() -> f32 {
     0.1
 }
+fn default_temperature() -> f64 {
+    0.7
+}
+fn default_top_p() -> f64 {
+    1.0
+}
+fn default_max_tokens() -> usize {
+    2048
+}
 fn default_aliases() -> Vec<String> {
     vec![
         "localmind".to_string(),
@@ -274,6 +406,12 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             name: "Máximo contexto · 262K (límite físico del modelo)".to_string(),
             description: "Alcanza los 262,144 tokens que el modelo soporta nativamente (~200k palabras: bases de código masivas). Requiere memoria RAM compartida considerable; ideal para cargas analíticas profundas.".to_string(),
             context: 262144,
+            // Barrido --cache-ram medido 2026-09-25 (bench.mjs, 262k/p512/m256,
+            // Qwen3.8-27B IQ4_XS en RX 6800 XT 16 GB; gen_tps de /api/metrics):
+            //   0 → 14.10 t/s · 4096 → 14.18 t/s · 6144 → 14.16 t/s · 8192 → 14.20 t/s
+            // Sin -kvu (cache_ram 6144) → 11.48 t/s: -kvu SÍ ayuda, se conserva.
+            // Conclusión: --cache-ram no mueve el cuello a 262K (plano ±0.1 t/s);
+            // se mantiene 6144. No tocar -ub/-b/hilos/spec en este perfil (PSU).
             cache_ram: 6144,
             extra_flags: vec!["-kvu".to_string()],
         },
@@ -303,6 +441,17 @@ impl ConfigStore {
             let last = cfg.last.clone();
             cfg = AppConfig::default();
             cfg.last = last;
+        }
+        // D-1: si no hay perfiles, reponer los integrados; si `last.profile`
+        // apunta a un id inexistente (p. ej. `turbo` heredado), caer al default
+        // real para que el estado nunca exponga un perfil fantasma.
+        if cfg.profiles.is_empty() {
+            cfg.profiles = built_in_profiles();
+        }
+        let known = |id: &str| cfg.profiles.iter().any(|p| p.id == id);
+        if cfg.last.profile.as_deref().is_some_and(|id| !known(id)) {
+            cfg.last.profile = Some(DEFAULT_PROFILE_ID.to_string());
+            cfg.last.context = None;
         }
         {
             let migrated = raw.is_some() && cfg.profiles.iter().all(|p| !["turbo","balanced","deep","ultra"].contains(&p.id.as_str()));
@@ -350,4 +499,105 @@ impl ConfigStore {
         std::fs::write(&self.path, text).map_err(|e| e.to_string())
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validador_id_perfil() {
+        assert!(profile_id_ok("perfil_1"));
+        assert!(profile_id_ok("a-b-c_123"));
+        assert!(profile_id_ok("velocidad"));
+        assert!(profile_id_ok("x"));
+        // Longitud máxima 32 chars
+        let exact32 = "a".repeat(32);
+        assert!(profile_id_ok(&exact32));
+        let too_long = "a".repeat(33);
+        assert!(!profile_id_ok(&too_long));
+        // Caracteres inválidos
+        assert!(!profile_id_ok(""));
+        assert!(!profile_id_ok("Perfil")); // mayúsculas
+        assert!(!profile_id_ok("perfil con espacio"));
+        assert!(!profile_id_ok("perfil/sub"));
+        assert!(!profile_id_ok("perfil.punto"));
+        assert!(!profile_id_ok("perfil;cmd"));
+    }
+
+    #[test]
+    fn validador_contexto_y_cache_ram() {
+        assert!(profile_context_ok(1024));
+        assert!(profile_context_ok(32768));
+        assert!(profile_context_ok(1048576));
+        assert!(!profile_context_ok(0));
+        assert!(!profile_context_ok(1023));
+        assert!(!profile_context_ok(1025)); // no es múltiplo de 1024
+        assert!(!profile_context_ok(1048576 + 1024)); // fuera de rango
+
+        assert!(profile_cache_ram_ok(0));
+        assert!(profile_cache_ram_ok(4096));
+        assert!(profile_cache_ram_ok(65536));
+        assert!(!profile_cache_ram_ok(65537));
+    }
+
+    #[test]
+    fn validador_extra_flags() {
+        let ok_flags = vec!["-kvu".to_string(), "--flash-attn".to_string(), "foo=bar:1/2".to_string()];
+        assert!(profile_flags_ok(&ok_flags));
+        assert!(profile_flags_ok(&[]));
+        // Máximo 8 flags
+        let nine = (0..9).map(|i| format!("-f{}", i)).collect::<Vec<_>>();
+        assert!(!profile_flags_ok(&nine));
+        // Flag vacía o >64 chars
+        assert!(!profile_flags_ok(&["".to_string()]));
+        let long_flag = "a".repeat(65);
+        assert!(!profile_flags_ok(&[long_flag]));
+        // Caracteres prohibidos (inyección cmd / shell)
+        assert!(!profile_flags_ok(&["-flag & calc.exe".to_string()]));
+        assert!(!profile_flags_ok(&["-flag; reboot".to_string()]));
+        assert!(!profile_flags_ok(&["-flag | echo".to_string()]));
+        assert!(!profile_flags_ok(&["-flag\"quote".to_string()]));
+    }
+
+    #[test]
+    fn validador_motor_y_generacion() {
+        assert!(engine_idle_timeout_ok(0));
+        assert!(engine_idle_timeout_ok(60));
+        assert!(engine_idle_timeout_ok(1500));
+        assert!(engine_idle_timeout_ok(604800));
+        assert!(!engine_idle_timeout_ok(59)); // <60 excepto 0
+        assert!(!engine_idle_timeout_ok(604801));
+
+        assert!(engine_threads_ok(1));
+        assert!(engine_threads_ok(6));
+        assert!(engine_threads_ok(256));
+        assert!(!engine_threads_ok(0));
+        assert!(!engine_threads_ok(257));
+
+        assert!(engine_priority_ok("2"));
+        assert!(engine_priority_ok("0"));
+        assert!(!engine_priority_ok("1"));
+        assert!(!engine_priority_ok("high"));
+
+        assert!(gen_temperature_ok(0.0));
+        assert!(gen_temperature_ok(0.7));
+        assert!(gen_temperature_ok(2.0));
+        assert!(!gen_temperature_ok(-0.1));
+        assert!(!gen_temperature_ok(2.1));
+        assert!(!gen_temperature_ok(f64::NAN));
+
+        assert!(gen_top_p_ok(0.0));
+        assert!(gen_top_p_ok(1.0));
+        assert!(!gen_top_p_ok(1.01));
+
+        assert!(gen_max_tokens_ok(1));
+        assert!(gen_max_tokens_ok(32768));
+        assert!(!gen_max_tokens_ok(0));
+        assert!(!gen_max_tokens_ok(32769));
+
+        assert!(gen_seed_ok(0));
+        assert!(gen_seed_ok(42));
+        assert!(!gen_seed_ok(-1));
+    }
 }

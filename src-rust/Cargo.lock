@@ -1238,6 +1238,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "tao",
  "tiny_http",
  "toml",
