@@ -1,0 +1,527 @@
+{
+  "ts": "2026-09-28T12:46:55.441Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 6800,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1488,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 24.157506945283245,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+        "--provider",
+        "localmind",
+        "--model",
+        "localmind/localmind",
+        "--thinking",
+        "low",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\pi"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-pi-reaction-E4adCP",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 59263.1877,
+      "first_byte_ms": 59247.5945,
+      "stdout_bytes": 45,
+      "stderr_bytes": 0,
+      "stdout_head": "Perfecto. Aquí estoy cuando necesites algo.\n",
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 119,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 35086,
+          "prompt_tokens": 4894,
+          "stream": true,
+          "ts": 1790599401
+        },
+        {
+          "completion_tokens": 74,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 7774,
+          "prompt_tokens": 5095,
+          "stream": true,
+          "ts": 1790599409
+        },
+        {
+          "completion_tokens": 114,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 10546,
+          "prompt_tokens": 5183,
+          "stream": true,
+          "ts": 1790599419
+        },
+        {
+          "completion_tokens": 53,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5017,
+          "prompt_tokens": 5309,
+          "stream": true,
+          "ts": 1790599424
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4894,
+          "completion_tokens": 119,
+          "ms": 35086,
+          "leg_tps": 3.391666191643391,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5095,
+          "completion_tokens": 74,
+          "ms": 7774,
+          "leg_tps": 9.518909184461023,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5183,
+          "completion_tokens": 114,
+          "ms": 10546,
+          "leg_tps": 10.809785700739617,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5309,
+          "completion_tokens": 53,
+          "ms": 5017,
+          "leg_tps": 10.564082120789315,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 20481,
+      "completion_tokens": 360,
+      "gateway_ms": 58423,
+      "effective_tps": 6.161956763603375
+    },
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+        "--provider",
+        "localmind",
+        "--model",
+        "localmind/localmind",
+        "--thinking",
+        "low",
+        "-p",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\pi"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-pi-tput1-xSWn5d",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 190545.5242,
+      "first_byte_ms": 190534.1206,
+      "stdout_bytes": 129,
+      "stderr_bytes": 0,
+      "stdout_head": "Correcto, ya está así. El archivo `numeros.txt` tiene solo los números del 1 al 300, uno por línea, sin texto adicional. ✅\n",
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 91,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 14094,
+          "prompt_tokens": 4896,
+          "stream": true,
+          "ts": 1790599439
+        },
+        {
+          "completion_tokens": 145,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 13374,
+          "prompt_tokens": 4999,
+          "stream": true,
+          "ts": 1790599452
+        },
+        {
+          "completion_tokens": 215,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 18524,
+          "prompt_tokens": 5157,
+          "stream": true,
+          "ts": 1790599471
+        },
+        {
+          "completion_tokens": 72,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6182,
+          "prompt_tokens": 5420,
+          "stream": true,
+          "ts": 1790599477
+        },
+        {
+          "completion_tokens": 122,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 11411,
+          "prompt_tokens": 5504,
+          "stream": true,
+          "ts": 1790599488
+        },
+        {
+          "completion_tokens": 170,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 13829,
+          "prompt_tokens": 5638,
+          "stream": true,
+          "ts": 1790599502
+        },
+        {
+          "completion_tokens": 60,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5019,
+          "prompt_tokens": 5820,
+          "stream": true,
+          "ts": 1790599507
+        },
+        {
+          "completion_tokens": 79,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6332,
+          "prompt_tokens": 5895,
+          "stream": true,
+          "ts": 1790599514
+        },
+        {
+          "completion_tokens": 92,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 20132,
+          "prompt_tokens": 7080,
+          "stream": true,
+          "ts": 1790599534
+        },
+        {
+          "completion_tokens": 60,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5318,
+          "prompt_tokens": 7190,
+          "stream": true,
+          "ts": 1790599539
+        },
+        {
+          "completion_tokens": 324,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 28524,
+          "prompt_tokens": 7262,
+          "stream": true,
+          "ts": 1790599568
+        },
+        {
+          "completion_tokens": 90,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 7662,
+          "prompt_tokens": 7598,
+          "stream": true,
+          "ts": 1790599575
+        },
+        {
+          "completion_tokens": 105,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 9281,
+          "prompt_tokens": 7702,
+          "stream": true,
+          "ts": 1790599585
+        },
+        {
+          "completion_tokens": 133,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 11233,
+          "prompt_tokens": 7819,
+          "stream": true,
+          "ts": 1790599596
+        },
+        {
+          "completion_tokens": 117,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 9118,
+          "prompt_tokens": 7964,
+          "stream": true,
+          "ts": 1790599605
+        },
+        {
+          "completion_tokens": 113,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 9942,
+          "prompt_tokens": 8095,
+          "stream": true,
+          "ts": 1790599615
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4896,
+          "completion_tokens": 91,
+          "ms": 14094,
+          "leg_tps": 6.456648219100327,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4999,
+          "completion_tokens": 145,
+          "ms": 13374,
+          "leg_tps": 10.841932107073426,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5157,
+          "completion_tokens": 215,
+          "ms": 18524,
+          "leg_tps": 11.60656445692075,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5420,
+          "completion_tokens": 72,
+          "ms": 6182,
+          "leg_tps": 11.646716273050792,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5504,
+          "completion_tokens": 122,
+          "ms": 11411,
+          "leg_tps": 10.691438086057314,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5638,
+          "completion_tokens": 170,
+          "ms": 13829,
+          "leg_tps": 12.293007448116278,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5820,
+          "completion_tokens": 60,
+          "ms": 5019,
+          "leg_tps": 11.95457262402869,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5895,
+          "completion_tokens": 79,
+          "ms": 6332,
+          "leg_tps": 12.476310802274163,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7080,
+          "completion_tokens": 92,
+          "ms": 20132,
+          "leg_tps": 4.569839062189549,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7190,
+          "completion_tokens": 60,
+          "ms": 5318,
+          "leg_tps": 11.282437006393382,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7262,
+          "completion_tokens": 324,
+          "ms": 28524,
+          "leg_tps": 11.358855700462767,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7598,
+          "completion_tokens": 90,
+          "ms": 7662,
+          "leg_tps": 11.746280344557556,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7702,
+          "completion_tokens": 105,
+          "ms": 9281,
+          "leg_tps": 11.313436052149552,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7819,
+          "completion_tokens": 133,
+          "ms": 11233,
+          "leg_tps": 11.840113949968842,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7964,
+          "completion_tokens": 117,
+          "ms": 9118,
+          "leg_tps": 12.831761351173503,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 8095,
+          "completion_tokens": 113,
+          "ms": 9942,
+          "leg_tps": 11.36592234962784,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 104039,
+      "completion_tokens": 1988,
+      "gateway_ms": 189975,
+      "effective_tps": 10.464534807211475,
+      "engine_gen_tps": 12.2791,
+      "engine_metrics": {
+        "gen_tps": 12.2791,
+        "prompt_tokens_cached": 125556,
+        "prompt_tokens_total": 14986,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 2270,
+        "spec_draft_tokens": 2833,
+        "tokens_predicted": 3690
+      }
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "reaction_first_byte_ms": 59247.5945,
+      "reaction_wall_ms": 59263.1877,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        190545.5242
+      ],
+      "throughput_first_byte_ms": [
+        190534.1206
+      ],
+      "throughput_prompt_tokens": [
+        104039
+      ],
+      "throughput_completion_tokens": [
+        1988
+      ],
+      "throughput_gateway_ms": [
+        189975
+      ],
+      "throughput_effective_tps": [
+        10.464534807211475
+      ],
+      "throughput_engine_gen_tps": [
+        12.2791
+      ],
+      "throughput_requests": [
+        16
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    }
+  ]
+}

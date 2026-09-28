@@ -1,0 +1,231 @@
+{
+  "ts": "2026-09-28T12:58:39.712Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 6800,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1477,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 24.157506945283245,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-reaction-qzn8xs",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 125728.1319,
+      "first_byte_ms": 125682.9314,
+      "stdout_bytes": 3,
+      "stderr_bytes": 141,
+      "stdout_head": "OK\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking me to reply with exactly \"OK\". This is a simple request. No tools are needed, and no skills apply either.\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6858,
+          "prompt_tokens": 166,
+          "stream": true,
+          "ts": 1790599998
+        },
+        {
+          "completion_tokens": 34,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 122525,
+          "prompt_tokens": 9701,
+          "stream": true,
+          "ts": 1790600114
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 166,
+          "completion_tokens": 64,
+          "ms": 6858,
+          "leg_tps": 9.332166812481773,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9701,
+          "completion_tokens": 34,
+          "ms": 122525,
+          "leg_tps": 0.27749438890022443,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9867,
+      "completion_tokens": 98,
+      "gateway_ms": 129383,
+      "effective_tps": 0.7574410857686095
+    },
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-tput1-9ZBPPw",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 205477.1188,
+      "first_byte_ms": 122477.6095,
+      "stdout_bytes": 1092,
+      "stderr_bytes": 655,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking to write the numbers from 1 to 300, one per line, with no additional text. This is a simple task—no skill is needed. I just need to write the numbers from 1 to 300, one per line, with no additional text.\n\nThe user says \"Escribe los números del 1 al 300, uno por línea, sin texto adicional\"—\"Write the numbers from 1 to 300, one per line, without additional text.\"\n\nSo, I should respond with only the numbers 1–300, one per line, with no other text at all. I shouldn't add a preamble like \"Aquí tienes:\". The response should be exactly the numbers themselves.\n\nLet me generate them: from 1 to 300, one per line.\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5305,
+          "prompt_tokens": 181,
+          "stream": true,
+          "ts": 1790600121
+        },
+        {
+          "completion_tokens": 1272,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 203636,
+          "prompt_tokens": 9723,
+          "stream": true,
+          "ts": 1790600319
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 181,
+          "completion_tokens": 64,
+          "ms": 5305,
+          "leg_tps": 12.064090480678606,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9723,
+          "completion_tokens": 1272,
+          "ms": 203636,
+          "leg_tps": 6.246439725785224,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9904,
+      "completion_tokens": 1336,
+      "gateway_ms": 208941,
+      "effective_tps": 6.394149544608286,
+      "engine_gen_tps": 14.9326,
+      "engine_metrics": {
+        "gen_tps": 14.9326,
+        "prompt_tokens_cached": 138550,
+        "prompt_tokens_total": 47569,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 4404,
+        "spec_draft_tokens": 5257,
+        "tokens_predicted": 7038
+      }
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "reaction_first_byte_ms": 125682.9314,
+      "reaction_wall_ms": 125728.1319,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        205477.1188
+      ],
+      "throughput_first_byte_ms": [
+        122477.6095
+      ],
+      "throughput_prompt_tokens": [
+        9904
+      ],
+      "throughput_completion_tokens": [
+        1336
+      ],
+      "throughput_gateway_ms": [
+        208941
+      ],
+      "throughput_effective_tps": [
+        6.394149544608286
+      ],
+      "throughput_engine_gen_tps": [
+        14.9326
+      ],
+      "throughput_requests": [
+        2
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    }
+  ]
+}

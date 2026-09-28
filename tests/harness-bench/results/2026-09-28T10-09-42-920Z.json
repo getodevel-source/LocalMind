@@ -1,0 +1,217 @@
+{
+  "ts": "2026-09-28T10:09:42.913Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "multi_doc",
+  "context_requested": 65536,
+  "context_live": 65536,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 13672,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 65536,
+    "profile": "multi_doc",
+    "port": 8080,
+    "idle_remaining_secs": 1466,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 31.959092361776925,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "omp",
+      "version": "omp/18.4.1",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "--thinking",
+        "low",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\omp"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-omp-reaction-kFQDZz",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 41562.3814,
+      "first_byte_ms": 626.1851,
+      "stdout_bytes": 3,
+      "stderr_bytes": 11,
+      "stdout_head": "OK\n",
+      "stderr_head": "Working...\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 63,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 40784,
+          "prompt_tokens": 7954,
+          "stream": true,
+          "ts": 1790590141
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7954,
+          "completion_tokens": 63,
+          "ms": 40784,
+          "leg_tps": 1.5447234209493919,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 7954,
+      "completion_tokens": 63,
+      "gateway_ms": 40784,
+      "effective_tps": 1.5447234209493919
+    },
+    {
+      "harness": "omp",
+      "version": "omp/18.4.1",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "--thinking",
+        "low",
+        "-p",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\omp"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-omp-tput1-f6vmHH",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 41379.0944,
+      "first_byte_ms": 506.7079,
+      "stdout_bytes": 1092,
+      "stderr_bytes": 11,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\n",
+      "stderr_head": "Working...\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 79,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 3218,
+          "prompt_tokens": 7969,
+          "stream": true,
+          "ts": 1790590145
+        },
+        {
+          "completion_tokens": 1157,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 37355,
+          "prompt_tokens": 9164,
+          "stream": true,
+          "ts": 1790590182
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7969,
+          "completion_tokens": 79,
+          "ms": 3218,
+          "leg_tps": 24.54940957116221,
+          "stream": true
+        },
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9164,
+          "completion_tokens": 1157,
+          "ms": 37355,
+          "leg_tps": 30.97309597108821,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 17133,
+      "completion_tokens": 1236,
+      "gateway_ms": 40573,
+      "effective_tps": 30.463608803884355,
+      "engine_gen_tps": 37.6763,
+      "engine_metrics": {
+        "gen_tps": 37.6763,
+        "prompt_tokens_cached": 15918,
+        "prompt_tokens_total": 9250,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 976,
+        "spec_draft_tokens": 1047,
+        "tokens_predicted": 1501
+      }
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "omp",
+      "version": "omp/18.4.1",
+      "reaction_first_byte_ms": 626.1851,
+      "reaction_wall_ms": 41562.3814,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        41379.0944
+      ],
+      "throughput_first_byte_ms": [
+        506.7079
+      ],
+      "throughput_prompt_tokens": [
+        17133
+      ],
+      "throughput_completion_tokens": [
+        1236
+      ],
+      "throughput_gateway_ms": [
+        40573
+      ],
+      "throughput_effective_tps": [
+        30.463608803884355
+      ],
+      "throughput_engine_gen_tps": [
+        37.6763
+      ],
+      "throughput_requests": [
+        2
+      ],
+      "exceeds_30tps": [
+        true
+      ],
+      "ok": true
+    }
+  ]
+}

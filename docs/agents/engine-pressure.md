@@ -124,18 +124,7 @@ Con 6 físicos y 16 GB VRAM, y los números de hoy:
 
 ## 7. ¿Qué hago para que no se trabe el escritorio a 128K? (respuesta honesta)
 
-La perilla que sí importa es **`--no-mmap` en el perfil `libros`** (ya aplicada
-como default): libera ~5 GB de RAM (libre 0,7→6,4 GB) porque los 13 GB del
-modelo dejan de vivir duplicados en el page-cache; el decode no se mueve
-(16,04→16,18 t/s) y el commit apenas baja (88,2→87,6 %) porque el modelo pesa
-lo que pesa. `cache_ram` no mueve nada (±0,2 t/s, commit idéntico) y `threads`
-4 no ahorra nada medible en idle (la CPU ya estaba en 1-5 % sin carga) aunque
-cuesta ~0 % en decode: útil solo como headroom de prefill, no como cura.
-Para el día a día en esta caja de 15,5 GB con un modelo de 13 GB: trabajo
-normal en **32K `velocidad`** (todo en VRAM, puerta ~34 t/s); 128K solo para
-sostener documentos largos aceptando commit ~88 % y ~16 t/s; 262K solo
-paso siguiente no es otro flag sino cerrar apps o bajar a 64K/32K: la caja no
-da para 13 GB de pesos + KV + escritorio con holgura.
+(Sección movida: ver §10 tras la corrección de seguridad — el contexto de trabajo es siempre 128K-262K.)
 
 ## 8. Cómo llega el fix al usuario (migración `profiles_version`)
 
@@ -166,3 +155,83 @@ commit igual o mejor. Por eso la v2 se supera: `libros` lleva `--load-mode
 none` (grafía no deprecada; `--no-mmap` hacía lo mismo pero está deprecado en
 el build 10683). Tests: `mig_v1_nommap_upgraded_to_canonical`,
 `mig_v2_empty_upgraded_to_canonical`, proofs v0/v1/v2 en scratch APPDATA.
+
+## 10. Seguridad de energía (LM-NF-3, 2026-09-28: dos apagones duros)
+
+Análisis del incidente: la PC se apagó de golpe dos veces, sin BSOD =
+firma de protección por sobrecorriente de la PSU, no crash de software.
+Sospechoso dominante: el transitorio de arranque del motor (cada
+`POST /api/start` lee ~13 GB a VRAM de una vez) repetido en decenas de
+ciclos start/stop seguidos entre campañas y ventanas de medición; el cambio
+a `--load-mode none` agravaba cada arranque (sin page-cache = relectura
+total). Sospechoso secundario: GPU sostenida ~99,6 % durante 40-60 min por
+campaña. El contexto de trabajo es siempre 128K-262K: la seguridad NO
+restringe contexto, solo picos y frecuencia.
+
+Guardarraíles implementados (`config.rs`/`process.rs`, defaults):
+- `[engine] start_cooldown_secs = 120`: un arranque antes de 120 s se rechaza
+  con los segundos restantes en español (y se loguea).
+- `[engine] max_starts_per_hour = 4`: el 5º arranque en hora rodante se
+  rechaza (y se loguea). Historial acotado a 64 entradas (D-8).
+- `[engine] idle_timeout_secs = 5400` (90 min, antes 1500): el motor
+  residente evita ciclos stop/start entre sesiones de agentes; para liberar
+  VRAM usar Stop manual.
+- `libros`/`max_contexto` vuelven a load mode default (mmap, arranques
+  baratos); `--load-mode none` queda opt-in por perfil (migración v4, misma
+  regla segura: fotos v0/v1/v2/v3 reconocidas, customs intactos).
+- Candado PSU en el arranque: `psu_unsafe_flag` rechaza `-ub`/`--ubatch-size`
+  > 512, `-b`/`--batch-size` > 1024 y cualquier `--spec-*` en perfiles o
+  engine global, nombrando la flag en español (ni el dueño ni un worker
+  futuro pueden aflojar los fusibles por config).
+- Watchdog sin reintentos: si el hijo muere (incluidos los primeros ~90 s),
+  `error` + log y NADA más; reintentar = Stop+Start manual (con cooldown).
+- `[engine] power_safe = true`: guardarraíl + candado + sin reintentos +
+  aviso en log al arrancar 262K; ningún perfil se rechaza.
+
+Recomendación de hardware (el fix real del pico): bajar el power limit de la
+GPU −10/−15 % en Radeon Software (costo típico <5 % t/s) y, a medio plazo,
+una PSU de mayor margen. El software solo puede espaciar y abaratar picos,
+no eliminar el transitorio de 13 GB.
+
+## 11. A/B `-kvu` en `libros` @128K: NO gana (2026-09-28, scratch APPDATA)
+
+Mismo prompt de ~12k (15802 tok reales vía gateway), mismo contexto 131072,
+misma máquina quieta, cargas separadas por ≥3 min idle + cooldown 120 s:
+
+| variante | gate t/s | prefill 15802 tok (motor) | prefill gateway | decode | commit med | free med |
+|---|---|---|---|---|---|---|
+| A 128K sin `-kvu` (`kv_unified='false'`) | 24.77 | 94020 ms (168.07 t/s) | 145.23 t/s | — | 76.6 % | 554 MB |
+| B 128K con `-kvu` (`kv_unified='true'`) | 24.34 | 102145 ms (154.70 t/s) | 134.49 t/s | — | 79.5 % | 1271 MB |
+
+Veredicto: **`-kvu` NO se aplica a `libros`**. A igualdad de prompt es −8 %
+en prefill del motor y −7 % vía gateway, con commit PEOR (+3 puntos); el
+decode/gate planos (±2 %). La ventaja 2× vista en la campaña (262K con
+`-kvu` vs 128K sin él) no replica a igualdad de contexto: era efecto del
+contextouchs y del prompt, no del flag. Sin cambio de código (la migración
+sigue en v4 con `libros` en `[]`); sin inestabilidad en ninguna carga.
+Nota metodológica: el primer intento de B corrió sin el flag (el TOML
+scratch había sido reescrito por la migración v4 al arrancar: `["-kvu"]` →
+`[]` por regla segura); se repitió con hot-import verificado (`["-kvu"]` +
+`kv_unified='true'` en el log). El guardarraíl de cooldown funcionó en vivo
+(un `start` a los ~70 s fue rechazado con "esperá 49 s").
+
+## 12. Puerta con calentamiento + mediana de 3 (bimodalidad 128K)
+
+Evidencia (campaña): mismo argv 128K, dos cargas seguidas dan prompt-eval
+34,8 vs 71,9 t/s y eval 17,0 vs 27,1 t/s; gates 13-15 vs 24-25 (30,5 en 262K,
+32-34 en 32K). La carga lenta arrancó ~25 s después de un stop previo; la
+rápida tras un reposo largo. La primera medida en frío no representa el
+estado estacionario.
+
+Comportamiento nuevo (`process.rs`, `config.rs`): tras `/health` OK y antes
+de la medida real, 1 completion desechable (16 tokens, mismo path de chat);
+luego 3 muestras iguales (prompt/max_tokens idénticos) y `decode_tps` =
+mediana (con 2 muestras por un fallo, la menor: no inflar). El veredicto
+sigue en la mediana (≥20 tokens, ≥3 t/s: la guarda contra CPU intacta).
+`decode_tps_samples: [f64; 3]` expone la dispersión; `engine_slow: bool` es
+true bajo `[engine] slow_gate_tps = 20` (default) con mensaje UI
+`El motor cargó lento (N t/s); puede mejorarse reiniciándolo una vez`.
+Sin reintentos automáticos (el guardarraíl LM-NF-3 lo prohíbe) y sin
+re-calentamiento con el motor en `running` (la puerta solo corre en
+`starting`, una vez por arranque). Cooldown, tope horario, candado PSU y
+watchdog intactos.

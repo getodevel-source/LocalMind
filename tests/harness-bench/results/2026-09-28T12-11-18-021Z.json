@@ -1,0 +1,231 @@
+{
+  "ts": "2026-09-28T12:11:18.013Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "max_contexto",
+  "context_requested": 262144,
+  "context_live": 262144,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 13516,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 262144,
+    "profile": "max_contexto",
+    "port": 8080,
+    "idle_remaining_secs": 1496,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 30.543677458766034,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-reaction-3bWfBj",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 103962.3052,
+      "first_byte_ms": 102617.3713,
+      "stdout_bytes": 3,
+      "stderr_bytes": 283,
+      "stdout_head": "OK\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking to respond exactly with \"OK\". This is a simple request. The Spanish phrase \"Responde exactamente: OK\" means \"Respond exactly: OK\".\n\nThis is a trivial single-turn task. There's no need to use any tools or skills. I should respond with exactly \"OK\".\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 3322,
+          "prompt_tokens": 166,
+          "stream": true,
+          "ts": 1790597242
+        },
+        {
+          "completion_tokens": 67,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 100911,
+          "prompt_tokens": 9707,
+          "stream": true,
+          "ts": 1790597340
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 166,
+          "completion_tokens": 64,
+          "ms": 3322,
+          "leg_tps": 19.26550270921132,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9707,
+          "completion_tokens": 67,
+          "ms": 100911,
+          "leg_tps": 0.6639514027212098,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9873,
+      "completion_tokens": 131,
+      "gateway_ms": 104233,
+      "effective_tps": 1.256799669970163
+    },
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-tput1-0OhpEY",
+      "ok": true,
+      "timedOut": false,
+      "exit_code": 0,
+      "wall_ms": 137459.7247,
+      "first_byte_ms": 101914.7535,
+      "stdout_bytes": 1092,
+      "stderr_bytes": 538,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking in Spanish: \"Escribe los números del 1 al 300, uno por línea, sin texto adicional.\" In other words, \"Write the numbers from 1 to 300, one per line, without any additional text.\"\n\nThis is a simple task: output the numbers from 1 to 300, one per line, with no additional text. I should just write them out directly. The instruction \"sin texto adicional\" (no additional text) means my response should be just the numbers, nothing else.\n\nLet me write it out. I'll just output 1 through 300, one per line.\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 4398,
+          "prompt_tokens": 181,
+          "stream": true,
+          "ts": 1790597347
+        },
+        {
+          "completion_tokens": 1233,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 134564,
+          "prompt_tokens": 9723,
+          "stream": true,
+          "ts": 1790597477
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 181,
+          "completion_tokens": 64,
+          "ms": 4398,
+          "leg_tps": 14.552069122328332,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9723,
+          "completion_tokens": 1233,
+          "ms": 134564,
+          "leg_tps": 9.16292619125472,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9904,
+      "completion_tokens": 1297,
+      "gateway_ms": 138962,
+      "effective_tps": 9.333486852520833,
+      "engine_gen_tps": 33.8097,
+      "engine_metrics": {
+        "gen_tps": 33.8097,
+        "prompt_tokens_cached": 112353,
+        "prompt_tokens_total": 58711,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 4972,
+        "spec_draft_tokens": 5780,
+        "tokens_predicted": 7864
+      }
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "reaction_first_byte_ms": 102617.3713,
+      "reaction_wall_ms": 103962.3052,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        137459.7247
+      ],
+      "throughput_first_byte_ms": [
+        101914.7535
+      ],
+      "throughput_prompt_tokens": [
+        9904
+      ],
+      "throughput_completion_tokens": [
+        1297
+      ],
+      "throughput_gateway_ms": [
+        138962
+      ],
+      "throughput_effective_tps": [
+        9.333486852520833
+      ],
+      "throughput_engine_gen_tps": [
+        33.8097
+      ],
+      "throughput_requests": [
+        2
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    }
+  ]
+}
