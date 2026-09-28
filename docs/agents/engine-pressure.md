@@ -1,0 +1,168 @@
+# Protocolo de mitigación de jank (LM-NF-3)
+
+Estado: plan + diffs preparados, SIN medir. Ventana de medición pendiente
+(la máquina está en uso por el dueño; otro worker tiene la ventana del motor).
+Nada de este documento requiere haber arrancado el motor para leerse.
+
+## 1. Inventario de palancas medido (fuente: `config.rs`, `process.rs` 849-925, TOML vivo)
+
+Modelo Qwen3.8-27B IQ4_XS (~13 GB) en RX 6800 XT 16 GB (Vulkan), CPU
+Ryzen 5 7600 6C/12T. Argv común: `-ngl 99 -ctk q4_0 -ctv q4_0 -a localmind
+--reuse-port -t <threads> -tb <threads_batch> --prio 2 -b 1024 -ub 512
+--device Vulkan0 --split-mode none --host 127.0.0.1 --port <dyn> -np 1
+--poll 0 --prio-batch 0 -fa on --metrics` + spec draft-mtp (n=2, p-split 0,1)
++ `--reasoning-preserve` + `--cache-reuse 256` (el motor lo desactiva:
+`cache_reuse is not supported by this context`, inerte hoy).
+
+| Palanca | 32K `velocidad` | 64K `multi_doc` | 128K `libros` | 262K `max_contexto` | Costo en escritorio |
+|---|---|---|---|---|---|
+| `-c` contexto | 32768 | 65536 | 131072 | 262144 | KV lineal con `-c`; a 128K+ cruza el bus |
+| `--cache-ram` (MB KV en RAM) | 0 | 4096 | **6144** | 6144 (+`-kvu`) | 128K = ~6 GB en DDR5; cada token decode viaja por el bus + commit de RAM |
+| `-t` threads (default TOML `threads=None` → `num_cpus`=6) | 6 | 6 | 6 | 6 | **6 = todos los físicos**: prefill satura el CPU, nada libre para el desktop |
+| `-tb` threads_batch (`limit_threads_batch=true` → `min(threads,4)`) | 4 | 4 | 4 | 4 | Pico de prefill algo acotado; 4+2 hilos siguen siendo casi todo el CPU |
+| `-b 1024` / `-ub 512` | fijos | fijos | fijos | fijos | **PSU-LOCKED: no tocar** (picos de potencia/VRAM) |
+| spec draft-mtp n=2 | activo | activo | activo | activo | **PSU-LOCKED: no tocar** |
+| `-fa on` | on | on | on | on | Bien: menos memoria de atención |
+| `process_priority below_normal` | sí | sí | sí | sí | Solo prioridad OS; no limita CPU/VRAM/bus |
+| mmap | default (activado, sin flag) | — | — | — | Pesos en page-cache; con commit alto puede hacer thrash |
+| `idle_timeout_secs` | 1500 (25 min, global) | — | — | — | Ventana de jank larga tras cada uso |
+
+Números ya medidos (aceptación, máquina con carga de workers): 128K 32,7 t/s;
+contexto corto caliente 94,6 t/s; 262K 14,16 t/s. En reposo sin motor:
+~7,6 GB libres de 15,5 GB, commit ~57 %, CPU 4-8 %.
+
+## 2. Hipótesis H1-H4 (qué las confirma o las mata)
+
+- **H1 — bus/RAM:** el jank es el KV de 6 GB en DDR5. Confirma: `cache_ram`
+  más bajo → commit% baja y `gen_tps` igual o mejor. Mata: t/s cae >5 %
+  al bajar `cache_ram` (el KV no entra en VRAM sin que el modelo desborde).
+- **H2 — CPU:** el jank es prefill saturando los 6 físicos. Confirma:
+  `threads 4` baja el pico por núcleo con `gen_tps` (decode, GPU-bound)
+  casi intacto. Mata: `prompt_tps` se hunde o el pico no baja.
+- **H3 — confusor workers:** los 11-18 t/s de la campaña de 35 min eran
+  contención (node/python/cargo ajenos), no el motor. Confirma: en máquina
+  quieta 128K vuelve a ~29-33 t/s. Mata: el número bajo se reproduce quieto.
+- **H4 — page-cache (mmap):** solo si H1/H2 no explican. Confirma:
+  `--no-mmap` baja pagefile%/fallos duros sin costo de RAM privada
+  inaceptable (~13 GB privados extra). Mata: commit% se dispara u OOM.
+
+## 3. Protocolo de la ventana libre (~8-10 min, una sola carga por ronda)
+
+Pre-chequeo cada ronda: `tasklist` sin `node`/`python`/`cargo` ajenos;
+si hay workers, esperar, no medir. Motor <10 min por ronda, stop entre rondas.
+
+Ronda 0 (baseline 128K):
+1. `POST /api/start {"profile":"libros","context":131072}` → esperar
+   `running` + `acceptance_ok:true`; anotar `load s` y `decode_tps` de la puerta.
+2. Muestreo 3 min cada 5 s (36 muestras) con `tests/pressure-sampler.mjs`
+   (worker ajeno; si no existe aún, el bucle manual de la §4 vale):
+   `Available MBytes`, `% Committed Bytes In Use`, `Paging File % Usage`,
+   CPU-tiempo + working set de `llama-server.exe`, `gen_tps` de `/api/metrics`
+   por muestra; GPU solo si el contador responde en AMD (si no, no-medible).
+3. Probe de 300 tokens (streaming directo al puerto del motor y vía
+   `/v1/chat/completions`, `max_tokens 300`, temperature 0) → `decode t/s`
+   en máquina quieta = re-medición honesta de los 11-18 de la campaña.
+4. `POST /api/stop` + confirmar sin `llama-server.exe` en `tasklist`.
+
+Ronda A (`cache_ram` 128K → 0): aplicar diff A, repetir 1-4.
+Ronda B (`cache_ram` 128K → 4096): aplicar diff B, repetir 1-4.
+Ronda C (`threads` default → 4): aplicar diff C, repetir 1-4.
+Ronda D (opcional, solo si H1/H2 no explican): `--no-mmap` en `extra_flags`
+del perfil `libros`, repetir 1-4.
+
+Criterio de aceptación (por cambio): presión del sistema mediblemente menor
+(commit% pico −2 puntos o pico CPU/núcleo −15 %) Y `decode t/s` sin regresión
+mayor al ~5 % frente a la ronda 0. Si no cumple ambas, rollback al valor previo.
+`-ub`/`-b`/spec-decode no se tocan nunca (PSU). El contexto nunca se reduce
+en silencio (D2): cada ronda pide 131072 explícito.
+
+## 4. Bucle manual de respaldo (si el sampler ajeno no está listo)
+
+```powershell
+# Una muestra cada 5 s: RAM + commit + pagefile + motor + gen_tps aparte
+powershell -NoProfile -Command "(Get-Counter '\Memory\Available MBytes','\Memory\% Committed Bytes In Use','\Paging File(_Total)\% Usage' -SampleInterval 1 -MaxSamples 1 | Select-Object -ExpandProperty CounterSamples | ForEach-Object { [math]::Round($_.CookedValue,1) }) -join '/'"
+powershell -NoProfile -Command "$p=Get-Process llama-server -ErrorAction SilentlyContinue | Select-Object -First 1; if($p){$p.CPU.ToString('F0')+'/'+[math]::Round($p.WorkingSet64/1MB,0)}else{'dead'}"
+# gen_tps por muestra: GET /api/metrics con la gateway key (ver tests/bench.mjs)
+```
+
+## 5. Resultados medidos 2026-09-25 (rondas B y C, máquina quieta)
+
+Serie pareada 128K (`libros`, sampler 200 s @5 s + probe 300 tok directo):
+
+| ronda | libre MB | commit % | page % | CPU % idle | decode 300tok | aceptación |
+|---|---|---|---|---|---|---|
+| R0 `cache_ram` 6144, threads 6 | ~1400 | 88.2 | ~9.8 | 3-5 | **16.04 t/s** | 14.88 t/s |
+| RA `cache_ram` 0 (revertida) | ~650 | 88.4 | 9.3 | 3-5 | 16.23 t/s | 15.03 t/s |
+| RB `threads` 4 | ~700 | 88.3 | 8.8 | 0-2 | **16.15 t/s** | 14.93 t/s |
+| RC `--no-mmap` (**mantenida**) | **~6440** | 87.6 | 8.5 | 0-2 | **16.18 t/s** | 15.04 t/s |
+
+- H1 (`cache_ram`): MUERTA — commit y t/s planos (±0,2 t/s); el commit lo
+  dominan los 13 GB del modelo, no el KV.
+- H2 (CPU): MUERTA como causa del jank (pico 16-18 %, media 1-5 % en todas
+  las rondas), pero `threads 4` deja 2 físicos libres casi gratis
+  (decode −0 %/+0,7 %): se documenta como opción, default sigue en 6
+  (TOML vivo restaurado a `threads = 6`; ver diff C más abajo).
+- H3 (contención): PARCIALMENTE VIVA — 16 t/s se reproduce en máquina quieta
+  con prompt largo; no era solo contención.
+- H4 (page-cache): **CONFIRMADA** — `--no-mmap` libera ~5 GB
+  (libre 0,7→6,4 GB), page-file 9,3→8,5 %, sin regresión de decode
+  (+0,9 % vs R0). El RSS privado sube (~3,8 GB estables, sin OOM).
+
+## 6. Diffs preparados (NO aplicados)
+
+Con 6 físicos y 16 GB VRAM, y los números de hoy:
+- Escritorio fluido: `velocidad` 32K (`cache_ram` 0, todo en VRAM) — [MEDIDO:
+  puerta ~34 t/s; jank no medido pero sin tráfico de bus por diseño].
+- 128K/262K: aceptar tráfico de bus + commit de RAM alto; cerrar trabajo
+  pesado antes; el motor tarda 25 min en soltarse solo (`idle_timeout_secs`).
+- Una línea para el dueño: **"para el escritorio fluido: 32K; para 128K/262K:
+  aceptá 6 GB de KV en RAM y micro-cortes, o bajá a 32K"** — [SIN MEDIR el
+  tamaño real de los micro-cortes; la ventana libre lo cuantifica].
+- "Modo liviano" propuesto (no implementado): preset `liviano` = 32K,
+  `threads 4`, `cache_ram 0`, `idle_timeout` corto; criterio: adoptarlo si la
+  ronda C muestra que 2 núcleos libres eliminan el jank sin costo >5 % en t/s.
+
+## 7. ¿Qué hago para que no se trabe el escritorio a 128K? (respuesta honesta)
+
+La perilla que sí importa es **`--no-mmap` en el perfil `libros`** (ya aplicada
+como default): libera ~5 GB de RAM (libre 0,7→6,4 GB) porque los 13 GB del
+modelo dejan de vivir duplicados en el page-cache; el decode no se mueve
+(16,04→16,18 t/s) y el commit apenas baja (88,2→87,6 %) porque el modelo pesa
+lo que pesa. `cache_ram` no mueve nada (±0,2 t/s, commit idéntico) y `threads`
+4 no ahorra nada medible en idle (la CPU ya estaba en 1-5 % sin carga) aunque
+cuesta ~0 % en decode: útil solo como headroom de prefill, no como cura.
+Para el día a día en esta caja de 15,5 GB con un modelo de 13 GB: trabajo
+normal en **32K `velocidad`** (todo en VRAM, puerta ~34 t/s); 128K solo para
+sostener documentos largos aceptando commit ~88 % y ~16 t/s; 262K solo
+paso siguiente no es otro flag sino cerrar apps o bajar a 64K/32K: la caja no
+da para 13 GB de pesos + KV + escritorio con holgura.
+
+## 8. Cómo llega el fix al usuario (migración `profiles_version`)
+
+El TOML vivo trae `[[profiles]]` materializados, así que cambiar el integrado
+en `config.rs` no basta: `ConfigStore::load` compara `profiles_version`
+(ausente = 0, actual = 3) y, si es menor, refresca cada id integrado presente
+solo cuando el usuario no lo customizó — `extra_flags` se actualiza únicamente
+si cada flag guardada ya estaba en ALGUNA foto previa (v0/v1/v2: una flag
+añadida por el usuario bloquea el refresh de ese perfil), y `context`/
+`cache_ram` solo si siguen iguales a alguna foto previa; ids desconocidos
+intactos. Luego escribe la versión (tmp + rename, best-effort) y deja una línea
+`[LocalMind] Perfiles actualizados a v3: <ids>` que `main.rs` emite vía
+`mgr.log` (= archivo P30 + SSE). Instalación fresca lo trae directo.
+Historial: v1 `--no-mmap` → v2 reversión a `[]` (veredicto A/B prematuro,
+documentado abajo y superado) → v3 `--load-mode none` (grafía canónica):
+cada salto conserva las fotos previas para no tocar customs.
+
+## 9. Veredicto A/B prefill 8k @128K: el flag SE MANTIENE (override del dueño)
+
+Mismo prompt de 10546 tokens, misma máquina quieta, scratch APPDATA:
+variante A (mmap default) → prefill **21,65 t/s** (463 s), decode **14,01 t/s**;
+variante B (sin mmap) → prefill **38,18 t/s** (263 s, **+76 %**), decode
+**13,92 t/s** (-0,6 % = ruido), commit 89,3→87,7 %, libre 620→991 MB.
+Racional explícita: el prefill del primer turno ES el caso diario — cada primer
+turno a 128K paga 5-12k tokens de system-prompt y el flag recorta ~200 s de esa
+espera ("cuánto tarda en reaccionar"); el decode sostenido queda igual y el
+commit igual o mejor. Por eso la v2 se supera: `libros` lleva `--load-mode
+none` (grafía no deprecada; `--no-mmap` hacía lo mismo pero está deprecado en
+el build 10683). Tests: `mig_v1_nommap_upgraded_to_canonical`,
+`mig_v2_empty_upgraded_to_canonical`, proofs v0/v1/v2 en scratch APPDATA.
