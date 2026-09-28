@@ -95,8 +95,15 @@ pub struct EngineConfig {
     /// Puerto preferido del motor (llama-server). Si está ocupado se busca el siguiente libre.
     #[serde(default = "default_llama_port")]
     pub llama_port: u16,
-    /// Reutilización de prefijos de prompt en KV cache (--cache-reuse N).
-    /// 0 = desactivado (default upstream). 256 = global LocalMind.
+    /// Reutilización de prefijos de prompt en KV cache (legado, INERTE).
+    /// El build 10683 rechaza `--cache-reuse` en este contexto con
+    /// `cache_reuse is not supported by this context` (medido 2026-09-27 en
+    /// 4 combinaciones: mínimo, -kvu, -np 2, --cache-prompt explícito) y la
+    /// reutilización de prefijo ya funciona sin el flag: mismo prompt de
+    /// 2699 tok a 128K, COLD 29585 ms → WARM 3109/3084 ms (~9,5×), con
+    /// `prompt_tokens_cached` 42 → 2737 → 5432 en `/api/metrics` (el slot
+    /// conserva el KV entre requests con `-np 1`). Campo conservado sin
+    /// efecto para no romper TOMLs/APIs que lo lean.
     #[serde(default = "default_cache_reuse")]
     pub cache_reuse: usize,
 }

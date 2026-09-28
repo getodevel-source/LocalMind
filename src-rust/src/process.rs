@@ -912,9 +912,11 @@ impl ProcessManager {
             cmd.args(["--cache-ram", &profile.cache_ram.to_string()]);
         }
 
-        if cfg.engine.cache_reuse > 0 {
-            cmd.args(["--cache-reuse", &cfg.engine.cache_reuse.to_string()]);
-        }
+        // `--cache-reuse` NO se pasa: el build 10683 lo rechaza en este
+        // contexto (`cache_reuse is not supported by this context`, medido
+        // 2026-09-27 en 4 combinaciones: mínimo/-kvu/-np2/--cache-prompt) y la
+        // reutilización de prefijo ya funciona sin él (ver comentario en
+        // `cache_reuse` en config.rs). Campo conservado para la API/compat.
 
         for flag in &profile.extra_flags {
             cmd.arg(flag);
