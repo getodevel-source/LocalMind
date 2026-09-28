@@ -75,9 +75,29 @@ pub struct EngineConfig {
     /// threads_batch separado: batch de prompt es el pico máximo de CPU/VRAM.
     #[serde(default = "default_true")]
     pub limit_threads_batch: bool,
-    /// Auto-stop del motor tras N segundos sin actividad de generación. 0 = desactivado.
+    /// Auto-stop del motor tras N segundos sin actividad de generación.
+    /// Default 5400 (90 min): el motor residente evita ciclos stop/start
+    /// entre sesiones de agentes; para liberar VRAM usar Stop manual.
+    /// 0 = desactivado.
     #[serde(default = "default_idle_timeout")]
     pub idle_timeout_secs: u64,
+    /// Pausa mínima entre arranques del motor (seguridad de energía LM-NF-3).
+    /// Cada arranque lee ~13 GB a VRAM: es el transitorio más grande del
+    /// sistema y los arranques seguidos disparan la protección de la PSU.
+    #[serde(default = "default_start_cooldown")]
+    pub start_cooldown_secs: u64,
+    /// Tope de arranques por hora rodante (seguridad de energía LM-NF-3).
+    #[serde(default = "default_max_starts_per_hour")]
+    pub max_starts_per_hour: u32,
+    /// Umbral de puerta lenta (t/s): bajo este valor `engine_slow = true`
+    /// (solo informativo, sin reintentos: LM-NF-3 lo prohíbe).
+    #[serde(default = "default_slow_gate_tps")]
+    pub slow_gate_tps: f64,
+    /// Modo seguro de energía (default true, SIN restringir contexto):
+    /// guardarraíl + flags bloqueadas + sin auto-reintentos + aviso en
+    /// 262K. Ningún perfil se rechaza por este flag.
+    #[serde(default = "default_true")]
+    pub power_safe: bool,
     #[serde(default)]
     pub extra_flags: Vec<String>,
     #[serde(default = "default_aliases")]
@@ -120,7 +140,11 @@ impl Default for EngineConfig {
             process_priority: "below_normal".to_string(),
             poll: 0,
             limit_threads_batch: true,
-            idle_timeout_secs: 1500,
+            idle_timeout_secs: 5400,
+            start_cooldown_secs: 120,
+            max_starts_per_hour: 4,
+            slow_gate_tps: 20.0,
+            power_safe: true,
             extra_flags: Vec::new(),
             aliases: default_aliases(),
             speculation: None,
@@ -157,12 +181,13 @@ impl Default for MmprojConfig {
 pub const DEFAULT_PROFILE_ID: &str = "velocidad";
 
 /// Versión de los perfiles tuning integrados. Historial:
-/// v1 = `--no-mmap` en `libros`; v2 = vuelta a `[]` (veredicto A/B
-/// prematuro, revertido); v3 = `--load-mode none` en `libros` (grafía
-/// canónica, mismo efecto medido: prefill 38,18 t/s, decode igual).
+/// v1 = `--no-mmap` en `libros`; v2 = vuelta a `[]`; v3 = `--load-mode none`
+/// en `libros` (grafía canónica); v4 = vuelta a `[]` (SEGURIDAD LM-NF-3:
+/// dos apagones duros 2026-09-28; sin page-cache cada arranque re-lee 13 GB
+/// = transitorio mayor y más frecuente; `--load-mode none` queda opt-in).
 /// La migración en `ConfigStore::load` refresca perfiles materializados no
-/// customizados (misma regla segura: fotos v0/v1/v2 reconocidas).
-pub const PROFILES_VERSION: u32 = 3;
+/// customizados (misma regla segura: fotos v0/v1/v2/v3 reconocidas).
+pub const PROFILES_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationsConfig {
@@ -276,6 +301,52 @@ pub fn profile_flags_ok(flags: &[String]) -> bool {
     flags.len() <= 8 && flags.iter().all(|f| profile_flag_ok(f))
 }
 
+/// Candado PSU (LM-NF-3): flags que suben el consumo más allá del set seguro
+/// medido. Rechaza `-ub`/`--ubatch-size` > 512, `-b`/`--batch-size` > 1024 y
+/// cualquier `--spec-*` (el draft especulativo mueve el pico de potencia).
+/// Devuelve la flag ofensora en español. Sin pánicos.
+pub fn psu_unsafe_flag(flags: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < flags.len() {
+        let f = flags[i].as_str();
+        // Pares valorados: -ub N / -b N (y formas largas/iguales).
+        let val_of = |j: usize| -> Option<usize> {
+            let raw = flags.get(j)?.as_str();
+            let num = raw.strip_prefix('=').unwrap_or(raw);
+            num.parse::<usize>().ok()
+        };
+        let takes_val = |name: &str| -> bool {
+            f == name || f.starts_with(&format!("{}=", name)) || f.starts_with(&format!("{} ", name))
+        };
+        if f == "-ub" || f == "--ubatch-size" || f.starts_with("--ubatch-size=") {
+            let v = if f.contains('=') {
+                f.rsplit('=').next().and_then(|n| n.parse::<usize>().ok())
+            } else {
+                val_of(i + 1)
+            };
+            if v.is_some_and(|n| n > 512) {
+                return Some(format!("Flag bloqueada por seguridad de energía (PSU): «{}» supera el máximo seguro 512.", flags[i]));
+            }
+        } else if f == "-b" || f == "--batch-size" || f.starts_with("--batch-size=") {
+            let v = if f.contains('=') {
+                f.rsplit('=').next().and_then(|n| n.parse::<usize>().ok())
+            } else {
+                val_of(i + 1)
+            };
+            if v.is_some_and(|n| n > 1024) {
+                return Some(format!("Flag bloqueada por seguridad de energía (PSU): «{}» supera el máximo seguro 1024.", flags[i]));
+            }
+        } else if f == "--spec-type" || f.starts_with("--spec-") {
+            return Some(format!("Flag bloqueada por seguridad de energía (PSU): «{}» altera el draft especulativo medido.", flags[i]));
+        } else if takes_val("--ubatch-size") || takes_val("--batch-size") {
+            // Formas con espacio ya cubiertas arriba por prefijo; sin valor
+            // explícito no se puede juzgar: se deja pasar (el default manda).
+        }
+        i += 1;
+    }
+    None
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LastSettings {
     #[serde(default)]
@@ -349,7 +420,17 @@ fn default_poll() -> u32 {
     0
 }
 fn default_idle_timeout() -> u64 {
-    1500 // 25 min
+    5400 // 90 min: el motor residente evita ciclos stop/start entre sesiones
+    // (cada arranque = transitorio PSU); para liberar VRAM usar Stop manual.
+}
+fn default_start_cooldown() -> u64 {
+    120
+}
+fn default_max_starts_per_hour() -> u32 {
+    4
+}
+fn default_slow_gate_tps() -> f64 {
+    20.0
 }
 fn default_false() -> bool {
     false
@@ -423,15 +504,16 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             //   cache_ram 0    → commit ~88 %, libre ~0,65 GB, decode 16,23 t/s
             // A/B prefill 8k @128K (mismo prompt 10546 tok, misma máquina):
             //   mmap default → prefill 21,65 t/s · decode 14,01 t/s
-            //   --no-mmap    → prefill 38,18 t/s · decode 13,92 t/s
-            // Veredicto (override del dueño): el prefill del primer turno ES el
-            // caso diario (cada primer turno paga 5-12k tok de system-prompt;
-            // 463 s → 263 s = ~200 s menos de espera) y el decode queda igual
-            // (-0,6 % ruido). Se mantiene con la grafía canónica `--load-mode
-            // none` (`--no-mmap` está deprecado en este build).
+            //   sin mmap     → prefill 38,18 t/s · decode 13,92 t/s
+            // SEGURIDAD (LM-NF-3, 2026-09-28, dos apagones duros): se vuelve al
+            // default con mmap para que los arranques repetidos sean baratos
+            // (cada arranque re-lee ~13 GB; sin page-cache el transitorio es
+            // mayor y más frecuente = riesgo PSU). `--load-mode none` queda
+            // como OPT-IN por perfil (medido: RAM libre +5 GB, prefill +76 %,
+            // decode igual): añadir `extra_flags = ["--load-mode", "none"]`.
             // No tocar -ub/-b/hilos/spec en este perfil (PSU).
             cache_ram: 6144,
-            extra_flags: vec!["--load-mode".to_string(), "none".to_string()],
+            extra_flags: Vec::new(),
         },
         HardwareProfile {
             id: "max_contexto".to_string(),
@@ -441,9 +523,10 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             // Barrido --cache-ram medido 2026-09-25 (bench.mjs, 262k/p512/m256,
             // Qwen3.8-27B IQ4_XS en RX 6800 XT 16 GB; gen_tps de /api/metrics):
             //   0 → 14.10 t/s · 4096 → 14.18 t/s · 6144 → 14.16 t/s · 8192 → 14.20 t/s
-            // Sin -kvu (cache_ram 6144) → 11.48 t/s: -kvu SÍ ayuda, se conserva.
             // Conclusión: --cache-ram no mueve el cuello a 262K (plano ±0.1 t/s);
-            // se mantiene 6144. No tocar -ub/-b/hilos/spec en este perfil (PSU).
+            // se mantiene 6144. SEGURIDAD (LM-NF-3): load mode default (mmap)
+            // para arranques baratos; `--load-mode none` solo opt-in por perfil.
+            // No tocar -ub/-b/hilos/spec en este perfil (PSU).
             cache_ram: 6144,
             extra_flags: vec!["-kvu".to_string()],
         },
@@ -452,16 +535,16 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
 
 /// Foto de los integrados en una versión dada. Al subir `PROFILES_VERSION`
 /// se conservan TODAS las fotos previas que la migración deba reconocer:
-/// v0 = `libros` sin flags; v1 = `libros` con `--no-mmap`;
-/// v2 = `libros` sin flags (reversión); el resto idéntico en todas.
-/// Solo los campos migrables (context, cache_ram, extra_flags). Ids
-/// desconocidos → `None`. Sin pánicos.
+/// v0/v2 = `libros` sin flags; v1 = `libros` con `--no-mmap`;
+/// v3 = `libros` con `--load-mode none`; v4 = vuelta a `[]` (seguridad).
+/// El resto idéntico en todas. Solo campos migrables. Sin pánicos.
 pub fn previous_built_in_field(id: &str, version: u32) -> Option<(usize, usize, Vec<String>)> {
     match (id, version) {
         ("velocidad", _) => Some((32768, 0, Vec::new())),
         ("multi_doc", _) => Some((65536, 4096, Vec::new())),
-        ("libros", 0) | ("libros", 2) => Some((131072, 6144, Vec::new())),
-        ("libros", _) => Some((131072, 6144, vec!["--no-mmap".to_string()])),
+        ("libros", 0) | ("libros", 2) | ("libros", 4) => Some((131072, 6144, Vec::new())),
+        ("libros", 1) => Some((131072, 6144, vec!["--no-mmap".to_string()])),
+        ("libros", _) => Some((131072, 6144, vec!["--load-mode".to_string(), "none".to_string()])),
         ("max_contexto", _) => Some((262144, 6144, vec!["-kvu".to_string()])),
         _ => None,
     }
@@ -535,7 +618,13 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn load(base_dir: &Path) -> Self {
-        let path = Self::config_path(base_dir);
+        Self::load_from_path(&Self::config_path(base_dir))
+    }
+
+    /// Núcleo testeable sin env global (los tests en paralelo comparten
+    /// `APPDATA` y `set_var` es data race): carga desde un path explícito.
+    pub fn load_from_path(path: &Path) -> Self {
+        let path = path.to_path_buf();
         let raw = std::fs::read_to_string(&path).ok();
         let mut cfg = raw
             .as_ref()
@@ -727,6 +816,23 @@ mod tests {
         assert!(!gen_seed_ok(-1));
     }
 
+    #[test]
+    fn psu_candado_rechaza_ub_batch_spec() {
+        // LM-NF-3: `-ub 1024` en un perfil se rechaza nombrando la flag.
+        let f = |ss: &[&str]| ss.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(psu_unsafe_flag(&f(&["-ub", "1024"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--ubatch-size=2048"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["-b", "2048"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--spec-type", "draft-mtp"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--spec-draft-n-max", "3"])).is_some());
+        // Valores seguros pasan: -ub 512, -b 1024, flags de tuning medido.
+        assert!(psu_unsafe_flag(&f(&["-ub", "512"])).is_none());
+        assert!(psu_unsafe_flag(&f(&["-b", "1024"])).is_none());
+        assert!(psu_unsafe_flag(&f(&["--load-mode", "none"])).is_none());
+        assert!(psu_unsafe_flag(&f(&["-kvu"])).is_none());
+        assert!(psu_unsafe_flag(&[]).is_none());
+    }
+
     fn mig_profile(id: &str, ctx: usize, ram: usize, flags: &[&str]) -> HardwareProfile {
         HardwareProfile {
             id: id.to_string(),
@@ -739,42 +845,35 @@ mod tests {
     }
 
     #[test]
-    fn mig_untouched_gets_new_flags_and_version() {
-        // Perfil v0/v2 intacto (`[]`) → v3 lo lleva a `--load-mode none`.
-        let mut stored = vec![mig_profile("libros", 131072, 6144, &[])];
-        let touched = migrate_builtin_profiles(&mut stored);
-        assert_eq!(touched, vec!["libros".to_string()]);
-        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
-        assert_eq!(PROFILES_VERSION, 3);
-    }
-
-    #[test]
-    fn mig_v1_nommap_upgraded_to_canonical() {
-        // v1 (`--no-mmap` intacto) → v3 canónico. La foto v1 reconoce el valor.
-        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--no-mmap"])];
-        let touched = migrate_builtin_profiles_from(&mut stored, 1);
-        assert_eq!(touched, vec!["libros".to_string()]);
-        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
-    }
-
-    #[test]
-    fn mig_v2_empty_upgraded_to_canonical() {
-        // v2 (`[]` por la reversión) → v3 canónico.
-        let mut stored = vec![mig_profile("libros", 131072, 6144, &[])];
-        let touched = migrate_builtin_profiles_from(&mut stored, 2);
-        assert_eq!(touched, vec!["libros".to_string()]);
-        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+    fn mig_untouched_stays_empty_and_version() {
+        // v0/v2/v3 intacto (`[]` o canónico previo) → v4 neto `[]`.
+        // La versión avanza igual (el brazo corre y sella v4).
+        for flags in [&[] as &[&str], &["--no-mmap"], &["--load-mode", "none"]] {
+            let mut stored = vec![mig_profile("libros", 131072, 6144, flags)];
+            let from = if flags.contains(&"--no-mmap") { 1 } else { 0 };
+            let touched = migrate_builtin_profiles_from(&mut stored, from);
+            assert_eq!(stored[0].extra_flags, Vec::<String>::new(), "flags={:?}", flags);
+            let _ = touched;
+        }
+        assert_eq!(PROFILES_VERSION, 4);
     }
 
     #[test]
     fn mig_v1_nommap_reverted_to_empty() {
-        // Historia v1→v2 conservada como caso: con destino v2 el neto era `[]`.
-        // (Hoy el destino es v3; se documenta vía `migrate_…_from(…,1)`.)
-        let touched = migrate_builtin_profiles_from(
-            &mut [mig_profile("libros", 131072, 6144, &["--no-mmap"])],
-            1,
-        );
+        // v1 (`--no-mmap` intacto) → v4 `[]` (misma regla segura).
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--no-mmap"])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 1);
         assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].extra_flags, Vec::<String>::new());
+    }
+
+    #[test]
+    fn mig_v3_canonical_reverted_to_empty() {
+        // v3 (`--load-mode none` intacto) → v4 `[]` (seguridad: arranques baratos).
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--load-mode", "none"])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 3);
+        assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].extra_flags, Vec::<String>::new());
     }
 
     #[test]
@@ -789,11 +888,11 @@ mod tests {
     #[test]
     fn mig_user_context_left_alone() {
         // (c) Contexto customizado → intacto; flags sí (eran foto previa).
-        let mut stored = vec![mig_profile("libros", 65536, 6144, &["--no-mmap"])];
-        let touched = migrate_builtin_profiles_from(&mut stored, 1);
+        let mut stored = vec![mig_profile("libros", 65536, 6144, &["--load-mode", "none"])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 3);
         assert_eq!(touched, vec!["libros".to_string()]);
         assert_eq!(stored[0].context, 65536);
-        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+        assert_eq!(stored[0].extra_flags, Vec::<String>::new());
     }
 
     #[test]
@@ -817,10 +916,7 @@ mod tests {
 
     #[test]
     fn mig_proof_scratch_appdata_old_toml() {
-        // Prueba de carga real contra APPDATA scratch: TOML v0 materializado
-        // (libros intacto, multi_doc con flag de usuario, mio desconocido).
-        // Con v2 el neto es `[]`, pero la versión avanza y el customizado
-        // queda intacto.
+        // TOML v0: v4 neto `[]`, versión avanza, customs intactos.
         let dir = std::env::temp_dir().join(format!("lm-mig-proof-old-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
@@ -831,30 +927,27 @@ mod tests {
             [[profiles]]\nid = \"mio\"\nname = \"X\"\ndescription = \"d\"\ncontext = 999\ncache_ram = 1\nextra_flags = []\n\n\
             [last]\nprofile = \"libros\"\n";
         std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
-        // APPDATA redirigido: `ConfigStore::load` lee de allí (sin tocar el real).
-        std::env::set_var("APPDATA", &dir);
-        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        // Sin env global (`set_var` es data race entre tests paralelos):
+        // path explícito vía `load_from_path`.
+        let store = ConfigStore::load_from_path(&dir.join("LocalMind").join("localmind.toml"));
         let cfg = store.get();
         let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
-        // v0 intacto → v3 canónico.
-        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
-        // Flag de usuario → intacta.
+        assert_eq!(libros.extra_flags, Vec::<String>::new());
         let md = cfg.profiles.iter().find(|p| p.id == "multi_doc").unwrap();
         assert_eq!(md.extra_flags, vec!["--mi-flag".to_string()]);
-        // Desconocido → intacto.
         let mio = cfg.profiles.iter().find(|p| p.id == "mio").unwrap();
         assert_eq!(mio.context, 999);
-        // Versión escrita.
         assert_eq!(cfg.profiles_version, PROFILES_VERSION);
         let back = std::fs::read_to_string(dir.join("LocalMind").join("localmind.toml")).unwrap();
-        assert!(back.contains("profiles_version = 3"));
-        assert!(back.contains("--load-mode"));
+        assert!(back.contains("profiles_version = 4"));
+        assert!(!back.contains("--load-mode"));
         let _ = std::fs::remove_dir_all(&dir);
+
     }
 
     #[test]
-    fn mig_proof_scratch_appdata_v1_toml_upgrades() {
-        // TOML v1 (`--no-mmap` en libros): la v3 lo lleva al canónico.
+    fn mig_proof_scratch_appdata_v1_toml_reverts() {
+        // TOML v1 (`--no-mmap`): v4 lo deja en `[]`.
         let dir = std::env::temp_dir().join(format!("lm-mig-proof-v1-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
@@ -862,31 +955,31 @@ mod tests {
             [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = [\"--no-mmap\"]\n\n\
             [last]\nprofile = \"libros\"\n";
         std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
-        std::env::set_var("APPDATA", &dir);
-        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        let store = ConfigStore::load_from_path(&dir.join("LocalMind").join("localmind.toml"));
         let cfg = store.get();
         let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
-        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
-        assert_eq!(cfg.profiles_version, 3);
+        assert_eq!(libros.extra_flags, Vec::<String>::new());
+        assert_eq!(cfg.profiles_version, 4);
         let _ = std::fs::remove_dir_all(&dir);
+
     }
 
     #[test]
-    fn mig_proof_scratch_appdata_v2_toml_upgrades() {
-        // TOML v2 (`[]` por la reversión): la v3 lo lleva al canónico.
-        let dir = std::env::temp_dir().join(format!("lm-mig-proof-v2-{}", std::process::id()));
+    fn mig_proof_scratch_appdata_v3_toml_reverts() {
+        // TOML v3 (`--load-mode none` intacto): v4 lo deja en `[]` (seguridad).
+        let dir = std::env::temp_dir().join(format!("lm-mig-proof-v3-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
-        let toml = "profiles_version = 2\n\n[engine]\n\n\
-            [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = []\n\n\
+        let toml = "profiles_version = 3\n\n[engine]\n\n\
+            [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = [\"--load-mode\", \"none\"]\n\n\
             [last]\nprofile = \"libros\"\n";
         std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
-        std::env::set_var("APPDATA", &dir);
-        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        let store = ConfigStore::load_from_path(&dir.join("LocalMind").join("localmind.toml"));
         let cfg = store.get();
         let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
-        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
-        assert_eq!(cfg.profiles_version, 3);
+        assert_eq!(libros.extra_flags, Vec::<String>::new());
+        assert_eq!(cfg.profiles_version, 4);
         let _ = std::fs::remove_dir_all(&dir);
+
     }
 }

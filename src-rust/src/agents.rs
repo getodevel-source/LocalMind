@@ -295,6 +295,8 @@ mod tests {
             starting_for_secs: 0,
             eta_secs: 0,
             decode_tps: None,
+            decode_tps_samples: Vec::new(),
+            engine_slow: false,
             acceptance_ok: None,
             acceptance_error: None,
         };

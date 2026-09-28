@@ -46,10 +46,43 @@ pub struct ServerStatus {
     pub eta_secs: u64,
     #[serde(default)]
     pub decode_tps: Option<f64>,
+    /// Las 3 muestras de la puerta (mediana en `decode_tps`); vacías si no
+    /// hubo puerta en este arranque. Para que la UI vea la dispersión.
+    #[serde(default)]
+    pub decode_tps_samples: Vec<f64>,
+    /// true si la mediana de la puerta quedó bajo `[engine] slow_gate_tps`
+    /// (default 20). Solo informativo: sin reintentos (LM-NF-3). Mensaje UI:
+    /// `El motor cargó lento (N t/s); puede mejorarse reiniciándolo una vez`.
+    #[serde(default)]
+    pub engine_slow: bool,
     #[serde(default)]
     pub acceptance_ok: Option<bool>,
     #[serde(default)]
     pub acceptance_error: Option<String>,
+}
+
+impl Default for ServerStatus {
+    fn default() -> Self {
+        Self {
+            status: "stopped".to_string(),
+            is_healthy: false,
+            pid: None,
+            model: String::new(),
+            context: 32768,
+            profile: crate::config::DEFAULT_PROFILE_ID.to_string(),
+            port: 0,
+            idle_remaining_secs: None,
+            last_error: None,
+            verifying: false,
+            starting_for_secs: 0,
+            eta_secs: 0,
+            decode_tps: None,
+            decode_tps_samples: Vec::new(),
+            engine_slow: false,
+            acceptance_ok: None,
+            acceptance_error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +132,8 @@ pub struct ProcessManager {
     load_times: Arc<Mutex<HashMap<String, u64>>>,
     /// Archivo de log con rotación (P30): se crea perezoso al primer `log()`.
     log_file: PathBuf,
+    /// Historial de arranques (epoch secs) para cooldown + tope horario (LM-NF-3).
+    start_history: Arc<Mutex<Vec<u64>>>,
     config: Arc<ConfigStore>,
     base_dir: PathBuf,
     bin_dir: PathBuf,
@@ -125,6 +160,8 @@ impl ProcessManager {
             starting_for_secs: 0,
             eta_secs: 0,
             decode_tps: None,
+            decode_tps_samples: Vec::new(),
+            engine_slow: false,
             acceptance_ok: None,
             acceptance_error: None,
         }));
@@ -137,6 +174,7 @@ impl ProcessManager {
         let last_activity = Arc::new(AtomicU64::new(0));
         let start_instant: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let start_epoch = Arc::new(AtomicU64::new(0));
+        let start_history: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
         // Duraciones de cargas exitosas (clave = modelo + contexto), para ETA.
         let load_times_path = Self::load_times_path();
         let load_times: Arc<Mutex<HashMap<String, u64>>> =
@@ -192,6 +230,12 @@ impl ProcessManager {
                         crash_summary(&lines, &code)
                     };
                     let mut st = status_clone.write();
+                    // Watchdog (LM-NF-3): si el hijo muere en starting/running
+                    // (incluidos los primeros ~90 s tras un arranque), se marca
+                    // `error` con el resumen y NO se reintenta ni se rearranca
+                    // solo: los bucles de reintento convierten un fallo en
+                    // transitorios repetidos = riesgo PSU. Reintento = Stop+Start
+                    // manual (respetando cooldown + tope horario).
                     // Aviso P20 pendiente si el crash era visible (starting/running).
                     let mut crash_notify: Option<(String, String, String)> = None;
                     if st.status == "starting" || st.status == "running" {
@@ -201,7 +245,8 @@ impl ProcessManager {
                         st.verifying = false;
                         st.starting_for_secs = 0;
                         st.eta_secs = 0;
-                        st.last_error = Some(summary.clone());
+                        st.decode_tps_samples = Vec::new();
+                        st.engine_slow = false;
                         crash_notify = Some((
                             "El motor falló".to_string(),
                             summary,
@@ -252,7 +297,7 @@ impl ProcessManager {
                         let is_ok = Self::health_check(port);
                         // Puerta de aceptación (D1): una sola vez por arranque, sin el lock
                         // cogido durante la request de verificación (el status sigue legible).
-                        let mut gate_outcome: Option<Result<(f64, u64), String>> = None;
+                        let mut gate_outcome: Option<Result<(f64, u64, Vec<f64>), String>> = None;
                         if is_ok && current_status == "starting" && !gate_done {
                             gate_done = true;
                             let my_epoch = seen_epoch;
@@ -275,7 +320,7 @@ impl ProcessManager {
                             st.is_healthy = is_ok;
                             if let Some(outcome) = gate_outcome {
                                 match outcome {
-                                    Ok((tps, _tokens)) => {
+                                    Ok((tps, _tokens, samples)) => {
                                         // Carga exitosa: registrar duración (D4) y declarar running.
                                         let secs = start_instant_poll
                                             .lock()
@@ -285,15 +330,20 @@ impl ProcessManager {
                                         let key = load_key(&st.model, st.context);
                                         load_times_poll.lock().insert(key.clone(), secs.max(1));
                                         let _ = load_times_save(&load_times_path_poll, &load_times_poll.lock());
+                                        let slow_at = cfg_poll.get().engine.slow_gate_tps;
                                         st.status = "running".to_string();
                                         st.verifying = false;
                                         st.starting_for_secs = 0;
                                         st.eta_secs = 0;
                                         st.decode_tps = Some(tps);
+                                        st.decode_tps_samples = samples.clone();
+                                        // engine_slow: solo informativo, sin
+                                        // reintentos (LM-NF-3 lo prohíbe).
+                                        st.engine_slow = gate_is_slow(tps, slow_at);
                                         st.acceptance_ok = Some(true);
                                         st.acceptance_error = None;
                                         st.last_error = None;
-                                        pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s", tps.round() as u64));
+                                        pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mediana de {})", tps.round() as u64, samples.len()));
                                         // Aviso P20: motor listo con modelo y velocidad.
                                         pending_notify = Some((
                                             "Motor listo".to_string(),
@@ -307,7 +357,8 @@ impl ProcessManager {
                                         st.verifying = false;
                                         st.starting_for_secs = 0;
                                         st.eta_secs = 0;
-                                        st.acceptance_ok = Some(false);
+                                        st.decode_tps_samples = Vec::new();
+                                        st.engine_slow = false;
                                         st.acceptance_error = Some(detail.clone());
                                         st.last_error = Some(detail.clone());
                                         // Aviso P20: fallo de la puerta con el motivo.
@@ -419,6 +470,7 @@ impl ProcessManager {
             start_epoch,
             load_times,
             log_file,
+            start_history,
             config,
             base_dir,
             bin_dir,
@@ -464,12 +516,42 @@ impl ProcessManager {
     /// Nunca paniquea: todo fallo se devuelve como `Err(detalle)` en español.
     /// La puerta usa `temperature: 0` FIJO a propósito (determinista): aunque
     /// `[generation]` (P16) exponga otra temperatura para el chat, la puerta no
-    /// la consume.
-    fn run_acceptance_gate(port: u16) -> Result<(f64, u64), String> {
+    /// la consume. Calienta con 1 request desechable y reporta la MEDIANA de
+    /// 3 muestras (la primera medida en frío no representa el estado
+    /// estacionario: bimodalidad 128K medida 34,8 vs 71,9 t/s prompt-eval).
+    fn run_acceptance_gate(port: u16) -> Result<(f64, u64, Vec<f64>), String> {
+        // Calentamiento desechable (mismo path de chat, pocos tokens): estabiliza
+        // la primera medida. Solo en la puerta; con el motor en `running` no
+        // hay re-calentamiento (la puerta solo corre en starting).
+        let _ = Self::gate_sample(port, 16);
+        // 3 muestras iguales; la mediana es el `decode_tps` reportado.
+        let mut samples = Vec::new();
+        let mut last_err = String::new();
+        for _ in 0..3 {
+            match Self::gate_sample(port, 200) {
+                Ok((tps, _)) => samples.push(tps),
+                Err(e) => last_err = e,
+            }
+        }
+        if samples.is_empty() {
+            return Err(if last_err.is_empty() {
+                "El modelo no respondió durante la verificación de arranque (sin usage válido).".to_string()
+            } else {
+                last_err
+            });
+        }
+        let median = gate_median(&samples).unwrap_or(0.0);
+        Ok((median, 0, samples))
+    }
+
+    /// Una muestra de la puerta: `(t/s, completion_tokens)` o detalle en
+    /// español. El veredicto (≥20 tokens, ≥3 t/s) lo aplica el llamador sobre
+    /// la mediana, no aquí.
+    fn gate_sample(port: u16, max_tokens: u32) -> Result<(f64, u64), String> {
         let url = format!("http://127.0.0.1:{}/v1/chat/completions", port);
         let body = serde_json::json!({
             "messages": [{"role": "user", "content": "Count from 1 to 60. Nothing else."}],
-            "max_tokens": 200,
+            "max_tokens": max_tokens,
             "temperature": 0,
             "stream": false,
         });
@@ -752,6 +834,31 @@ impl ProcessManager {
     }
 
     pub fn start(&self, req: StartRequest) -> Result<u32, String> {
+        // Guardarraíles de energía (LM-NF-3): cooldown + tope horario + modo
+        // seguro. Cada arranque lee ~13 GB a VRAM (el transitorio más grande
+        // del sistema); se evalúan ANTES de tocar el motor en marcha.
+        let cfg = self.config.get();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if let Err(wait) = check_start_guard(
+            cfg.engine.start_cooldown_secs,
+            cfg.engine.max_starts_per_hour,
+            &mut self.start_history.lock(),
+            now,
+        ) {
+            let msg = if wait.cooldown_left > 0 {
+                format!(
+                    "Arranque demasiado pronto: esperá {} s antes de reintentar (protección de energía).",
+                    wait.cooldown_left
+                )
+            } else {
+                "Límite de arranques por hora alcanzado (protección de energía): reintentá más tarde.".to_string()
+            };
+            self.log(&msg);
+            return Err(msg);
+        }
         self.stop();
 
         // Brief delay to allow Windows to clear any TIME_WAIT TCP sockets
@@ -759,7 +866,6 @@ impl ProcessManager {
 
         let cfg = self.config.get();
         let engine = &cfg.engine;
-
         // Perfil: request > config.last > config.profiles
         let profile: HardwareProfile = if let Some(id) = req.profile.as_ref().filter(|s| !s.is_empty()) {
             crate::profiles::resolve_profile(&cfg.profiles, id)
@@ -774,7 +880,10 @@ impl ProcessManager {
         // persiste ni se expone el fantasma (D-1) aunque el request o el TOML
         // traigan un id desconocido.
         let profile_id = profile.id.clone();
-
+        // Modo seguro (LM-NF-3, SIN restringir contexto: el dueño trabaja
+        // siempre en 128K-262K). El aviso de 262K se emite tras resolver el
+        // contexto real (ver `power_note_262k` abajo).
+        let power_safe_on = engine.power_safe;
         let models = self.list_models();
         let model_filename = req
             .model
@@ -918,6 +1027,15 @@ impl ProcessManager {
         // reutilización de prefijo ya funciona sin él (ver comentario en
         // `cache_reuse` en config.rs). Campo conservado para la API/compat.
 
+        // Candado PSU (LM-NF-3): ni el perfil ni el engine global pueden subir
+        // `-ub`/`-b`/spec por config. La función nombra la flag ofensora.
+        let mut all_extra: Vec<String> = Vec::new();
+        all_extra.extend(profile.extra_flags.iter().cloned());
+        all_extra.extend(cfg.engine.extra_flags.iter().cloned());
+        if let Some(err) = crate::config::psu_unsafe_flag(&all_extra) {
+            self.log(&err);
+            return Err(err);
+        }
         for flag in &profile.extra_flags {
             cmd.arg(flag);
         }
@@ -940,6 +1058,11 @@ impl ProcessManager {
             "[LocalMind] Contexto: {} tokens | Hilos: {} | uBatch: {} | Puerto: {} | cache-reuse: {}",
             context, threads, ubatch, llama_port, cfg.engine.cache_reuse
         ));
+        // Aviso power_safe en 262K (SIN restringir: el dueño trabaja en
+        // 128K-262K siempre). Visible en log/SSE/archivo P30.
+        if power_safe_on && context >= 262144 {
+            self.log("Contexto 262K: consumo y picos más altos; arranques limitados (cooldown 120 s + tope 4/hora). Para liberar VRAM usá Stop manual.");
+        }
         self.log("================================================================");
 
         let mut child = cmd
@@ -1020,8 +1143,9 @@ impl ProcessManager {
             let stored = self.load_times.lock().get(&load_key(&model_filename, context)).copied();
             st.eta_secs = eta_secs(stored, Self::model_size_gb(&self.models_dir, &model_filename));
             st.decode_tps = None;
+            st.decode_tps_samples = Vec::new();
+            st.engine_slow = false;
             st.acceptance_ok = None;
-            st.acceptance_error = None;
         }
         *self.start_instant.lock() = Some(Instant::now());
         // Nuevo arranque: invalida cualquier puerta de aceptación en curso (D1).
@@ -1029,7 +1153,8 @@ impl ProcessManager {
         // Sembrar el timer de inactividad al arrancar (D-20): sin esto
         // `last_activity` queda en 0 y el auto-stop por inactividad no dispara nunca.
         self.touch_activity();
-
+        // Registrar el arranque para cooldown + tope horario (LM-NF-3).
+        record_start(&mut self.start_history.lock(), now);
         // Persistir "última configuración usada" para el próximo arranque.
         self.config.update(|c| {
             c.last = crate::config::LastSettings {
@@ -1066,6 +1191,8 @@ impl ProcessManager {
         st.verifying = false;
         st.starting_for_secs = 0;
         st.eta_secs = 0;
+        st.decode_tps_samples = Vec::new();
+        st.engine_slow = false;
         *self.start_instant.lock() = None;
         // Invalida cualquier puerta de aceptación en curso (D1).
         self.start_epoch.fetch_add(1, Ordering::Relaxed);
@@ -1086,6 +1213,45 @@ fn num_cpus() -> usize {
         .unwrap_or(6)
 }
 
+/// Resultado del guardarraíl de arranque (LM-NF-3): cuánto falta de cooldown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartGuardWait {
+    /// Segundos restantes de cooldown (0 = el tope horario es el que bloquea).
+    pub cooldown_left: u64,
+}
+
+/// Guardarraíl de arranques (LM-NF-3, puro y testeable): cooldown mínimo entre
+/// arranques + tope por hora rodante. `history` son epoch-secs de arranques
+/// previos (solo se podan entradas >1 h). Devuelve `Ok` y NO toca nada si
+/// puede arrancar; `Err` con la espera restante si no. Sin pánicos.
+pub fn check_start_guard(
+    cooldown_secs: u64,
+    max_per_hour: u32,
+    history: &mut Vec<u64>,
+    now: u64,
+) -> Result<(), StartGuardWait> {
+    history.retain(|t| now.saturating_sub(*t) < 3600);
+    if let Some(last) = history.iter().max() {
+        let elapsed = now.saturating_sub(*last);
+        if elapsed < cooldown_secs {
+            return Err(StartGuardWait { cooldown_left: cooldown_secs - elapsed });
+        }
+    }
+    if max_per_hour > 0 && (history.len() as u32) >= max_per_hour {
+        return Err(StartGuardWait { cooldown_left: 0 });
+    }
+    Ok(())
+}
+
+/// Registrar un arranque permitido (LM-NF-3). Acota el historial a 64
+/// entradas para no crecer sin límite (D-8).
+pub fn record_start(history: &mut Vec<u64>, now: u64) {
+    history.push(now);
+    if history.len() > 64 {
+        let excess = history.len() - 64;
+        history.drain(..excess);
+    }
+}
 // ---------------------------------------------------------------------------
 // Puerta de aceptación + crash legible + ETA (funciones puras, testeables)
 // ---------------------------------------------------------------------------
@@ -1142,6 +1308,27 @@ fn acceptance_verdict(tokens: u64, ms: u64) -> Result<f64, String> {
         return Err("tps".to_string());
     }
     Ok(tps)
+}
+
+/// Mediana de las muestras de la puerta (pura y testeable): con 3 elige la
+/// del medio; con 2 la menor (cota inferior: no inflar el reporte); vacía
+/// → `None`. No decide el veredicto, solo resume.
+fn gate_median(samples: &[f64]) -> Option<f64> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if sorted.len() == 2 {
+        return Some(sorted[0]);
+    }
+    Some(sorted[sorted.len() / 2])
+}
+
+/// `engine_slow` (puro): true si la mediana queda bajo el umbral configurable.
+/// Solo informativo — el llamador nunca reintenta por esto (LM-NF-3).
+fn gate_is_slow(median_tps: f64, slow_at: f64) -> bool {
+    median_tps < slow_at
 }
 
 /// ETA en segundos: duración guardada para la misma clave; en frío,
@@ -1514,5 +1701,60 @@ mod tests {
         let resolved = crate::profiles::resolve_profile(&profiles, "turbo");
         assert_eq!(resolved.id, profiles[0].id);
         assert_eq!(profiles[0].id, crate::config::DEFAULT_PROFILE_ID);
+    }
+
+    #[test]
+    fn guard_cooldown_blocks_then_allows() {
+        // Cooldown 120 s: segundo arranque a los 30 s bloqueado con espera 90.
+        let mut h = vec![1000u64];
+        let err = check_start_guard(120, 4, &mut h, 1030).unwrap_err();
+        assert_eq!(err.cooldown_left, 90);
+        // Tras la ventana, permite (y no muta en el check).
+        assert!(check_start_guard(120, 4, &mut h, 1120).is_ok());
+        assert_eq!(h, vec![1000u64]);
+    }
+
+    #[test]
+    fn guard_hourly_cap_blocks_fourth() {
+        // Tope 4/hora: con 4 en la última hora, el 5º se rechaza sin espera.
+        let mut h = vec![100u64, 200, 300, 400];
+        let err = check_start_guard(0, 4, &mut h, 500).unwrap_err();
+        assert_eq!(err.cooldown_left, 0);
+        // Ventana rodada (el más viejo expira) vuelve a permitir.
+        assert!(check_start_guard(0, 4, &mut h, 3701).is_ok());
+    }
+
+    #[test]
+    fn guard_watchdog_does_not_retry() {
+        // El watchdog es solo comentario + `error` sin reintento: verificar que
+        // `check_start_guard` no registra nada solo (el registro ocurre una
+        // vez en el arranque permitido, vía `record_start`).
+        let mut h: Vec<u64> = Vec::new();
+        assert!(check_start_guard(120, 4, &mut h, 9999).is_ok());
+        assert!(h.is_empty());
+        record_start(&mut h, 9999);
+        assert_eq!(h, vec![9999u64]);
+    }
+
+    #[test]
+    fn gate_median_picks_middle_of_three() {
+        // Bimodalidad 128K: [13,0, 25,0, 15,0] → mediana 15,0 (no la fría).
+        assert_eq!(gate_median(&[13.0, 25.0, 15.0]), Some(15.0));
+        assert_eq!(gate_median(&[30.0, 14.0, 28.0]), Some(28.0));
+    }
+
+    #[test]
+    fn gate_median_lower_bound_with_two() {
+        // Con 2 muestras (una falló) se reporta la menor: no inflar.
+        assert_eq!(gate_median(&[24.0, 15.0]), Some(15.0));
+        assert_eq!(gate_median(&[]), None);
+    }
+
+    #[test]
+    fn gate_slow_flag_at_threshold() {
+        // Umbral default 20: bajo → true; igual o más → false.
+        assert!(gate_is_slow(19.9, 20.0));
+        assert!(!gate_is_slow(20.0, 20.0));
+        assert!(!gate_is_slow(34.0, 20.0));
     }
 }
