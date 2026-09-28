@@ -192,23 +192,55 @@ fn load_asset(base_dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
     std::fs::read(base_dir.join(name)).ok()
 }
 
+/// Normaliza `reasoning_effort` antes de reenviar al motor (última línea de
+/// defensa del gateway: los tres proxys pasan por aquí).
+/// La plantilla Qwen solo acepta `low`/`medium`/`xhigh` y responde 500 ante
+/// cualquier otro valor (medido: `"max"` → error de chat-template).
+/// - `minimal` → `low`; `high`/`max` → `xhigh` (insensible a mayúsculas).
+/// - `low`/`medium`/`xhigh` se conservan (en minúsculas).
+/// - Cualquier otro string (incluido `off`: la plantilla también lo rechaza)
+///   o un valor no-string se ELIMINA: el motor usa su default en vez de dar 500.
+/// Los lanzadores anuncian `--thinking max` y sus `thinkingLevelMap` lo marcan
+/// `null` (nivel no soportado lado cliente), pero si un `max` crudo llega al
+/// gateway, aquí se convierte a `xhigh` en vez de tumbar el motor.
 fn sanitize_payload(body_bytes: Vec<u8>) -> Vec<u8> {
     if let Ok(mut json_val) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
         if let Some(obj) = json_val.as_object_mut() {
-            if let Some(re) = obj.get("reasoning_effort").and_then(|v| v.as_str()).map(str::to_string) {
-                let mapped = if re.eq_ignore_ascii_case("minimal") {
-                    "low".to_string()
-                } else if re.eq_ignore_ascii_case("high") {
-                    "xhigh".to_string()
-                } else {
-                    re.clone()
-                };
-                obj.insert("reasoning_effort".to_string(), serde_json::Value::String(mapped));
+            if obj.contains_key("reasoning_effort") {
+                match obj
+                    .get("reasoning_effort")
+                    .and_then(|v| v.as_str())
+                    .and_then(normalize_reasoning_effort)
+                {
+                    Some(mapped) => {
+                        obj.insert("reasoning_effort".to_string(), serde_json::Value::String(mapped));
+                    }
+                    None => {
+                        obj.remove("reasoning_effort");
+                    }
+                }
             }
         }
         serde_json::to_vec(&json_val).unwrap_or(body_bytes)
     } else {
         body_bytes
+    }
+}
+
+/// Mapea un `reasoning_effort` al vocabulario de la plantilla Qwen
+/// (`low`/`medium`/`xhigh`); `None` = desconocido → el llamador elimina el campo.
+fn normalize_reasoning_effort(v: &str) -> Option<String> {
+    if v.eq_ignore_ascii_case("minimal") || v.eq_ignore_ascii_case("low") {
+        Some("low".to_string())
+    } else if v.eq_ignore_ascii_case("high")
+        || v.eq_ignore_ascii_case("max")
+        || v.eq_ignore_ascii_case("xhigh")
+    {
+        Some("xhigh".to_string())
+    } else if v.eq_ignore_ascii_case("medium") {
+        Some("medium".to_string())
+    } else {
+        None
     }
 }
 
@@ -2290,6 +2322,47 @@ mod proxy {
             // Y un archivo real sí carga (el propio server.rs como testigo).
             let here = std::path::PathBuf::from("src");
             assert!(super::super::load_asset(&here, "server.rs").is_some());
+        }
+        #[test]
+        fn reasoning_effort_max_a_xhigh_y_desconocido_se_elimina() {
+            // Misma función que usan los tres proxys: `/v1/chat/completions`,
+            // `/v1/messages` y `/v1/responses` (todos llaman `sanitize_payload`
+            // antes de reenviar al motor).
+            let get = |body: &str| {
+                let out = super::super::sanitize_payload(body.as_bytes().to_vec());
+                let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                v.get("reasoning_effort").cloned()
+            };
+            // `max` → `xhigh` (era el 500 de la plantilla Qwen).
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"max"}"#), Some(serde_json::json!("xhigh")));
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"MAX"}"#), Some(serde_json::json!("xhigh")));
+            // Comportamiento previo intacto.
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"minimal"}"#), Some(serde_json::json!("low")));
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"high"}"#), Some(serde_json::json!("xhigh")));
+            // Válidos intactos (normalizados a minúsculas).
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"low"}"#), Some(serde_json::json!("low")));
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"medium"}"#), Some(serde_json::json!("medium")));
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"xhigh"}"#), Some(serde_json::json!("xhigh")));
+            assert_eq!(get(r#"{"model":"m","reasoning_effort":"Medium"}"#), Some(serde_json::json!("medium")));
+            // Desconocidos (incluido `off`, que la plantilla también rechaza)
+            // y no-strings: campo eliminado, el motor usa su default.
+            let dropped = |body: &str| {
+                let out = super::super::sanitize_payload(body.as_bytes().to_vec());
+                let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                assert!(v.get("reasoning_effort").is_none(), "debió eliminarse: {:?}", String::from_utf8_lossy(&out));
+            };
+            dropped(r#"{"model":"m","reasoning_effort":"ultra"}"#);
+            dropped(r#"{"model":"m","reasoning_effort":"off"}"#);
+            dropped(r#"{"model":"m","reasoning_effort":""}"#);
+            dropped(r#"{"model":"m","reasoning_effort":42}"#);
+            dropped(r#"{"model":"m","reasoning_effort":null}"#);
+            // Sin campo → sin campo; resto del body intacto.
+            let out = super::super::sanitize_payload(br#"{"model":"m","temperature":0.7}"#.to_vec());
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(v.get("reasoning_effort").is_none());
+            assert_eq!(v["temperature"], serde_json::json!(0.7));
+            // No-JSON pasa intacto.
+            assert_eq!(super::super::sanitize_payload(b"no-json".to_vec()), b"no-json".to_vec());
         }
     }
 }
