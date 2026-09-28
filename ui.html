@@ -1592,9 +1592,9 @@
                     <option value="low" selected data-i18n="opt.effLow">Bajo (Rápido)</option>
                     <option value="off" data-i18n="opt.effOff">Desactivado (Off)</option>
                   </select>
-                </div>
               </div>
-              <div class="profile-hint" data-i18n="launch.effortHint">Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar</div>
+            </div>
+            </div>
 
             <div class="field-group">
               <label class="field-label" for="launcher-agent-select">
@@ -2060,6 +2060,13 @@
                 </select>
               </div>
             </div>
+            <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.guardsTitle">Protecciones de arranque</span></div>
+            <div class="telemetry-meta" role="status">
+              <span id="cfg-guard-cooldown">cooldown: —</span>
+              <span id="cfg-guard-starts">arranques/hora: —</span>
+              <span id="cfg-guard-slow">umbral lento: —</span>
+              <span id="cfg-guard-power">power_safe: —</span>
+            </div>
             <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.notifTitle">Avisos del sistema</span></div>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-enabled"> <span data-i18n="settings.notifEnabled">Avisos activados</span></label>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-ready"> <span data-i18n="settings.notifReady">Avisar al quedar listo</span></label>
@@ -2155,7 +2162,9 @@
         'launch.folder': 'Carpeta de Trabajo (Proyecto)',
         'launch.folderTitle': 'Elegir directorio donde abrirán OMP y Pi',
         'launch.chooseFolder': 'Elegir Carpeta',
+        'launch.defaultFolder': '(Ubicación predeterminada)',
         'launch.clearTitle': 'Restablecer a default',
+        'launch.cliDesc': 'Sesión CLI conectada a ',
         'launch.effort': 'Nivel de Razonamiento (Effort)',
         'launch.effortHint': 'Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar',
         'launch.agent': 'Agente / interfaz',
@@ -2290,6 +2299,7 @@
         'settings.seed': 'Seed',
         'settings.nextStart': 'Se aplica al próximo arranque del motor',
         'settings.engineTitle': 'Motor y avisos',
+        'settings.guardsTitle': 'Protecciones de arranque',
         'settings.idleMin': 'Auto-stop (minutos)',
         'settings.idleHint': '0 = desactivado: el motor no se apaga solo',
         'settings.notifTitle': 'Avisos del sistema',
@@ -2359,7 +2369,9 @@
         'launch.folder': 'Work Folder (Project)',
         'launch.folderTitle': 'Choose the directory where OMP and Pi will open',
         'launch.chooseFolder': 'Choose Folder',
+        'launch.defaultFolder': '(Default location)',
         'launch.clearTitle': 'Reset to default',
+        'launch.cliDesc': 'CLI session connected to ',
         'launch.effort': 'Reasoning Level (Effort)',
         'launch.effortHint': 'Low = faster answers; High/Max = more reasoning before answering',
         'launch.agent': 'Agent / interface',
@@ -2492,6 +2504,7 @@
         'settings.seed': 'Seed',
         'settings.nextStart': 'Applies on the next engine start',
         'settings.engineTitle': 'Engine & notices',
+        'settings.guardsTitle': 'Start guardrails',
         'settings.idleMin': 'Auto-stop (minutes)',
         'settings.idleHint': '0 = disabled: the engine never stops itself',
         'settings.notifTitle': 'System notices',
@@ -3330,6 +3343,17 @@
       setCheck('cfg-notif-ready', notif.on_ready === true);
       setCheck('cfg-notif-failure', notif.on_failure === true);
       setCheck('cfg-notif-autostop', notif.on_autostop === true);
+      // Read-only guardrails: shown from GET /api/config (or TOML); never POSTed.
+      const setT = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = v;
+      };
+      const numOrDash = (v, suffix) => ((typeof v === 'number' && isFinite(v)) ? (String(v) + (suffix || '')) : '—');
+      const boolOrDash = (v) => (typeof v === 'boolean' ? (v ? 'sí' : 'no') : '—');
+      setT('cfg-guard-cooldown', 'cooldown: ' + numOrDash(eng.start_cooldown_secs, ' s'));
+      setT('cfg-guard-starts', 'arranques/hora: ' + numOrDash(eng.max_starts_per_hour, ''));
+      setT('cfg-guard-slow', 'umbral lento: ' + numOrDash(eng.slow_gate_tps, ' t/s'));
+      setT('cfg-guard-power', 'power_safe: ' + boolOrDash(eng.power_safe));
     }
 
     async function saveGenerationCfg() {
@@ -3748,6 +3772,7 @@
       return [
         { id: 'pi', label: 'Pi', kind: 'cli', available: true },
         { id: 'omp', label: 'OMP', kind: 'cli', available: true },
+        { id: 'opencode', label: 'OpenCode', kind: 'cli', available: true },
         { id: 'web', label: T('launch.web'), kind: 'web', available: true }
       ];
     }
@@ -3812,14 +3837,15 @@
       const hint = document.getElementById('launcher-agent-hint');
       if (!hint) return;
       const cur = launcherCurrent();
-      if (!cur) { hint.textContent = ''; return; }
+      const trade = T('launch.effortHint');
+      if (!cur) { hint.textContent = trade; return; }
       if (cur.kind === 'web') {
-        hint.textContent = T('launch.webDesc');
+        hint.textContent = T('launch.webDesc') + ' · ' + trade;
         return;
       }
       const active = (st && st.model) || '';
       const activeModelName = active ? String(active).split('/').pop() : 'localmind';
-      hint.textContent = T('launch.cliDesc') + 'localmind/' + activeModelName;
+      hint.textContent = T('launch.cliDesc') + 'localmind/' + activeModelName + ' · ' + trade;
     }
 
     function launcherSetBusy(busy) {
@@ -4114,8 +4140,9 @@
       if (!badge) return;
       try {
         const v = await api.getVersion();
-        if (v && typeof v.version === 'string' && v.version) {
-          badge.textContent = 'v' + v.version;
+        const ver = v && (typeof v.app === 'string' && v.app ? v.app : (typeof v.version === 'string' && v.version ? v.version : ''));
+        if (ver) {
+          badge.textContent = 'v' + ver;
           return; // keep a truthful value; never hide, never invent one
         }
       } catch (e) {}
