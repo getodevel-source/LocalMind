@@ -53,7 +53,7 @@ const stubs = [{}, {}, {}];
 
 function load(script, doc, storage, nav, fetchImpl) {
   const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
-    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, setLanguage, getLanguage, T, I18N, lastModelsCache };');
+    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache };');
   return factory(doc, mkWindow(), storage || mkStorage(), nav || mkNav(), mkES, fetchImpl || stubFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
 }
 
@@ -534,4 +534,44 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   ok('version badge falls back to version field', (await run({ version: '1.2.3' })) === '1.2.3');
   ok('version badge falls back to local', (await run(null)) === 'local');
   void mkApi;
+}
+
+// ---- failing start (400, Spanish error) surfaces in error banner ----
+{
+  const d = makeDoc();
+  const calls = [];
+  const fetch400 = async (url, opts = {}) => {
+    calls.push(String(url));
+    if (String(url).includes('/api/start')) {
+      return { ok: false, status: 400, json: async () => ({ error: 'perfil desconocido: noexiste' }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  const a = load(script, d, mkStorage(), mkNav(), fetch400);
+  d.getElementById('model-select').value = 'm.gguf';
+  d.getElementById('profile-select').value = 'noexiste';
+  await a.startEngine();
+  const b = d.getElementById('error-banner');
+  ok('failed POST /api/start 400 shows inline banner',
+    b.style.display === 'block' && String(b.textContent || '').includes('perfil desconocido: noexiste'),
+    JSON.stringify({ display: b.style.display, text: String(b.textContent || '').slice(0, 90) }));
+  ok('failed start hits /api/start exactly once', calls.filter(u => u.includes('/api/start')).length === 1, JSON.stringify(calls));
+}
+
+// ---- failing start with bad context: same inline path ----
+{
+  const d = makeDoc();
+  const fetch400 = async (url) => {
+    if (String(url).includes('/api/start')) {
+      return { ok: false, status: 400, json: async () => ({ error: 'contexto inválido: 123' }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  const a = load(script, d, mkStorage(), mkNav(), fetch400);
+  d.getElementById('model-select').value = 'm.gguf';
+  await a.startEngine();
+  const b = d.getElementById('error-banner');
+  ok('failed start (bad context) shows inline banner',
+    b.style.display === 'block' && String(b.textContent || '').includes('contexto inválido'),
+    JSON.stringify(String(b.textContent || '').slice(0, 80)));
 }
