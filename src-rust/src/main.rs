@@ -98,6 +98,10 @@ fn main() {
     let cfg_now = config.get();
 
     let process_mgr = Arc::new(ProcessManager::new(base_dir.clone(), Arc::clone(&config)));
+    // Migración tuning: una línea de log con los perfiles refrescados (P30).
+    if let Some(note) = config.take_migration_note() {
+        process_mgr.log(&note);
+    }
 
     // Start embedded HTTP server
     let server = match HttpServer::start(Arc::clone(&process_mgr), Arc::clone(&config), base_dir.clone()) {

@@ -149,6 +149,14 @@ impl Default for MmprojConfig {
 /// el fantasma `turbo` nunca debe asomar en el estado ni en `last.profile`).
 pub const DEFAULT_PROFILE_ID: &str = "velocidad";
 
+/// Versión de los perfiles tuning integrados. Historial:
+/// v1 = `--no-mmap` en `libros`; v2 = vuelta a `[]` (veredicto A/B
+/// prematuro, revertido); v3 = `--load-mode none` en `libros` (grafía
+/// canónica, mismo efecto medido: prefill 38,18 t/s, decode igual).
+/// La migración en `ConfigStore::load` refresca perfiles materializados no
+/// customizados (misma regla segura: fotos v0/v1/v2 reconocidas).
+pub const PROFILES_VERSION: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationsConfig {
     /// Interruptor general de avisos de escritorio (P20).
@@ -288,6 +296,10 @@ pub struct AppConfig {
     /// Parámetros de generación (P16). La puerta usa temperature 0 fijo.
     #[serde(default)]
     pub generation: GenerationConfig,
+    /// Versión de los perfiles integrados materializados (migración tuning).
+    /// Ausente en TOMLs viejos → 0. Actual: `PROFILES_VERSION`.
+    #[serde(default)]
+    pub profiles_version: u32,
 }
 
 impl Default for AppConfig {
@@ -299,6 +311,7 @@ impl Default for AppConfig {
             last: LastSettings::default(),
             notifications: NotificationsConfig::default(),
             generation: GenerationConfig::default(),
+            profiles_version: PROFILES_VERSION,
         }
     }
 }
@@ -398,8 +411,20 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
             name: "Libros largos · 128K contexto extendido".to_string(),
             description: "Modelo en VRAM + KV cache ampliado en RAM del sistema: sostiene ~120k palabras (un libro entero o proyecto grande). Velocidad moderada (~15-20% menor que Velocidad máxima) al cursar tráfico por el bus de memoria.".to_string(),
             context: 131072,
+            // Jank 128K medido 2026-09-25 (máquina quieta, sampler 200 s @5 s):
+            //   cache_ram 6144 → commit ~88 %, libre ~1,4 GB, decode 16,04 t/s
+            //   cache_ram 0    → commit ~88 %, libre ~0,65 GB, decode 16,23 t/s
+            // A/B prefill 8k @128K (mismo prompt 10546 tok, misma máquina):
+            //   mmap default → prefill 21,65 t/s · decode 14,01 t/s
+            //   --no-mmap    → prefill 38,18 t/s · decode 13,92 t/s
+            // Veredicto (override del dueño): el prefill del primer turno ES el
+            // caso diario (cada primer turno paga 5-12k tok de system-prompt;
+            // 463 s → 263 s = ~200 s menos de espera) y el decode queda igual
+            // (-0,6 % ruido). Se mantiene con la grafía canónica `--load-mode
+            // none` (`--no-mmap` está deprecado en este build).
+            // No tocar -ub/-b/hilos/spec en este perfil (PSU).
             cache_ram: 6144,
-            extra_flags: Vec::new(),
+            extra_flags: vec!["--load-mode".to_string(), "none".to_string()],
         },
         HardwareProfile {
             id: "max_contexto".to_string(),
@@ -418,6 +443,78 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
     ]
 }
 
+/// Foto de los integrados en una versión dada. Al subir `PROFILES_VERSION`
+/// se conservan TODAS las fotos previas que la migración deba reconocer:
+/// v0 = `libros` sin flags; v1 = `libros` con `--no-mmap`;
+/// v2 = `libros` sin flags (reversión); el resto idéntico en todas.
+/// Solo los campos migrables (context, cache_ram, extra_flags). Ids
+/// desconocidos → `None`. Sin pánicos.
+pub fn previous_built_in_field(id: &str, version: u32) -> Option<(usize, usize, Vec<String>)> {
+    match (id, version) {
+        ("velocidad", _) => Some((32768, 0, Vec::new())),
+        ("multi_doc", _) => Some((65536, 4096, Vec::new())),
+        ("libros", 0) | ("libros", 2) => Some((131072, 6144, Vec::new())),
+        ("libros", _) => Some((131072, 6144, vec!["--no-mmap".to_string()])),
+        ("max_contexto", _) => Some((262144, 6144, vec!["-kvu".to_string()])),
+        _ => None,
+    }
+}
+
+/// Refrescar perfiles materializados no customizados hacia los integrados
+/// actuales, aceptando como "no customizado" el valor de CUALQUIER versión
+/// previa (`stored_version..PROFILES_VERSION`): el usuario solo customiza si
+/// su valor no coincide con ninguna foto previa. Regla por id conocido:
+/// `extra_flags` se actualiza solo si cada flag guardada ya estaba en alguna
+/// foto previa (el usuario no añadió nada); `cache_ram`/`context` solo si
+/// siguen iguales a alguna foto previa. Ids desconocidos intactos. Devuelve
+/// los ids tocados (para el log).
+pub fn migrate_builtin_profiles_from(
+    stored: &mut [HardwareProfile],
+    stored_version: u32,
+) -> Vec<String> {
+    let current = built_in_profiles();
+    let mut touched = Vec::new();
+    for p in stored.iter_mut() {
+        let cur = match current.iter().find(|c| c.id == p.id) {
+            Some(c) => c,
+            None => continue,
+        };
+        let mut prevs = Vec::new();
+        for v in stored_version..PROFILES_VERSION {
+            if let Some(prev) = previous_built_in_field(&p.id, v) {
+                prevs.push(prev);
+            }
+        }
+        if prevs.is_empty() {
+            continue;
+        }
+        let flags_untouched = prevs.iter().any(|prev| p.extra_flags.iter().all(|f| prev.2.contains(f)));
+        let mut changed = false;
+        if flags_untouched && p.extra_flags != cur.extra_flags {
+            p.extra_flags = cur.extra_flags.clone();
+            changed = true;
+        }
+        if prevs.iter().any(|prev| p.context == prev.0) && p.context != cur.context {
+            p.context = cur.context;
+            changed = true;
+        }
+        if prevs.iter().any(|prev| p.cache_ram == prev.1) && p.cache_ram != cur.cache_ram {
+            p.cache_ram = cur.cache_ram;
+            changed = true;
+        }
+        if changed {
+            touched.push(p.id.clone());
+        }
+    }
+    touched
+}
+
+/// Atajo para tests: migrar como si el TOML estuviera en v0.
+#[cfg(test)]
+pub fn migrate_builtin_profiles(stored: &mut [HardwareProfile]) -> Vec<String> {
+    migrate_builtin_profiles_from(stored, 0)
+}
+
 // ---------------------------------------------------------------------------
 // ConfigStore: carga/escritura del TOML en %APPDATA%\LocalMind\localmind.toml
 // ---------------------------------------------------------------------------
@@ -425,6 +522,8 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
 pub struct ConfigStore {
     path: PathBuf,
     inner: Arc<RwLock<AppConfig>>,
+    /// Nota de migración pendiente de loguear (la sirve `take_migration_note`).
+    pending_note: Arc<RwLock<Option<String>>>,
 }
 
 impl ConfigStore {
@@ -453,22 +552,37 @@ impl ConfigStore {
             cfg.last.profile = Some(DEFAULT_PROFILE_ID.to_string());
             cfg.last.context = None;
         }
-        {
-            let migrated = raw.is_some() && cfg.profiles.iter().all(|p| !["turbo","balanced","deep","ultra"].contains(&p.id.as_str()));
-            if raw.is_none() || migrated {
-                // Primera ejecución o migración de perfiles: materializar plantilla
-                if let Ok(text) = toml::to_string_pretty(&cfg) {
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(&path, text);
+        // Migración tuning (v0/v1 → v2: vuelta de `libros` a `[]`): refrescar
+        // solo perfiles materializados no customizados (regla en
+        // `migrate_builtin_profiles_from`, que acepta cualquier foto previa);
+        // perfiles de usuario e ids desconocidos intactos. Atómica best-effort.
+        let mut tuned_note: Option<String> = None;
+        if raw.is_some() && cfg.profiles_version < PROFILES_VERSION {
+            let touched = migrate_builtin_profiles_from(&mut cfg.profiles, cfg.profiles_version);
+            cfg.profiles_version = PROFILES_VERSION;
+            if !touched.is_empty() {
+                tuned_note = Some(format!(
+                    "[LocalMind] Perfiles actualizados a v{}: {}",
+                    PROFILES_VERSION,
+                    touched.join(", ")
+                ));
+            }
+            if let Ok(text) = toml::to_string_pretty(&cfg) {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let tmp = path.with_extension("toml.tmp");
+                if std::fs::write(&tmp, text).is_ok() {
+                    let _ = std::fs::rename(&tmp, &path);
                 }
             }
         }
-        Self {
+        let store = Self {
             path,
             inner: Arc::new(RwLock::new(cfg)),
-        }
+            pending_note: Arc::new(RwLock::new(tuned_note)),
+        };
+        store
     }
 
     fn config_path(base_dir: &Path) -> PathBuf {
@@ -487,6 +601,11 @@ impl ConfigStore {
 
     pub fn update(&self, f: impl FnOnce(&mut AppConfig)) {
         f(&mut self.inner.write());
+    }
+
+    /// Servir y consumir la nota de migración (una sola vez, para `mgr.log`).
+    pub fn take_migration_note(&self) -> Option<String> {
+        self.pending_note.write().take()
     }
 
     /// Persistir en disco (best-effort).
@@ -599,5 +718,168 @@ mod tests {
         assert!(gen_seed_ok(0));
         assert!(gen_seed_ok(42));
         assert!(!gen_seed_ok(-1));
+    }
+
+    fn mig_profile(id: &str, ctx: usize, ram: usize, flags: &[&str]) -> HardwareProfile {
+        HardwareProfile {
+            id: id.to_string(),
+            name: String::new(),
+            description: String::new(),
+            context: ctx,
+            cache_ram: ram,
+            extra_flags: flags.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn mig_untouched_gets_new_flags_and_version() {
+        // Perfil v0/v2 intacto (`[]`) → v3 lo lleva a `--load-mode none`.
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &[])];
+        let touched = migrate_builtin_profiles(&mut stored);
+        assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+        assert_eq!(PROFILES_VERSION, 3);
+    }
+
+    #[test]
+    fn mig_v1_nommap_upgraded_to_canonical() {
+        // v1 (`--no-mmap` intacto) → v3 canónico. La foto v1 reconoce el valor.
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--no-mmap"])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 1);
+        assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+    }
+
+    #[test]
+    fn mig_v2_empty_upgraded_to_canonical() {
+        // v2 (`[]` por la reversión) → v3 canónico.
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &[])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 2);
+        assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+    }
+
+    #[test]
+    fn mig_v1_nommap_reverted_to_empty() {
+        // Historia v1→v2 conservada como caso: con destino v2 el neto era `[]`.
+        // (Hoy el destino es v3; se documenta vía `migrate_…_from(…,1)`.)
+        let touched = migrate_builtin_profiles_from(
+            &mut [mig_profile("libros", 131072, 6144, &["--no-mmap"])],
+            1,
+        );
+        assert_eq!(touched, vec!["libros".to_string()]);
+    }
+
+    #[test]
+    fn mig_user_flag_keeps_profile() {
+        // (b) Flag añadida por el usuario → no se sobrescribe (ninguna versión).
+        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--mi-flag"])];
+        let touched = migrate_builtin_profiles(&mut stored);
+        assert!(touched.is_empty());
+        assert_eq!(stored[0].extra_flags, vec!["--mi-flag".to_string()]);
+    }
+
+    #[test]
+    fn mig_user_context_left_alone() {
+        // (c) Contexto customizado → intacto; flags sí (eran foto previa).
+        let mut stored = vec![mig_profile("libros", 65536, 6144, &["--no-mmap"])];
+        let touched = migrate_builtin_profiles_from(&mut stored, 1);
+        assert_eq!(touched, vec!["libros".to_string()]);
+        assert_eq!(stored[0].context, 65536);
+        assert_eq!(stored[0].extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+    }
+
+    #[test]
+    fn mig_unknown_id_untouched() {
+        // (d) Id desconocido → intacto.
+        let mut stored = vec![mig_profile("mio", 999, 1, &[])];
+        let touched = migrate_builtin_profiles(&mut stored);
+        assert!(touched.is_empty());
+        assert_eq!(stored[0].context, 999);
+    }
+
+    #[test]
+    fn mig_current_version_writes_nothing() {
+        // (e) Versión al día → `load` no reescribe (regla: solo si < actual).
+        // Se prueba la condición, no el FS: un cfg ya en v1 no entra al brazo.
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.profiles_version, PROFILES_VERSION);
+        assert!(cfg.profiles_version < PROFILES_VERSION + 1);
+        assert!(!(cfg.profiles_version < PROFILES_VERSION));
+    }
+
+    #[test]
+    fn mig_proof_scratch_appdata_old_toml() {
+        // Prueba de carga real contra APPDATA scratch: TOML v0 materializado
+        // (libros intacto, multi_doc con flag de usuario, mio desconocido).
+        // Con v2 el neto es `[]`, pero la versión avanza y el customizado
+        // queda intacto.
+        let dir = std::env::temp_dir().join(format!("lm-mig-proof-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
+        let toml = "[engine]\n\n\
+            [[profiles]]\nid = \"velocidad\"\nname = \"V\"\ndescription = \"d\"\ncontext = 32768\ncache_ram = 0\nextra_flags = []\n\n\
+            [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = []\n\n\
+            [[profiles]]\nid = \"multi_doc\"\nname = \"M\"\ndescription = \"d\"\ncontext = 65536\ncache_ram = 4096\nextra_flags = [\"--mi-flag\"]\n\n\
+            [[profiles]]\nid = \"mio\"\nname = \"X\"\ndescription = \"d\"\ncontext = 999\ncache_ram = 1\nextra_flags = []\n\n\
+            [last]\nprofile = \"libros\"\n";
+        std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
+        // APPDATA redirigido: `ConfigStore::load` lee de allí (sin tocar el real).
+        std::env::set_var("APPDATA", &dir);
+        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        let cfg = store.get();
+        let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
+        // v0 intacto → v3 canónico.
+        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+        // Flag de usuario → intacta.
+        let md = cfg.profiles.iter().find(|p| p.id == "multi_doc").unwrap();
+        assert_eq!(md.extra_flags, vec!["--mi-flag".to_string()]);
+        // Desconocido → intacto.
+        let mio = cfg.profiles.iter().find(|p| p.id == "mio").unwrap();
+        assert_eq!(mio.context, 999);
+        // Versión escrita.
+        assert_eq!(cfg.profiles_version, PROFILES_VERSION);
+        let back = std::fs::read_to_string(dir.join("LocalMind").join("localmind.toml")).unwrap();
+        assert!(back.contains("profiles_version = 3"));
+        assert!(back.contains("--load-mode"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mig_proof_scratch_appdata_v1_toml_upgrades() {
+        // TOML v1 (`--no-mmap` en libros): la v3 lo lleva al canónico.
+        let dir = std::env::temp_dir().join(format!("lm-mig-proof-v1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
+        let toml = "profiles_version = 1\n\n[engine]\n\n\
+            [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = [\"--no-mmap\"]\n\n\
+            [last]\nprofile = \"libros\"\n";
+        std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
+        std::env::set_var("APPDATA", &dir);
+        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        let cfg = store.get();
+        let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
+        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+        assert_eq!(cfg.profiles_version, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mig_proof_scratch_appdata_v2_toml_upgrades() {
+        // TOML v2 (`[]` por la reversión): la v3 lo lleva al canónico.
+        let dir = std::env::temp_dir().join(format!("lm-mig-proof-v2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
+        let toml = "profiles_version = 2\n\n[engine]\n\n\
+            [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = []\n\n\
+            [last]\nprofile = \"libros\"\n";
+        std::fs::write(dir.join("LocalMind").join("localmind.toml"), toml).unwrap();
+        std::env::set_var("APPDATA", &dir);
+        let store = ConfigStore::load(Path::new("irrelevant-base"));
+        let cfg = store.get();
+        let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
+        assert_eq!(libros.extra_flags, vec!["--load-mode".to_string(), "none".to_string()]);
+        assert_eq!(cfg.profiles_version, 3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
