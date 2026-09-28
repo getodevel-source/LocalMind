@@ -1,0 +1,1048 @@
+{
+  "ts": "2026-09-28T03:47:01.315Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 6236,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1464,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 14.83019427554501,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-reaction-gLzbEY",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 472076.3912,
+      "first_byte_ms": 472031.4113,
+      "stdout_bytes": 3,
+      "stderr_bytes": 141,
+      "stdout_head": "OK\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking me to respond exactly with \"OK\". This is a simple one-turn request, and there's no need to use any tools.\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 7058,
+          "prompt_tokens": 166,
+          "stream": true,
+          "ts": 1790564117
+        },
+        {
+          "completion_tokens": 35,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 157337,
+          "prompt_tokens": 9703,
+          "stream": true,
+          "ts": 1790564567
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 166,
+          "completion_tokens": 64,
+          "ms": 7058,
+          "leg_tps": 9.067724567866252,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9703,
+          "completion_tokens": 35,
+          "ms": 157337,
+          "leg_tps": 0.22245244284561166,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9869,
+      "completion_tokens": 99,
+      "gateway_ms": 164395,
+      "effective_tps": 0.6022080963532954
+    },
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-tput1-4WVq3Z",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 526215.7515,
+      "first_byte_ms": 458106.6477,
+      "stdout_bytes": 1092,
+      "stderr_bytes": 561,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking in Spanish: \"Escribe los números del 1 al 300, uno por línea, sin texto adicional.\" — \"Write the numbers from 1 to 300, one per line, with no additional text.\"\n\nThis is a simple request: output the numbers from 1 to 300, one per line, with no additional text. This is probably a benchmark testing output token count. I just need to write out the numbers.\n\nNo tools needed. I just need to respond with the numbers from 1 to 300, one per line, with no additional text.\n\nLet me carefully write out the numbers from 1 to 300.\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5878,
+          "prompt_tokens": 181,
+          "stream": true,
+          "ts": 1790564575
+        },
+        {
+          "completion_tokens": 1242,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 223975,
+          "prompt_tokens": 9725,
+          "stream": true,
+          "ts": 1790565093
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 181,
+          "completion_tokens": 64,
+          "ms": 5878,
+          "leg_tps": 10.888057162300102,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 9725,
+          "completion_tokens": 1242,
+          "ms": 223975,
+          "leg_tps": 5.545261747962942,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 9906,
+      "completion_tokens": 1306,
+      "gateway_ms": 229853,
+      "effective_tps": 5.681892339886797,
+      "engine_gen_tps": 17.7568,
+      "engine_metrics": {
+        "gen_tps": 17.7568,
+        "prompt_tokens_cached": 19548,
+        "prompt_tokens_total": 19736,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 1079,
+        "spec_draft_tokens": 1188,
+        "tokens_predicted": 1679
+      }
+    },
+    {
+      "harness": "opencode",
+      "version": "1.18.10",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "run",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "XDG_DATA_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\data",
+        "XDG_CONFIG_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\config",
+        "XDG_CACHE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\cache",
+        "XDG_STATE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\state",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-opencode-reaction-VYCm6c",
+      "ok": false,
+      "error": "timeout after 600000 ms",
+      "exit_code": null,
+      "wall_ms": 600010.3824,
+      "first_byte_ms": 1646.4768,
+      "stdout_bytes": 0,
+      "stderr_bytes": 36,
+      "stdout_head": null,
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 39,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 16744,
+          "prompt_tokens": 592,
+          "stream": true,
+          "ts": 1790565113
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 592,
+          "completion_tokens": 39,
+          "ms": 16744,
+          "leg_tps": 2.329192546583851,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 592,
+      "completion_tokens": 39,
+      "gateway_ms": 16744,
+      "effective_tps": 2.329192546583851
+    },
+    {
+      "harness": "opencode",
+      "version": "1.18.10",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "run",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "XDG_DATA_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\data",
+        "XDG_CONFIG_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\config",
+        "XDG_CACHE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\cache",
+        "XDG_STATE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\state",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-opencode-tput1-Q5mxiz",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 783129.0615,
+      "first_byte_ms": 2072.3527,
+      "stdout_bytes": 1093,
+      "stderr_bytes": 36,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\r\n",
+      "stderr_head": "\u001b[0m\r\n> build · qwen3.8-27b\r\n\u001b[0m\r\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 30,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 656374,
+          "prompt_tokens": 12279,
+          "stream": true,
+          "ts": 1790565754
+        },
+        {
+          "completion_tokens": 206,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 72531,
+          "prompt_tokens": 608,
+          "stream": true,
+          "ts": 1790565769
+        },
+        {
+          "completion_tokens": 1213,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 779427,
+          "prompt_tokens": 12294,
+          "stream": true,
+          "ts": 1790566478
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 12279,
+          "completion_tokens": 30,
+          "ms": 656374,
+          "leg_tps": 0.04570564952298537,
+          "stream": true
+        },
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 608,
+          "completion_tokens": 206,
+          "ms": 72531,
+          "leg_tps": 2.840164895010409,
+          "stream": true
+        },
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 12294,
+          "completion_tokens": 1213,
+          "ms": 779427,
+          "leg_tps": 1.5562714660898327,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 25181,
+      "completion_tokens": 1449,
+      "gateway_ms": 1508332,
+      "effective_tps": 0.9606638326310122,
+      "engine_gen_tps": 17.4497,
+      "engine_metrics": {
+        "gen_tps": 17.4497,
+        "prompt_tokens_cached": 20138,
+        "prompt_tokens_total": 44936,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 2038,
+        "spec_draft_tokens": 2252,
+        "tokens_predicted": 3169
+      }
+    },
+    {
+      "harness": "omp",
+      "version": "omp/18.3.1",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "--thinking",
+        "low",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\omp"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-omp-reaction-75DHSI",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 323951.6869,
+      "first_byte_ms": 564.3592,
+      "stdout_bytes": 3,
+      "stderr_bytes": 11,
+      "stdout_head": "OK\n",
+      "stderr_head": "Working...\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 22,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 323236,
+          "prompt_tokens": 7733,
+          "stream": true,
+          "ts": 1790566802
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7733,
+          "completion_tokens": 22,
+          "ms": 323236,
+          "leg_tps": 0.06806172579786905,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 7733,
+      "completion_tokens": 22,
+      "gateway_ms": 323236,
+      "effective_tps": 0.06806172579786905
+    },
+    {
+      "harness": "omp",
+      "version": "omp/18.3.1",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "--thinking",
+        "low",
+        "-p",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\omp"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-omp-tput1-7hG2qU",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 67166.3044,
+      "first_byte_ms": 503.4666,
+      "stdout_bytes": 1092,
+      "stderr_bytes": 11,
+      "stdout_head": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193\n194\n195\n196\n197\n198\n199\n200\n201\n202\n203\n204\n205\n206\n207\n208\n209\n210\n211\n212\n213\n214\n215\n216\n217\n218\n219\n220\n221\n222\n223\n224\n225\n226\n227\n228\n229\n230\n231\n232\n233\n234\n235\n236\n237\n238\n239\n240\n241\n242\n243\n244\n245\n246\n247\n248\n249\n250\n251\n252\n253\n254\n255\n256\n257\n258\n259\n260\n261\n262\n263\n264\n265\n266\n267\n268\n269\n270\n271\n272\n273\n274\n275\n276\n277\n278\n279\n280\n281\n282\n283\n284\n285\n286\n287\n288\n289\n290\n291\n292\n293\n294\n295\n296\n297\n298\n299\n300\n",
+      "stderr_head": "Working...\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 1119,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 66535,
+          "prompt_tokens": 7751,
+          "stream": true,
+          "ts": 1790566870
+        }
+      ],
+      "legs": [
+        {
+          "model": "qwen3.8-27b",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 7751,
+          "completion_tokens": 1119,
+          "ms": 66535,
+          "leg_tps": 16.818215976553695,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 7751,
+      "completion_tokens": 1119,
+      "gateway_ms": 66535,
+      "effective_tps": 16.818215976553695,
+      "engine_gen_tps": 18.2228,
+      "engine_metrics": {
+        "gen_tps": 18.2228,
+        "prompt_tokens_cached": 27801,
+        "prompt_tokens_total": 52774,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 2798,
+        "spec_draft_tokens": 3022,
+        "tokens_predicted": 4312
+      }
+    },
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "phase": "reaction",
+      "rep": 1,
+      "fair": true,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+        "--provider",
+        "localmind",
+        "--model",
+        "localmind/localmind",
+        "--thinking",
+        "low",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\pi"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-pi-reaction-wW5KDP",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 188376.9332,
+      "first_byte_ms": 188368.1674,
+      "stdout_bytes": 45,
+      "stderr_bytes": 0,
+      "stdout_head": "Listo, aquí estoy cuando me necesites. 👍\n",
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 71,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 177839,
+          "prompt_tokens": 4895,
+          "stream": true,
+          "ts": 1790567049
+        },
+        {
+          "completion_tokens": 76,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5786,
+          "prompt_tokens": 4980,
+          "stream": true,
+          "ts": 1790567055
+        },
+        {
+          "completion_tokens": 51,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 4298,
+          "prompt_tokens": 5068,
+          "stream": true,
+          "ts": 1790567059
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4895,
+          "completion_tokens": 71,
+          "ms": 177839,
+          "leg_tps": 0.3992375125816047,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4980,
+          "completion_tokens": 76,
+          "ms": 5786,
+          "leg_tps": 13.135153819564467,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5068,
+          "completion_tokens": 51,
+          "ms": 4298,
+          "leg_tps": 11.865984178687762,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 14943,
+      "completion_tokens": 198,
+      "gateway_ms": 187923,
+      "effective_tps": 1.0536230264523236
+    },
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "phase": "throughput",
+      "rep": 1,
+      "thinking": "low",
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+        "--provider",
+        "localmind",
+        "--model",
+        "localmind/localmind",
+        "--thinking",
+        "low",
+        "-p",
+        "Escribe los números del 1 al 300, uno por línea, sin texto adicional."
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\pi"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-pi-tput1-L2UuzQ",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 161493.3014,
+      "first_byte_ms": 161482.9823,
+      "stdout_bytes": 144,
+      "stderr_bytes": 0,
+      "stdout_head": "Entendido: \"sin texto adicional.\" — exactamente así está `numeros.txt`: solo los 300 números, uno por línea, nada más. ✅\n\n¿Algo más?\n",
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 76,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 29448,
+          "prompt_tokens": 4896,
+          "stream": true,
+          "ts": 1790567089
+        },
+        {
+          "completion_tokens": 74,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6696,
+          "prompt_tokens": 4984,
+          "stream": true,
+          "ts": 1790567096
+        },
+        {
+          "completion_tokens": 205,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 16046,
+          "prompt_tokens": 5071,
+          "stream": true,
+          "ts": 1790567112
+        },
+        {
+          "completion_tokens": 92,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 7703,
+          "prompt_tokens": 5288,
+          "stream": true,
+          "ts": 1790567120
+        },
+        {
+          "completion_tokens": 108,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 11971,
+          "prompt_tokens": 5392,
+          "stream": true,
+          "ts": 1790567132
+        },
+        {
+          "completion_tokens": 48,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 3866,
+          "prompt_tokens": 5512,
+          "stream": true,
+          "ts": 1790567135
+        },
+        {
+          "completion_tokens": 120,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 8763,
+          "prompt_tokens": 5575,
+          "stream": true,
+          "ts": 1790567144
+        },
+        {
+          "completion_tokens": 75,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6035,
+          "prompt_tokens": 5715,
+          "stream": true,
+          "ts": 1790567150
+        },
+        {
+          "completion_tokens": 288,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 22894,
+          "prompt_tokens": 5802,
+          "stream": true,
+          "ts": 1790567173
+        },
+        {
+          "completion_tokens": 61,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5650,
+          "prompt_tokens": 6102,
+          "stream": true,
+          "ts": 1790567179
+        },
+        {
+          "completion_tokens": 69,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 5677,
+          "prompt_tokens": 6177,
+          "stream": true,
+          "ts": 1790567185
+        },
+        {
+          "completion_tokens": 157,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 12632,
+          "prompt_tokens": 6258,
+          "stream": true,
+          "ts": 1790567197
+        },
+        {
+          "completion_tokens": 116,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 8443,
+          "prompt_tokens": 6427,
+          "stream": true,
+          "ts": 1790567206
+        },
+        {
+          "completion_tokens": 85,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6661,
+          "prompt_tokens": 6569,
+          "stream": true,
+          "ts": 1790567212
+        },
+        {
+          "completion_tokens": 114,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 8364,
+          "prompt_tokens": 6668,
+          "stream": true,
+          "ts": 1790567221
+        }
+      ],
+      "legs": [
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4896,
+          "completion_tokens": 76,
+          "ms": 29448,
+          "leg_tps": 2.580820429231187,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 4984,
+          "completion_tokens": 74,
+          "ms": 6696,
+          "leg_tps": 11.051373954599761,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5071,
+          "completion_tokens": 205,
+          "ms": 16046,
+          "leg_tps": 12.775769662221116,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5288,
+          "completion_tokens": 92,
+          "ms": 7703,
+          "leg_tps": 11.943398675840582,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5392,
+          "completion_tokens": 108,
+          "ms": 11971,
+          "leg_tps": 9.021802689833764,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5512,
+          "completion_tokens": 48,
+          "ms": 3866,
+          "leg_tps": 12.415933781686498,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5575,
+          "completion_tokens": 120,
+          "ms": 8763,
+          "leg_tps": 13.693940431359124,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5715,
+          "completion_tokens": 75,
+          "ms": 6035,
+          "leg_tps": 12.427506213753107,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 5802,
+          "completion_tokens": 288,
+          "ms": 22894,
+          "leg_tps": 12.579715209225125,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6102,
+          "completion_tokens": 61,
+          "ms": 5650,
+          "leg_tps": 10.79646017699115,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6177,
+          "completion_tokens": 69,
+          "ms": 5677,
+          "leg_tps": 12.154306852210675,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6258,
+          "completion_tokens": 157,
+          "ms": 12632,
+          "leg_tps": 12.428752374920837,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6427,
+          "completion_tokens": 116,
+          "ms": 8443,
+          "leg_tps": 13.739192230249913,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6569,
+          "completion_tokens": 85,
+          "ms": 6661,
+          "leg_tps": 12.760846719711756,
+          "stream": true
+        },
+        {
+          "model": "localmind",
+          "endpoint": "chat.completions",
+          "prompt_tokens": 6668,
+          "completion_tokens": 114,
+          "ms": 8364,
+          "leg_tps": 13.629842180774748,
+          "stream": true
+        }
+      ],
+      "prompt_tokens": 86436,
+      "completion_tokens": 1688,
+      "gateway_ms": 160849,
+      "effective_tps": 10.494314543453799,
+      "engine_gen_tps": 15.8348,
+      "engine_metrics": {
+        "gen_tps": 15.8348,
+        "prompt_tokens_cached": 123463,
+        "prompt_tokens_total": 58508,
+        "prompt_tps": 0,
+        "requests_processing": 0,
+        "spec_accepted_tokens": 3876,
+        "spec_draft_tokens": 4650,
+        "tokens_predicted": 6200
+      }
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "reaction_first_byte_ms": 188368.1674,
+      "reaction_wall_ms": 188376.9332,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        161493.3014
+      ],
+      "throughput_first_byte_ms": [
+        161482.9823
+      ],
+      "throughput_prompt_tokens": [
+        86436
+      ],
+      "throughput_completion_tokens": [
+        1688
+      ],
+      "throughput_gateway_ms": [
+        160849
+      ],
+      "throughput_effective_tps": [
+        10.494314543453799
+      ],
+      "throughput_engine_gen_tps": [
+        15.8348
+      ],
+      "throughput_requests": [
+        15
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    },
+    {
+      "harness": "omp",
+      "version": "omp/18.3.1",
+      "reaction_first_byte_ms": 564.3592,
+      "reaction_wall_ms": 323951.6869,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        67166.3044
+      ],
+      "throughput_first_byte_ms": [
+        503.4666
+      ],
+      "throughput_prompt_tokens": [
+        7751
+      ],
+      "throughput_completion_tokens": [
+        1119
+      ],
+      "throughput_gateway_ms": [
+        66535
+      ],
+      "throughput_effective_tps": [
+        16.818215976553695
+      ],
+      "throughput_engine_gen_tps": [
+        18.2228
+      ],
+      "throughput_requests": [
+        1
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    },
+    {
+      "harness": "opencode",
+      "version": "1.18.10",
+      "reaction_first_byte_ms": 1646.4768,
+      "reaction_wall_ms": 600010.3824,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        783129.0615
+      ],
+      "throughput_first_byte_ms": [
+        2072.3527
+      ],
+      "throughput_prompt_tokens": [
+        25181
+      ],
+      "throughput_completion_tokens": [
+        1449
+      ],
+      "throughput_gateway_ms": [
+        1508332
+      ],
+      "throughput_effective_tps": [
+        0.9606638326310122
+      ],
+      "throughput_engine_gen_tps": [
+        17.4497
+      ],
+      "throughput_requests": [
+        3
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": false
+    },
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "reaction_first_byte_ms": 472031.4113,
+      "reaction_wall_ms": 472076.3912,
+      "throughput_reps": 1,
+      "throughput_wall_ms": [
+        526215.7515
+      ],
+      "throughput_first_byte_ms": [
+        458106.6477
+      ],
+      "throughput_prompt_tokens": [
+        9906
+      ],
+      "throughput_completion_tokens": [
+        1306
+      ],
+      "throughput_gateway_ms": [
+        229853
+      ],
+      "throughput_effective_tps": [
+        5.681892339886797
+      ],
+      "throughput_engine_gen_tps": [
+        17.7568
+      ],
+      "throughput_requests": [
+        2
+      ],
+      "exceeds_30tps": [
+        false
+      ],
+      "ok": true
+    }
+  ]
+}

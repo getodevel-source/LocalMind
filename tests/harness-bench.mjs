@@ -72,6 +72,8 @@ function parseArgs(argv) {
     fair: false,
     thinking: "low",
     warmup: false,
+    reactionTimeout: 600,
+    throughputTimeout: 900,
     baseUrl: "http://127.0.0.1:17860",
   };
   for (let i = 0; i < argv.length; i++) {
@@ -99,8 +101,13 @@ function parseArgs(argv) {
       if (!["low", "off"].includes(v)) throw new Error(`--thinking must be low|off, got "${v}"`);
       o.thinking = v;
     } else if (a === "--warmup") o.warmup = true;
-    else if (a === "--base-url") o.baseUrl = String(next()).replace(/\/+$/, "");
-    else throw new Error(`unknown flag "${a}"`);
+    else if (a === "--reaction-timeout") {
+      o.reactionTimeout = Math.max(1, Number(next()) | 0);
+      if (!Number.isFinite(o.reactionTimeout)) throw new Error("--reaction-timeout needs seconds");
+    } else if (a === "--throughput-timeout") {
+      o.throughputTimeout = Math.max(1, Number(next()) | 0);
+      if (!Number.isFinite(o.throughputTimeout)) throw new Error("--throughput-timeout needs seconds");
+    } else if (a === "--base-url") o.baseUrl = String(next()).replace(/\/+$/, "");
   }
   if (!o.reaction && !o.throughput) {
     o.reaction = true;
@@ -567,11 +574,14 @@ function runChild(spec, cwd, timeoutMs) {
       } catch {}
       resolve({
         ok: false,
+        timedOut: true, // wall time is DATA: the harness was still working
         error: `timeout after ${timeoutMs} ms`,
         wall_ms: Number(process.hrtime.bigint() - t0) / 1e6,
         first_byte_ms: firstByteMs,
         stdout_bytes: outBytes,
         stderr_bytes: errBytes,
+        stdout_head: cap.out.slice(0, 2000),
+        stderr_head: cap.err.slice(0, 2000),
       });
     }, timeoutMs);
     child.on("close", (code, signal) => {
@@ -823,7 +833,7 @@ async function main() {
       const cwd = mkdtempSync(join(tmpdir(), `harness-bench-${h}-reaction-`));
       console.log(`${h} reaction: spawning...`);
       const before = usageLineCount();
-      const r = await runChild(spec, cwd, REACTION_TIMEOUT_MS);
+      const r = await runChild(spec, cwd, OPTS.reactionTimeout * 1000);
       const ulines = usageNewLines(before);
       const agg = sumUsage(ulines);
       // Per-request legs: each gateway request decoded separately (fair mode
@@ -854,7 +864,7 @@ async function main() {
         ),
         cwd,
         ok: r.ok,
-        error: r.error || null,
+        timedOut: r.timedOut === true,
         exit_code: r.exit_code ?? null,
         wall_ms: r.wall_ms,
         first_byte_ms: r.first_byte_ms ?? null,
@@ -883,7 +893,7 @@ async function main() {
         const cwd = mkdtempSync(join(tmpdir(), `harness-bench-${h}-tput${rep}-`));
         const before = usageLineCount();
         console.log(`${h} throughput rep${rep}: spawning...`);
-        const r = await runChild(spec, cwd, THROUGHPUT_TIMEOUT_MS);
+        const r = await runChild(spec, cwd, OPTS.throughputTimeout * 1000);
         const ulines = usageNewLines(before);
         const agg = sumUsage(ulines);
         const legs = ulines.map((u) => ({
@@ -912,7 +922,7 @@ async function main() {
           ),
           cwd,
           ok: r.ok,
-          error: r.error || null,
+          timedOut: r.timedOut === true,
           exit_code: r.exit_code ?? null,
           wall_ms: r.wall_ms,
           first_byte_ms: r.first_byte_ms ?? null,
