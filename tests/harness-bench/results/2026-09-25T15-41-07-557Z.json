@@ -1,0 +1,99 @@
+{
+  "ts": "2026-09-25T15:41:07.556Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 4140,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1376,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 13.35113484646195,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "omp",
+      "version": "omp/18.3.1",
+      "phase": "reaction",
+      "rep": 1,
+      "bin": "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Local\\omp\\omp.exe",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "--thinking",
+        "max",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\omp"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-omp-reaction-IRTz5L",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 335399.1378,
+      "first_byte_ms": 1374.5289,
+      "stdout_bytes": 3,
+      "stderr_bytes": 11,
+      "stdout_head": "OK\n",
+      "stderr_head": "Working...\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 20,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 333813,
+          "prompt_tokens": 7732,
+          "stream": true,
+          "ts": 1790350867
+        }
+      ],
+      "prompt_tokens": 7732,
+      "completion_tokens": 20,
+      "gateway_ms": 333813,
+      "effective_tps": 0.05991378406473086
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "omp",
+      "version": "omp/18.3.1",
+      "reaction_first_byte_ms": 1374.5289,
+      "reaction_wall_ms": 335399.1378,
+      "throughput_reps": 0,
+      "throughput_wall_ms": [],
+      "throughput_first_byte_ms": [],
+      "throughput_prompt_tokens": [],
+      "throughput_completion_tokens": [],
+      "throughput_gateway_ms": [],
+      "throughput_effective_tps": [],
+      "throughput_engine_gen_tps": [],
+      "throughput_requests": [],
+      "exceeds_30tps": [],
+      "ok": false
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "ts": "2026-09-25T15:53:00.767Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 4140,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1486,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 13.35113484646195,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "opencode",
+      "version": "1.18.10",
+      "phase": "reaction",
+      "rep": 1,
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\opencode.cmd",
+        "--model",
+        "localmind/qwen3.8-27b",
+        "run",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "XDG_DATA_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\data",
+        "XDG_CONFIG_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\config",
+        "XDG_CACHE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\cache",
+        "XDG_STATE_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\opencode\\state",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-opencode-reaction-H2qJqS",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 287293.8427,
+      "first_byte_ms": 1917.7121,
+      "stdout_bytes": 4,
+      "stderr_bytes": 36,
+      "stdout_head": "OK\r\n",
+      "stderr_head": "\u001b[0m\r\n> build · qwen3.8-27b\r\n\u001b[0m\r\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 221,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 38941,
+          "prompt_tokens": 592,
+          "stream": true,
+          "ts": 1790351334
+        },
+        {
+          "completion_tokens": 30,
+          "endpoint": "chat.completions",
+          "model": "qwen3.8-27b",
+          "ms": 281946,
+          "prompt_tokens": 12278,
+          "stream": true,
+          "ts": 1790351580
+        }
+      ],
+      "prompt_tokens": 12870,
+      "completion_tokens": 251,
+      "gateway_ms": 320887,
+      "effective_tps": 0.7822068204695111
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "opencode",
+      "version": "1.18.10",
+      "reaction_first_byte_ms": 1917.7121,
+      "reaction_wall_ms": 287293.8427,
+      "throughput_reps": 0,
+      "throughput_wall_ms": [],
+      "throughput_first_byte_ms": [],
+      "throughput_prompt_tokens": [],
+      "throughput_completion_tokens": [],
+      "throughput_gateway_ms": [],
+      "throughput_effective_tps": [],
+      "throughput_engine_gen_tps": [],
+      "throughput_requests": [],
+      "exceeds_30tps": [],
+      "ok": false
+    }
+  ]
+}

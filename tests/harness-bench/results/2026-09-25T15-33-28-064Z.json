@@ -1,0 +1,159 @@
+{
+  "ts": "2026-09-25T15:33:28.063Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 4140,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1065,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 13.35113484646195,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "phase": "reaction",
+      "rep": 1,
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\pi.cmd",
+        "--provider",
+        "localmind",
+        "--model",
+        "localmind/localmind",
+        "--thinking",
+        "max",
+        "-p",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:17860/v1",
+        "OPENAI_API_KEY": "[REDACTED]",
+        "PI_CODING_AGENT_DIR": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\pi"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-pi-reaction-E7RvCu",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 235535.3238,
+      "first_byte_ms": 235519.9252,
+      "stdout_bytes": 76,
+      "stderr_bytes": 0,
+      "stdout_head": "Listo. Dime la tarea o pega el contenido que quieres que procese y arranco.\n",
+      "stderr_head": null,
+      "usage_lines": [
+        {
+          "completion_tokens": 159,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 204973,
+          "prompt_tokens": 4907,
+          "stream": true,
+          "ts": 1790350247
+        },
+        {
+          "completion_tokens": 119,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 12486,
+          "prompt_tokens": 5148,
+          "stream": true,
+          "ts": 1790350260
+        },
+        {
+          "completion_tokens": 118,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 9867,
+          "prompt_tokens": 5281,
+          "stream": true,
+          "ts": 1790350270
+        },
+        {
+          "completion_tokens": 71,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 6790,
+          "prompt_tokens": 5411,
+          "stream": true,
+          "ts": 1790350276
+        }
+      ],
+      "prompt_tokens": 20747,
+      "completion_tokens": 467,
+      "gateway_ms": 234116,
+      "effective_tps": 1.9947376514206632
+    }
+  ],
+  "control": {
+    "ok": true,
+    "wall_ms": 131109.8741,
+    "ttft_ms": 74366.7137,
+    "last_token_ms": 131109.5533,
+    "prompt_tokens": 73,
+    "completion_tokens": 2418,
+    "text_chars": 1091,
+    "decode_tps": 42.61330622586607,
+    "prefill_tps": 0.9816219699378756,
+    "usage_lines": [
+      {
+        "completion_tokens": 2418,
+        "endpoint": "chat.completions",
+        "model": "qwen3.8-27b",
+        "ms": 131105,
+        "prompt_tokens": 73,
+        "stream": true,
+        "ts": 1790350408
+      }
+    ],
+    "gateway_prompt_tokens": 73,
+    "gateway_completion_tokens": 2418,
+    "gateway_ms": 131105,
+    "engine_metrics": {
+      "gen_tps": 18.7316,
+      "prompt_tokens_cached": 15730,
+      "prompt_tokens_total": 5154,
+      "prompt_tps": 0,
+      "requests_processing": 0,
+      "spec_accepted_tokens": 1971,
+      "spec_draft_tokens": 2223,
+      "tokens_predicted": 3085
+    }
+  },
+  "table": [
+    {
+      "harness": "pi",
+      "version": "0.87.0",
+      "reaction_first_byte_ms": 235519.9252,
+      "reaction_wall_ms": 235535.3238,
+      "throughput_reps": 0,
+      "throughput_wall_ms": [],
+      "throughput_first_byte_ms": [],
+      "throughput_prompt_tokens": [],
+      "throughput_completion_tokens": [],
+      "throughput_gateway_ms": [],
+      "throughput_effective_tps": [],
+      "throughput_engine_gen_tps": [],
+      "throughput_requests": [],
+      "exceeds_30tps": [],
+      "ok": false
+    }
+  ]
+}

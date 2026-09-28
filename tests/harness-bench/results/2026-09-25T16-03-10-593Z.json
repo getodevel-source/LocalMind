@@ -1,0 +1,106 @@
+{
+  "ts": "2026-09-25T16:03:10.592Z",
+  "base_url": "http://127.0.0.1:17860",
+  "profile": "libros",
+  "context_requested": 131072,
+  "context_live": 131072,
+  "engine": {
+    "status": "running",
+    "is_healthy": true,
+    "pid": 4140,
+    "model": "Qwen3.8-27B-IQ4_XS_4BPW.gguf",
+    "context": 131072,
+    "profile": "libros",
+    "port": 8080,
+    "idle_remaining_secs": 1491,
+    "last_error": null,
+    "verifying": false,
+    "starting_for_secs": 0,
+    "eta_secs": 0,
+    "decode_tps": 13.35113484646195,
+    "acceptance_ok": true,
+    "acceptance_error": null,
+    "reused": true,
+    "load_note": "reused running load (no restart)",
+    "load_secs": null
+  },
+  "key_source": "gateway.key",
+  "runs": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "phase": "reaction",
+      "rep": 1,
+      "bin": "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+      "argv": [
+        "C:\\Users\\juans\\AppData\\Roaming\\npm\\dsh.cmd",
+        "--profile",
+        "headless",
+        "Responde exactamente: OK"
+      ],
+      "env_redacted": {
+        "DSH_HOME": "C:\\Users\\juans\\AppData\\Roaming\\LocalMind\\agents\\deepseek",
+        "DSH_TELEMETRY_MODE": "DISABLED",
+        "DSH_PERMISSION_MODE": "workspace-write",
+        "LOCALMIND_API_KEY": "[REDACTED]"
+      },
+      "cwd": "C:\\Users\\juans\\AppData\\Local\\Temp\\harness-bench-deepseek-reaction-RELF6X",
+      "ok": true,
+      "error": null,
+      "exit_code": 0,
+      "wall_ms": 199431.1301,
+      "first_byte_ms": 199380.0449,
+      "stdout_bytes": 3,
+      "stderr_bytes": 127,
+      "stdout_head": "OK\n",
+      "stderr_head": "dsh: reasoning:\nThe user is asking me to respond exactly with \"OK\". This is a simple request. I should just respond with \"OK\".\n",
+      "usage_lines": [
+        {
+          "completion_tokens": 64,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 9831,
+          "prompt_tokens": 166,
+          "stream": true,
+          "ts": 1790352003
+        },
+        {
+          "completion_tokens": 31,
+          "endpoint": "chat.completions",
+          "model": "localmind",
+          "ms": 196392,
+          "prompt_tokens": 9703,
+          "stream": true,
+          "ts": 1790352190
+        }
+      ],
+      "prompt_tokens": 9869,
+      "completion_tokens": 95,
+      "gateway_ms": 206223,
+      "effective_tps": 0.46066636602124883
+    }
+  ],
+  "control": {
+    "ok": true,
+    "skipped": true
+  },
+  "table": [
+    {
+      "harness": "deepseek",
+      "version": "0.1.5-rc.3",
+      "reaction_first_byte_ms": 199380.0449,
+      "reaction_wall_ms": 199431.1301,
+      "throughput_reps": 0,
+      "throughput_wall_ms": [],
+      "throughput_first_byte_ms": [],
+      "throughput_prompt_tokens": [],
+      "throughput_completion_tokens": [],
+      "throughput_gateway_ms": [],
+      "throughput_effective_tps": [],
+      "throughput_engine_gen_tps": [],
+      "throughput_requests": [],
+      "exceeds_30tps": [],
+      "ok": false
+    }
+  ]
+}
