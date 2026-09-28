@@ -404,3 +404,58 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
     a.T('launch.effortHint').includes('Bajo') && (() => { a.setLanguage('en'); const s = a.T('launch.effortHint'); a.setLanguage('es'); return s.includes('Low'); })());
 }
 
+// ---- telemetry: gate samples render joined with middle dot ----
+{
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 24.1, decode_tps_samples: [14.8, 24.1, 24.8] });
+  const s = String(d.getElementById('tel-decode-samples').textContent ?? '');
+  ok('samples render joined with middle dot', s.includes('14,8 · 24,1 · 24,8'), JSON.stringify(s));
+}
+
+// ---- telemetry: two-sample payload also renders ----
+{
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 20.0, decode_tps_samples: [19.5, 20.5] });
+  const box = d.getElementById('tel-decode-samples');
+  const s = String(box.textContent ?? '');
+  ok('two-sample payload renders', box.style.display !== 'none' && s.includes('·'), JSON.stringify({ display: box.style.display, s }));
+}
+
+// ---- telemetry: engine_slow true shows warning with median ----
+{
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 14.8, decode_tps_samples: [14.8, 24.1, 24.8], engine_slow: true });
+  const box = d.getElementById('tel-slow-box');
+  const t = String(d.getElementById('tel-slow-text').textContent ?? '');
+  ok('engine_slow true shows warning with median', box.style.display !== 'none' && t.includes('15'), JSON.stringify({ display: box.style.display, t }));
+  a.setLanguage('en');
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 14.8, decode_tps_samples: [14.8, 24.1, 24.8], engine_slow: true });
+  const te = String(d.getElementById('tel-slow-text').textContent ?? '');
+  ok('slow warning translates to english', te.includes('slowly') && te.includes('15'), JSON.stringify(te));
+  a.setLanguage('es');
+}
+
+// ---- telemetry: missing fields render nothing, no leak ----
+{
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 30.1 });
+  const sOn = d.getElementById('tel-decode-samples').style.display === 'none';
+  const wOn = d.getElementById('tel-slow-box').style.display === 'none';
+  a.renderStatus({ status: 'running', is_healthy: true });
+  a.renderStatus({ status: 'stopped', decode_tps_samples: [undefined, NaN, 'x'], engine_slow: undefined });
+  const dump = [...d.reg.values()].map(e => String(e.textContent)).join('|');
+  ok('missing samples and slow flag render nothing', sOn && wOn, JSON.stringify({ sOn, wOn }));
+  ok('samples and slow leak no undefined/NaN', !dump.includes('undefined') && !dump.includes('NaN'), dump.slice(0, 200));
+}
+
+// ---- telemetry: warning hidden when engine_slow false ----
+{
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderStatus({ status: 'running', is_healthy: true, decode_tps: 33.5, decode_tps_samples: [30.1, 33.5, 34.0], engine_slow: false });
+  ok('warning hidden when engine_slow false', d.getElementById('tel-slow-box').style.display === 'none');
+}

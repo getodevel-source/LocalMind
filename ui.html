@@ -725,6 +725,27 @@
       white-space: nowrap;
     }
     .metric-value.highlight { color: var(--ok); }
+    .metric-sub {
+      font-size: 11px;
+      font-weight: var(--fw-regular);
+      color: var(--text-subtle);
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .metric-box.warn {
+      border-color: rgba(245, 185, 79, 0.35);
+      background: var(--warn-glow);
+    }
+    .metric-box.warn .metric-label { color: var(--warn); }
+    .metric-box.warn .metric-value {
+      font-size: var(--fs-s);
+      font-weight: var(--fw-medium);
+      color: var(--warn);
+      white-space: normal;
+    }
 
     .telemetry-meta {
       display: flex;
@@ -1644,10 +1665,15 @@
               <div class="metric-box" id="tel-decode-box" style="display: none;">
                 <span class="metric-label" data-i18n="telemetry.verified">Velocidad verificada</span>
                 <span id="tel-decode-tps" class="metric-value highlight">—</span>
+                <span id="tel-decode-samples" class="metric-sub" style="display: none;">—</span>
               </div>
               <div class="metric-box" id="tel-accept-box" style="display: none;">
                 <span class="metric-label" data-i18n="telemetry.gpuCheck">Verificación GPU</span>
                 <span id="tel-accept-status" class="metric-value">—</span>
+              </div>
+              <div class="metric-box warn" id="tel-slow-box" role="status" style="display: none;">
+                <span class="metric-label" data-i18n="telemetry.slowTitle">Motor lento</span>
+                <span id="tel-slow-text" class="metric-value">—</span>
               </div>
             </div>
           </div>
@@ -2121,12 +2147,14 @@
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Caché',
         'telemetry.requests': 'Solicitudes',
         'telemetry.verified': 'Velocidad verificada',
+        'telemetry.samples': 'muestras: {list} t/s',
+        'telemetry.slowTitle': 'Motor lento',
+        'telemetry.slowText': 'El motor cargó lento ({median} t/s); puede mejorarse reiniciándolo una vez',
         'telemetry.gpuCheck': 'Verificación GPU',
         'launch.title': 'Accesos',
         'launch.folder': 'Carpeta de Trabajo (Proyecto)',
         'launch.folderTitle': 'Elegir directorio donde abrirán OMP y Pi',
         'launch.chooseFolder': 'Elegir Carpeta',
-        'launch.defaultFolder': '(Ubicación predeterminada)',
         'launch.clearTitle': 'Restablecer a default',
         'launch.effort': 'Nivel de Razonamiento (Effort)',
         'launch.effortHint': 'Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar',
@@ -2323,12 +2351,14 @@
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Cache',
         'telemetry.requests': 'Requests',
         'telemetry.verified': 'Verified speed',
+        'telemetry.samples': 'samples: {list} t/s',
+        'telemetry.slowTitle': 'Slow engine',
+        'telemetry.slowText': 'The engine loaded slowly ({median} t/s); a single restart may improve it',
         'telemetry.gpuCheck': 'GPU check',
         'launch.title': 'Shortcuts',
         'launch.folder': 'Work Folder (Project)',
         'launch.folderTitle': 'Choose the directory where OMP and Pi will open',
         'launch.chooseFolder': 'Choose Folder',
-        'launch.defaultFolder': '(Default location)',
         'launch.clearTitle': 'Reset to default',
         'launch.effort': 'Reasoning Level (Effort)',
         'launch.effortHint': 'Low = faster answers; High/Max = more reasoning before answering',
@@ -4243,6 +4273,35 @@
       } else {
         set('tel-decode-tps', '—');
         show('tel-decode-box', false);
+      }
+      // Gate samples: discreet secondary line, only with >= 2 finite entries.
+      // Never renders undefined/NaN: entries are validated individually.
+      const samplesRaw = st.decode_tps_samples;
+      const samples = Array.isArray(samplesRaw)
+        ? samplesRaw.filter(v => typeof v === 'number' && isFinite(v))
+        : [];
+      if (samples.length >= 2) {
+        const fmt1 = (v) => {
+          const r = Math.round(v * 10) / 10;
+          return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace('.', ',');
+        };
+        set('tel-decode-samples', T('telemetry.samples', { list: samples.map(fmt1).join(' · ') }));
+        show('tel-decode-samples', true);
+      } else {
+        set('tel-decode-samples', '—');
+        show('tel-decode-samples', false);
+      }
+      // Slow-load chip: only when the backend flags this load as slow.
+      // Median shown is decode_tps (rounded); hidden when absent or false.
+      if (st.engine_slow === true) {
+        const med = (typeof st.decode_tps === 'number' && isFinite(st.decode_tps))
+          ? String(Math.round(st.decode_tps))
+          : '—';
+        set('tel-slow-text', T('telemetry.slowText', { median: med }));
+        show('tel-slow-box', true);
+      } else {
+        set('tel-slow-text', '—');
+        show('tel-slow-box', false);
       }
       if (st.acceptance_ok === true) {
         set('tel-accept-status', 'OK');
