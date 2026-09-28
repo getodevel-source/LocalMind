@@ -101,6 +101,7 @@ fn app_config_json(c: &crate::config::AppConfig) -> String {
             "idle_timeout_secs": c.engine.idle_timeout_secs,
             "threads": c.engine.threads,
             "priority": c.engine.priority,
+            "speculation_enabled": c.engine.speculation.as_ref().is_some_and(|s| s.enabled),
             "batch": c.engine.batch,
             "ubatch": 512,
             "device": c.engine.device,
@@ -829,7 +830,7 @@ fn handle_request(
                 }
             };
             for k in em.keys() {
-                if k != "idle_timeout_secs" && k != "threads" && k != "priority" {
+                if k != "idle_timeout_secs" && k != "threads" && k != "priority" && k != "speculation" {
                     let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("campo inválido: engine.{} (solo lectura o desconocido)", k) }).to_string(), origin.as_deref()));
                     return;
                 }
@@ -863,6 +864,37 @@ fn handle_request(
                     Some(s) if crate::config::engine_priority_ok(s) => next.engine.priority = s.to_string(),
                     _ => {
                         let _ = req.respond(json_response_for_origin(400, bad("engine.priority"), origin.as_deref()));
+                        return;
+                    }
+                }
+            }
+            if let Some(j) = em.get("speculation") {
+                match j.as_object() {
+                    Some(sm) => {
+                        for k in sm.keys() {
+                            if k != "enabled" {
+                                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("campo inválido: engine.speculation.{} (solo se acepta enabled)", k) }).to_string(), origin.as_deref()));
+                                return;
+                            }
+                        }
+                        match sm.get("enabled") {
+                            Some(b) if b.is_boolean() => {
+                                let en = b.as_bool().unwrap_or(true);
+                                if next.engine.speculation.is_none() {
+                                    next.engine.speculation = Some(crate::config::SpeculationConfig::default());
+                                }
+                                if let Some(s) = next.engine.speculation.as_mut() {
+                                    s.enabled = en;
+                                }
+                            }
+                            _ => {
+                                let _ = req.respond(json_response_for_origin(400, bad("engine.speculation.enabled"), origin.as_deref()));
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        let _ = req.respond(json_response_for_origin(400, bad("engine.speculation"), origin.as_deref()));
                         return;
                     }
                 }
@@ -2368,6 +2400,61 @@ mod proxy {
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             // No-JSON pasa intacto.
             assert_eq!(super::super::sanitize_payload(b"no-json".to_vec()), b"no-json".to_vec());
+        }
+
+        #[test]
+        fn config_speculation_enabled_persiste_y_subclave_desconocida_se_rechaza() {
+            // `POST /api/config {"engine":{"speculation":{"enabled":false}}}`:
+            // misma lógica de validación del handler, probada sin socket:
+            // persiste `false` y expone `speculation_enabled` en el GET.
+            let dir = std::env::temp_dir().join(format!("lm-test-speccfg-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join("localmind.toml");
+            let store = crate::config::ConfigStore::load_from_path(&path);
+            // Estado inicial: `speculation` ausente => GET expone `false`.
+            let v0: serde_json::Value = serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
+            assert_eq!(v0["engine"]["speculation_enabled"], serde_json::json!(false));
+            // Aplicar `{"enabled":false}` con la misma regla del handler:
+            // solo se acepta la sub-clave `enabled` y debe ser booleano.
+            let apply = |store: &crate::config::ConfigStore, body: &str| -> Result<bool, String> {
+                let val: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+                let sm = val.get("engine").and_then(|e| e.get("speculation")).and_then(|s| s.as_object()).ok_or("engine.speculation")?;
+                for k in sm.keys() {
+                    if k != "enabled" {
+                        return Err(format!("campo inválido: engine.speculation.{} (solo se acepta enabled)", k));
+                    }
+                }
+                match sm.get("enabled") {
+                    Some(b) if b.is_boolean() => {
+                        let en = b.as_bool().unwrap_or(true);
+                        store.update(|c| {
+                            if c.engine.speculation.is_none() {
+                                c.engine.speculation = Some(crate::config::SpeculationConfig::default());
+                            }
+                            if let Some(s) = c.engine.speculation.as_mut() {
+                                s.enabled = en;
+                            }
+                        });
+                        store.save()?;
+                        Ok(en)
+                    }
+                    _ => Err("campo inválido: engine.speculation.enabled".to_string()),
+                }
+            };
+            assert_eq!(apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap(), false);
+            assert_eq!(store.get().engine.speculation.as_ref().map(|s| s.enabled), Some(false));
+            let v1: serde_json::Value = serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
+            assert_eq!(v1["engine"]["speculation_enabled"], serde_json::json!(false));
+            // Recarga desde disco: persiste.
+            let store2 = crate::config::ConfigStore::load_from_path(&path);
+            assert_eq!(store2.get().engine.speculation.as_ref().map(|s| s.enabled), Some(false));
+            // Sub-clave desconocida => 400 con el mensaje del handler.
+            let err = apply(&store, r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#).unwrap_err();
+            assert!(err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"), "{}", err);
+            // `enabled` no booleano => 400.
+            let err2 = apply(&store, r#"{"engine":{"speculation":{"enabled":"si"}}}"#).unwrap_err();
+            assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
