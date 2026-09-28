@@ -235,3 +235,19 @@ Sin reintentos automáticos (el guardarraíl LM-NF-3 lo prohíbe) y sin
 re-calentamiento con el motor en `running` (la puerta solo corre en
 `starting`, una vez por arranque). Cooldown, tope horario, candado PSU y
 watchdog intactos.
+
+## 13. Migración `[engine]` a v5: menos ciclos stop/start (2026-09-28)
+
+El TOML materializado trae `[engine]` con defaults viejos (`idle 1500`, sin
+`start_cooldown_secs`/`max_starts_per_hour`/`power_safe`/`slow_gate_tps`) y la
+migración solo refrescaba perfiles: los nuevos defaults de energía nunca
+llegaban a una instalación existente (misma brecha que los perfiles en v1).
+Regla v5 (igual de segura que perfiles): cada campo de `[engine]` se toca
+solo si sigue igual a ALGUNA foto previa (1500 para idle; 90/3 de v4 para
+cooldown/cap; ausente = foto `None`); un 900 deliberado o cualquier
+`threads`/`batch`/`priority`/puerto customizado queda intacto. Efecto
+esperado (no medido como t/s: es conteo de ciclos): con `idle 5400` el motor
+residente sobrevive 90 min entre turnos de agentes en vez de 25, así que una
+jornada de harnesses paga ~3 arranques en vez de ~10+ (cada arranque = el
+transitorio PSU más grande). La nota de migración nombra
+`engine: idle_timeout_secs, start_cooldown_secs, …`.
