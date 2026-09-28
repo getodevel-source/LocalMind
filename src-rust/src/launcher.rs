@@ -355,6 +355,11 @@ pub fn deepseek_not_configured_msg() -> String {
 }
 
 /// Sufijo `--thinking <nivel>` (mismo que el lanzador actual).
+/// Sin `effort` (campo omitido) => `low`: la fase de razonamiento domina la
+/// latencia al primer token (medido: ~74 s con thinking al máximo frente a
+/// ~1 s con `low`), así que el default arranca en el modo más rápido. Cada
+/// valor explícito (`off`/`low`/`medium`/`high`/`max`) se respeta tal cual;
+/// cualquier otro string conserva el fallback previo (`max`).
 pub fn effort_flag(effort: Option<&str>) -> &'static str {
     match effort {
         Some("off") => " --thinking off",
@@ -362,6 +367,7 @@ pub fn effort_flag(effort: Option<&str>) -> &'static str {
         Some("medium") => " --thinking medium",
         Some("high") => " --thinking high",
         Some("max") => " --thinking max",
+        None => " --thinking low",
         _ => " --thinking max",
     }
 }
@@ -649,6 +655,24 @@ mod tests {
         assert!(omp.contains("http://127.0.0.1:17860/v1"));
         assert!(omp.contains("OPENAI_API_KEY=K2"));
         assert!(!omp.contains("http://127.0.0.1:8080/v1"));
+    }
+
+    #[test]
+    fn effort_default_low_y_explicitos_intactos() {
+        // Default: omitido => `low` (el razonamiento domina el primer token).
+        assert_eq!(effort_flag(None), " --thinking low");
+        // Explícitos: cada valor aceptado se respeta tal cual.
+        assert_eq!(effort_flag(Some("off")), " --thinking off");
+        assert_eq!(effort_flag(Some("low")), " --thinking low");
+        assert_eq!(effort_flag(Some("medium")), " --thinking medium");
+        assert_eq!(effort_flag(Some("high")), " --thinking high");
+        assert_eq!(effort_flag(Some("max")), " --thinking max");
+        // La línea construida solo lleva `--thinking low` cuando no se pidió effort.
+        let sin_effort = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", None, "");
+        assert!(sin_effort.contains("--thinking low"), "{}", sin_effort);
+        let con_max = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", Some("max"), "");
+        assert!(con_max.contains("--thinking max"), "{}", con_max);
+        assert!(!con_max.contains("--thinking low"), "{}", con_max);
     }
 
     #[test]

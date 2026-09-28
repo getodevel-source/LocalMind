@@ -1565,15 +1565,15 @@
                 </span>
                 <div class="select-wrapper cli-effort-wrap">
                   <select id="cli-effort-select" class="cli-effort-select" data-i18n-aria="launch.effort" aria-label="Nivel de Razonamiento (Effort)">
-                    <option value="max" selected data-i18n="opt.effMax">Max (Profundo)</option>
+                    <option value="max" data-i18n="opt.effMax">Max (Profundo)</option>
                     <option value="high" data-i18n="opt.effHigh">Alto (High)</option>
                     <option value="medium" data-i18n="opt.effMed">Medio (Medium)</option>
-                    <option value="low" data-i18n="opt.effLow">Bajo (Rápido)</option>
+                    <option value="low" selected data-i18n="opt.effLow">Bajo (Rápido)</option>
                     <option value="off" data-i18n="opt.effOff">Desactivado (Off)</option>
                   </select>
                 </div>
               </div>
-            </div>
+              <div class="profile-hint" data-i18n="launch.effortHint">Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar</div>
 
             <div class="field-group">
               <label class="field-label" for="launcher-agent-select">
@@ -2129,6 +2129,7 @@
         'launch.defaultFolder': '(Ubicación predeterminada)',
         'launch.clearTitle': 'Restablecer a default',
         'launch.effort': 'Nivel de Razonamiento (Effort)',
+        'launch.effortHint': 'Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar',
         'launch.agent': 'Agente / interfaz',
         'launch.open': 'Abrir',
         'launch.opened': 'Abierto: {id}',
@@ -2330,6 +2331,7 @@
         'launch.defaultFolder': '(Default location)',
         'launch.clearTitle': 'Reset to default',
         'launch.effort': 'Reasoning Level (Effort)',
+        'launch.effortHint': 'Low = faster answers; High/Max = more reasoning before answering',
         'launch.agent': 'Agent / interface',
         'launch.open': 'Open',
         'launch.opened': 'Opened: {id}',
@@ -3678,11 +3680,33 @@
     function clearProjectFolder() {
       setProjectFolder('');
     }
+    const EFFORT_KEY = 'localmind_cli_effort';
+    const EFFORT_DEFAULT = 'low';
+    const EFFORT_VALUES = ['max', 'high', 'medium', 'low', 'off'];
     function getSelectedCliEffort() {
       const sel = document.getElementById('cli-effort-select');
-      return sel ? sel.value : 'max';
+      if (sel && sel.value) return sel.value;
+      try {
+        const saved = localStorage.getItem(EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) return saved;
+      } catch (e) {}
+      return EFFORT_DEFAULT;
     }
-
+    function initCliEffort() {
+      const sel = document.getElementById('cli-effort-select');
+      if (!sel) return;
+      let val = EFFORT_DEFAULT;
+      try {
+        const saved = localStorage.getItem(EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) val = saved;
+      } catch (e) {}
+      try { sel.value = val; } catch (e) {}
+    }
+    function persistCliEffort(val) {
+      try {
+        if (val && EFFORT_VALUES.indexOf(val) >= 0) localStorage.setItem(EFFORT_KEY, val);
+      } catch (e) {}
+    }
     /* ---------- Unified launcher: ONE selector + ONE "Abrir" button.
        Source: GET /api/agents (fallback: pi/omp/web). Target: POST /api/launch.
        CLI-only rows (folder + effort) show only for kind:"cli" agents. */
@@ -4639,6 +4663,9 @@
       if (modelSel) modelSel.addEventListener('change', () => updateModelBadges(lastModelsCache));
       const langSel = document.getElementById('lang-select');
       if (langSel) langSel.addEventListener('change', () => setLanguage(langSel.value));
+      initCliEffort();
+      const effortSel = document.getElementById('cli-effort-select');
+      if (effortSel) effortSel.addEventListener('change', () => persistCliEffort(effortSel.value));
     }
 
     document.addEventListener('DOMContentLoaded', initApp);

@@ -200,9 +200,11 @@ fn load_asset(base_dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
 /// - `low`/`medium`/`xhigh` se conservan (en minúsculas).
 /// - Cualquier otro string (incluido `off`: la plantilla también lo rechaza)
 ///   o un valor no-string se ELIMINA: el motor usa su default en vez de dar 500.
-/// Los lanzadores anuncian `--thinking max` y sus `thinkingLevelMap` lo marcan
-/// `null` (nivel no soportado lado cliente), pero si un `max` crudo llega al
-/// gateway, aquí se convierte a `xhigh` en vez de tumbar el motor.
+/// Los lanzadores aceptan `--thinking off|low|medium|high|max` (omitido =>
+/// `low`, porque el razonamiento domina el primer token) y sus
+/// `thinkingLevelMap` marcan `max` como `null` (nivel no soportado lado
+/// cliente), pero si un `max` crudo llega al gateway, aquí se convierte a
+/// `xhigh` en vez de tumbar el motor.
 fn sanitize_payload(body_bytes: Vec<u8>) -> Vec<u8> {
     if let Ok(mut json_val) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
         if let Some(obj) = json_val.as_object_mut() {
@@ -1280,6 +1282,9 @@ fn open_browser_action(mgr: &Arc<ProcessManager>) {
 /// - `pi`/`omp`: escribe `%APPDATA%\LocalMind\agents\<agent>\` con el puerto,
 ///   contexto y clave VIVOS, lanza con `PI_CODING_AGENT_DIR` por Windows
 ///   Terminal → `cmd start`. Sin motor vivo: 409 con el mensaje existente.
+///   `effort` (`off`|`low`|`medium`|`high`|`max`): nivel `--thinking` del CLI;
+///   omitido => `low` (la fase de razonamiento domina la latencia al primer
+///   token, así que el default arranca en el modo más rápido).
 /// - `opencode`: `OPENCODE_CONFIG_CONTENT` por env + XDG aislados (409 sin motor).
 /// - `web`: abre la interfaz web externa (misma acción que
 ///   `/api/open_browser`: el navegador en el puerto del motor).

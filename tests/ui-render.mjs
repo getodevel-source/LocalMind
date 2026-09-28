@@ -53,7 +53,7 @@ const stubs = [{}, {}, {}];
 
 function load(script, doc, storage, nav, fetchImpl) {
   const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
-    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, setLanguage, getLanguage, T, I18N, lastModelsCache };');
+    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, setLanguage, getLanguage, T, I18N, lastModelsCache };');
   return factory(doc, mkWindow(), storage || mkStorage(), nav || mkNav(), mkES, fetchImpl || stubFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
 }
 
@@ -380,5 +380,27 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   ]);
   const dump = [...d.reg.values()].map(e => String(e.textContent)).join('|');
   ok('string orca absent from rendered DOM', !/orca/i.test(dump), dump.slice(0, 120));
+}
+
+// ---- launcher: effort defaults to low with empty storage ----
+{
+  const d = makeDoc();
+  const storage = mkStorage();
+  const a = load(script, d, storage);
+  const sel = d.getElementById('cli-effort-select');
+  sel.value = '';
+  a.initCliEffort();
+  ok('effort selector defaults to low when storage empty', sel.value === 'low', JSON.stringify(sel.value));
+  ok('effort getter falls back to low', a.getSelectedCliEffort() === 'low', JSON.stringify(a.getSelectedCliEffort()));
+  a.persistCliEffort('high');
+  ok('effort choice persists', storage.getItem('localmind_cli_effort') === 'high', JSON.stringify(storage.getItem('localmind_cli_effort')));
+  const d2 = makeDoc();
+  const a2 = load(script, d2, storage);
+  const sel2 = d2.getElementById('cli-effort-select');
+  sel2.value = '';
+  a2.initCliEffort();
+  ok('effort selector restores stored choice', sel2.value === 'high', JSON.stringify(sel2.value));
+  ok('effort hint line present in both languages',
+    a.T('launch.effortHint').includes('Bajo') && (() => { a.setLanguage('en'); const s = a.T('launch.effortHint'); a.setLanguage('es'); return s.includes('Low'); })());
 }
 
