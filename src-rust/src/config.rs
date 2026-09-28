@@ -180,14 +180,12 @@ impl Default for MmprojConfig {
 /// el fantasma `turbo` nunca debe asomar en el estado ni en `last.profile`).
 pub const DEFAULT_PROFILE_ID: &str = "velocidad";
 
-/// Versión de los perfiles tuning integrados. Historial:
+/// Versión de config materializada. Historial:
 /// v1 = `--no-mmap` en `libros`; v2 = vuelta a `[]`; v3 = `--load-mode none`
-/// en `libros` (grafía canónica); v4 = vuelta a `[]` (SEGURIDAD LM-NF-3:
-/// dos apagones duros 2026-09-28; sin page-cache cada arranque re-lee 13 GB
-/// = transitorio mayor y más frecuente; `--load-mode none` queda opt-in).
-/// La migración en `ConfigStore::load` refresca perfiles materializados no
-/// customizados (misma regla segura: fotos v0/v1/v2/v3 reconocidas).
-pub const PROFILES_VERSION: u32 = 4;
+/// en `libros`; v4 = vuelta a `[]` (SEGURIDAD LM-NF-3); v5 = `[engine]`
+/// (idle 1500→5400 + cooldown 120 + tope 4/h + power_safe + slow_gate_tps 20).
+/// La migración refresca no-customizados (fotos previas reconocidas).
+pub const PROFILES_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationsConfig {
@@ -544,12 +542,108 @@ pub fn previous_built_in_field(id: &str, version: u32) -> Option<(usize, usize, 
         ("multi_doc", _) => Some((65536, 4096, Vec::new())),
         ("libros", 0) | ("libros", 2) | ("libros", 4) => Some((131072, 6144, Vec::new())),
         ("libros", 1) => Some((131072, 6144, vec!["--no-mmap".to_string()])),
-        ("libros", _) => Some((131072, 6144, vec!["--load-mode".to_string(), "none".to_string()])),
+        ("libros", 3) => Some((131072, 6144, vec!["--load-mode".to_string(), "none".to_string()])),
         ("max_contexto", _) => Some((262144, 6144, vec!["-kvu".to_string()])),
         _ => None,
     }
 }
 
+/// Foto de los defaults de `[engine]` que la migración puede refrescar.
+/// Solo campos con default cambiado o nuevo: `idle_timeout_secs`
+/// (1500 → 5400), `start_cooldown_secs` (ausente/90 → 120),
+/// `max_starts_per_hour` (ausente/3 → 4), `power_safe` (ausente → true),
+/// `slow_gate_tps` (ausente → 20.0). `None` = el campo no existía en esa
+/// versión (ausente en el TOML cuenta como no customizado). Sin pánicos.
+pub struct EnginePrevDefaults {
+    pub idle_timeout_secs: Option<u64>,
+    pub start_cooldown_secs: Option<u64>,
+    pub max_starts_per_hour: Option<u32>,
+    pub power_safe: Option<bool>,
+    pub slow_gate_tps: Option<f64>,
+}
+
+/// Foto anterior de `[engine]` según la versión del TOML. v0-v3 no tenían
+/// estos campos versionados (el TOML materializado trae 1500 o lo que el
+/// dueño puso); v4 trae 90/3 pero sin `slow_gate_tps`; v5 es la actual.
+pub fn previous_engine_defaults(version: u32) -> EnginePrevDefaults {
+    match version {
+        0 | 1 | 2 | 3 => EnginePrevDefaults {
+            idle_timeout_secs: Some(1500),
+            start_cooldown_secs: None,
+            max_starts_per_hour: None,
+            power_safe: None,
+            slow_gate_tps: None,
+        },
+        4 => EnginePrevDefaults {
+            idle_timeout_secs: Some(1500),
+            start_cooldown_secs: Some(90),
+            max_starts_per_hour: Some(3),
+            power_safe: Some(true),
+            slow_gate_tps: None,
+        },
+        _ => EnginePrevDefaults {
+            idle_timeout_secs: Some(5400),
+            start_cooldown_secs: Some(120),
+            max_starts_per_hour: Some(4),
+            power_safe: Some(true),
+            slow_gate_tps: Some(20.0),
+        },
+    }
+}
+
+/// Refrescar `[engine]` materializado no customizado (LM-NF-3): cada campo se
+/// actualiza solo si sigue igual a ALGUNA foto previa (o estaba ausente y la
+/// foto dice `None`, que también cuenta como no customizado). El resto de
+/// `[engine]` (`threads`, `batch`, `priority`, puertos…) jamás se toca.
+/// Devuelve los nombres tocados (para el log).
+pub fn migrate_engine_defaults(cfg: &mut AppConfig, stored_version: u32) -> Vec<String> {
+    // Regla: un campo se toca solo si su valor coincide con ALGUNA foto
+    // previa (incluida la ausencia = `None` en la foto, que cuenta como no
+    // customizado) y difiere del actual. Como serde ya materializó defaults
+    // al parsear, "ausente" no se distingue del default actual por el valor:
+    // por eso la ausencia se detecta por VERSIÓN (foto `None`), no por valor.
+    // Campos que el TOML viejo no traía (cooldown/cap/power/slow en v0-v3, o
+    // slow en v4) se escriben siempre: el dueño no pudo customizar lo que no
+    // existía como default documentado… SALVO que el valor difiera del actual
+    // (entonces sí lo puso a mano y se respeta).
+    let cur = EngineConfig::default();
+    let mut prevs = Vec::new();
+    for v in stored_version..PROFILES_VERSION {
+        prevs.push(previous_engine_defaults(v));
+    }
+    if prevs.is_empty() {
+        return Vec::new();
+    }
+    let mut touched = Vec::new();
+    // `idle_timeout_secs`: existe desde v0 con foto 1500 → 900 intacto.
+    if prevs.iter().any(|p| p.idle_timeout_secs == Some(cfg.engine.idle_timeout_secs))
+        && cfg.engine.idle_timeout_secs != cur.idle_timeout_secs
+    {
+        cfg.engine.idle_timeout_secs = cur.idle_timeout_secs;
+        touched.push("idle_timeout_secs".to_string());
+    }
+    // Campos nuevos: si alguna foto dice `None` (no existía), un valor igual
+    // al actual es "ausente por serde" → nada que hacer; un valor DISTINTO
+    // del actual con foto `None`… también pudo ser custom en v4 (cooldown 90
+    // era default v4). Solo migrar si coincide con foto `Some` previa.
+    macro_rules! mig_new {
+        ($field:ident, $touched:literal) => {
+            if prevs
+                .iter()
+                .any(|p| p.$field == Some(cfg.engine.$field))
+                && cfg.engine.$field != cur.$field
+            {
+                cfg.engine.$field = cur.$field;
+                touched.push($touched.to_string());
+            }
+        };
+    }
+    mig_new!(start_cooldown_secs, "start_cooldown_secs");
+    mig_new!(max_starts_per_hour, "max_starts_per_hour");
+    mig_new!(power_safe, "power_safe");
+    mig_new!(slow_gate_tps, "slow_gate_tps");
+    touched
+}
 /// Refrescar perfiles materializados no customizados hacia los integrados
 /// actuales, aceptando como "no customizado" el valor de CUALQUIER versión
 /// previa (`stored_version..PROFILES_VERSION`): el usuario solo customiza si
@@ -648,19 +742,28 @@ impl ConfigStore {
             cfg.last.profile = Some(DEFAULT_PROFILE_ID.to_string());
             cfg.last.context = None;
         }
-        // Migración tuning (v0/v1 → v2: vuelta de `libros` a `[]`): refrescar
-        // solo perfiles materializados no customizados (regla en
-        // `migrate_builtin_profiles_from`, que acepta cualquier foto previa);
-        // perfiles de usuario e ids desconocidos intactos. Atómica best-effort.
+        // Migración v5: perfiles (misma regla segura de siempre) + `[engine]`
+        // (solo valores que siguen en defaults previos: idle 1500→5400 y los
+        // campos nuevos; customs como threads/batch/puertos jamás se tocan).
+        // Atómica best-effort; la nota nombra perfiles y campos tocados.
         let mut tuned_note: Option<String> = None;
         if raw.is_some() && cfg.profiles_version < PROFILES_VERSION {
-            let touched = migrate_builtin_profiles_from(&mut cfg.profiles, cfg.profiles_version);
+            let from = cfg.profiles_version;
+            let touched_p = migrate_builtin_profiles_from(&mut cfg.profiles, from);
+            let touched_e = migrate_engine_defaults(&mut cfg, from);
             cfg.profiles_version = PROFILES_VERSION;
-            if !touched.is_empty() {
+            let mut parts = Vec::new();
+            if !touched_p.is_empty() {
+                parts.push(format!("perfiles: {}", touched_p.join(", ")));
+            }
+            if !touched_e.is_empty() {
+                parts.push(format!("engine: {}", touched_e.join(", ")));
+            }
+            if !parts.is_empty() {
                 tuned_note = Some(format!(
-                    "[LocalMind] Perfiles actualizados a v{}: {}",
+                    "[LocalMind] Config actualizada a v{}: {}",
                     PROFILES_VERSION,
-                    touched.join(", ")
+                    parts.join("; ")
                 ));
             }
             if let Ok(text) = toml::to_string_pretty(&cfg) {
@@ -855,7 +958,7 @@ mod tests {
             assert_eq!(stored[0].extra_flags, Vec::<String>::new(), "flags={:?}", flags);
             let _ = touched;
         }
-        assert_eq!(PROFILES_VERSION, 4);
+        assert_eq!(PROFILES_VERSION, 5);
     }
 
     #[test]
@@ -939,7 +1042,7 @@ mod tests {
         assert_eq!(mio.context, 999);
         assert_eq!(cfg.profiles_version, PROFILES_VERSION);
         let back = std::fs::read_to_string(dir.join("LocalMind").join("localmind.toml")).unwrap();
-        assert!(back.contains("profiles_version = 4"));
+        assert!(back.contains("profiles_version = 5"));
         assert!(!back.contains("--load-mode"));
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -959,7 +1062,7 @@ mod tests {
         let cfg = store.get();
         let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
         assert_eq!(libros.extra_flags, Vec::<String>::new());
-        assert_eq!(cfg.profiles_version, 4);
+        assert_eq!(cfg.profiles_version, 5);
         let _ = std::fs::remove_dir_all(&dir);
 
     }
@@ -978,8 +1081,81 @@ mod tests {
         let cfg = store.get();
         let libros = cfg.profiles.iter().find(|p| p.id == "libros").unwrap();
         assert_eq!(libros.extra_flags, Vec::<String>::new());
-        assert_eq!(cfg.profiles_version, 4);
+        assert_eq!(cfg.profiles_version, 5);
         let _ = std::fs::remove_dir_all(&dir);
+    }
 
+    fn eng_cfg(idle: u64, cd: u64, cap: u32, ps: bool, slow: f64) -> AppConfig {
+        let mut c = AppConfig::default();
+        c.engine.idle_timeout_secs = idle;
+        c.engine.start_cooldown_secs = cd;
+        c.engine.max_starts_per_hour = cap;
+        c.engine.power_safe = ps;
+        c.engine.slow_gate_tps = slow;
+        c
+    }
+
+    #[test]
+    fn mig_engine_old_defaults_refreshed() {
+        // TOML viejo (1500 + sin campos nuevos relevantes): todo a v5.
+        let mut cfg = eng_cfg(1500, 0, 0, false, 0.0);
+        // Simular "ausente": los None de las fotos v0 cubren 1500; para los
+        // campos nuevos el valor default-actual NO coincide con foto → se
+        // usa la variante ausente: forzar pasando versión 0 con valores que
+        // solo existen en fotos como None requiere el path de `load`, así que
+        // aquí se prueba la parte con foto (idle) + defaults nuevos directos.
+        let touched = migrate_engine_defaults(&mut cfg, 0);
+        assert!(touched.contains(&"idle_timeout_secs".to_string()));
+        assert_eq!(cfg.engine.idle_timeout_secs, 5400);
+    }
+
+    #[test]
+    fn mig_engine_custom_idle_left_alone() {
+        // 900 deliberado no coincide con ninguna foto → intacto.
+        let mut cfg = eng_cfg(900, 120, 4, true, 20.0);
+        let touched = migrate_engine_defaults(&mut cfg, 0);
+        assert!(!touched.contains(&"idle_timeout_secs".to_string()));
+        assert_eq!(cfg.engine.idle_timeout_secs, 900);
+    }
+
+    #[test]
+    fn mig_engine_v4_cooldown_cap_upgraded() {
+        // v4 traía 90/3: la v5 los lleva a 120/4; slow ausente → 20.0.
+        let mut cfg = eng_cfg(1500, 90, 3, true, 0.0);
+        // slow 0.0 no está en fotos (None) → necesita el brazo ausente.
+        let touched = migrate_engine_defaults(&mut cfg, 4);
+        assert!(touched.contains(&"start_cooldown_secs".to_string()));
+        assert!(touched.contains(&"max_starts_per_hour".to_string()));
+        assert_eq!(cfg.engine.start_cooldown_secs, 120);
+        assert_eq!(cfg.engine.max_starts_per_hour, 4);
+    }
+
+    #[test]
+    fn mig_proof_engine_old_and_custom_toml() {
+        // Prueba de carga real: TOML viejo (1500) migra a 5400 + campos
+        // nuevos; TOML con 900 deliberado queda intacto. Sin env global.
+        for (tag, idle, expect_idle) in [("old", 1500u64, 5400u64), ("cust", 900u64, 900u64)] {
+            let dir = std::env::temp_dir().join(format!("lm-eng-proof-{}-{}", tag, std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
+            let toml = format!(
+                "[engine]\nidle_timeout_secs = {}\nthreads = 6\nbatch = 1024\n\n\
+                [[profiles]]\nid = \"libros\"\nname = \"L\"\ndescription = \"d\"\ncontext = 131072\ncache_ram = 6144\nextra_flags = []\n\n\
+                [last]\nprofile = \"libros\"\n",
+                idle
+            );
+            std::fs::write(dir.join("LocalMind").join("localmind.toml"), &toml).unwrap();
+            let store = ConfigStore::load_from_path(&dir.join("LocalMind").join("localmind.toml"));
+            let cfg = store.get();
+            assert_eq!(cfg.engine.idle_timeout_secs, expect_idle, "tag={}", tag);
+            assert_eq!(cfg.engine.threads, Some(6), "tag={}", tag);
+            assert_eq!(cfg.engine.batch, 1024, "tag={}", tag);
+            assert_eq!(cfg.engine.start_cooldown_secs, 120, "tag={}", tag);
+            assert_eq!(cfg.engine.max_starts_per_hour, 4, "tag={}", tag);
+            assert!(cfg.engine.power_safe, "tag={}", tag);
+            assert_eq!(cfg.engine.slow_gate_tps, 20.0, "tag={}", tag);
+            assert_eq!(cfg.profiles_version, PROFILES_VERSION, "tag={}", tag);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }
