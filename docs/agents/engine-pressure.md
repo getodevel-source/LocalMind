@@ -251,3 +251,64 @@ residente sobrevive 90 min entre turnos de agentes en vez de 25, así que una
 jornada de harnesses paga ~3 arranques en vez de ~10+ (cada arranque = el
 transitorio PSU más grande). La nota de migración nombra
 `engine: idle_timeout_secs, start_cooldown_secs, …`.
+
+## 14. Validación del request de arranque (nunca sustituir en silencio)
+
+`POST /api/start` valida CAMPOS NOMBRADOS antes del guardarraíl (un typo no
+consume cooldown/tope): perfil inexistente → `Perfil desconocido: '<id>'.
+Válidos: …`; contexto fuera de 1024..=1048576 en múltiplos de 1024 →
+`Contexto no válido`; modelo no listado ni alias → `Modelo desconocido`.
+Omitidos resuelven por la precedencia habitual (request → última sesión →
+defaults). Misma familia que el bug "pedí 32K y me dio 128K".
+
+## 15. Modelos sin MTP: reintento dirigido sin spec (2026-09-28)
+
+Defecto: `POST /api/start {"model":"LFM2.5-2.6B-Q4_K_M.gguf"}` moria siempre
+(`creating MTP draft context` -> `model doesn't contain MTP layers` ->
+`failed to create MTP context`) porque la app pasa `--spec-*` siempre
+(`[engine.speculation] enabled = true`), valido solo para modelos con capas
+MTP (nuestro Qwen). Recuperacion dirigida (NO es el auto-reintento generico
+que prohibe LM-NF-3): si el hijo muere en `starting` con la firma exacta,
+UNA vez por arranque y solo con spec habilitada, se relanza el MISMO
+arranque sin `--spec-*` (mismo modelo/perfil/contexto/puerto; sin cooldown,
+sin tope, sin revalidar; la puerta sigue en `starting`). Linea grepeable:
+`[LocalMind] El modelo no soporta decodificacion especulativa (MTP):
+reintentando sin --spec-*`. Si vuelve a fallar -> `error` normal.
+Desactivar spec por config: `[engine.speculation] enabled = false`
+(pendiente `POST /api/config` -> `engine.speculation.enabled`; el worker de
+server.rs no pudo tomarlo — derivado a Main/engine-worker con snippet).
+
+## 16. Doble defecto MTP: unconditional + contexto stale + verificación /props
+
+Evidencia (model worker, LFM2.5): (a) el reintento MTP disparaba aunque el
+TOML tuviera spec apagada — la condición no exigía `spec_on`; (b) el
+reintento reconstruía el argv desde `st.context`/`st.model` (stale: `[last]`
+se persiste al final del `start()` original), así que pedir 65536/131072
+relanzaba con 32768 (`n_ctx_slot = 32768` en el log del motor).
+Fix: (1) `spawn_child_nospec` recibe el `ResolvedStart` guardado en
+`start()` (mismo modelo/path, contexto, perfil, hilos, prioridad, puerto,
+mmproj) y difiere del primer spawn SOLO en omitir `--spec-*`;
+`pending_start.take()` = una sola vez; (2) condición endurecida con
+`spec_on` (sin spec habilitada no hay nada que omitir: directo a `error`);
+(3) cinturón `/props`: tras la puerta, `engine_n_ctx(port)` compara `n_ctx`
+vs pedido; si difiere → `error` grepeable
+`El motor cargó con contexto N pero se pidió M` (ausente → sin falso error).
+
+## 16 (actualizado). Doble defecto MTP: unconditional + contexto stale + verificación /props
+
+Evidencia (model worker, LFM2.5): (a) el reintento MTP disparaba aunque el
+TOML tuviera spec apagada — la condición no exigía `spec_on`; (b) el
+reintento reconstruía el argv desde `st.context`/`st.model` (stale: `[last]`
+se persiste al final del `start()` original), así que pedir 65536/131072
+relanzaba con 32768 (`n_ctx_slot = 32768` en el log del motor).
+Fix: (1) `spawn_child_nospec` recibe el `ResolvedStart` guardado en
+`start()` (mismo modelo/path, contexto, perfil, hilos, prioridad, puerto,
+mmproj) y difiere del primer spawn SOLO en omitir `--spec-*`;
+`pending_start.take()` = una sola vez; (2) condición endurecida con
+`spec_on` (sin spec habilitada no hay nada que omitir: directo a `error`);
+(3) cinturón `/props`: tras la puerta, `engine_n_ctx(port)` compara `n_ctx`
+vs pedido; si difiere → `error` grepeable
+`El motor cargó con contexto N pero se pidió M` (ausente → sin falso error).
+Tests: `props_n_ctx_shapes` (raíz/anidado/ausente/no-numérico),
+`retry_argv_equals_first_minus_spec_32k` y `_128k` (el reintento difiere
+SOLO en los 6 tokens spec, mismo `-c`).

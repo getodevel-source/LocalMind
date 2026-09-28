@@ -11,9 +11,13 @@
   integración por ruta de la app (§ "Integración"), disclaimers de contención,
   y curva t/s vs profundidad (§ "Curva": solo el punto ~512 es válido; 8k colgó
   el prefill ~300 s, 32k omitido por inestabilidad).
-- Pendiente: deriva térmica/sostenida, truncamiento con `finish_reason`, puerta de
-  aceptación (32,7 / 32,47 / 14,46 / 15,13 / 14,83 — ítem abierto), y el timeout de
-  reacción de opencode (se repitió también con la caché puesta).
+- Pendiente: puerta de aceptación histórica (32,7 / 32,47 / 14,46 / 15,13 / 14,83 —
+  ver § "Varianza entre cargas" para la explicación por rama lenta/rápida), y el
+  timeout de reacción de opencode (se repitió también con la caché puesta).
+  Medido el 2026-09-28 (§ "Deriva térmica y `finish_reason` (ventana 2026-09-28)"):
+  sin droop térmico en ~3 min sostenidos a 128K; `finish_reason:length` directo
+  (2000 tokens, pasa del 127) — el corte en 127 de los harnesses sigue abierto
+  por lado harness (falta `finish_reason` por pata).
 
 Carga única compartida: perfil `libros`, contexto 131072, modelo Qwen3.8-27B-IQ4_XS.
 Arranque: `POST /api/start {"profile":"libros","context":131072}` aceptado de inmediato
@@ -289,8 +293,13 @@ por encima de los ~1,19k completion observados. Tampoco es un cap del proxy: el 
 prompt por vía directa con `max_tokens: 2000` llegó a 2000 tokens / 196 líneas
 (`finish: length`, cortado a mitad del "195"), y con `max_tokens: 900` a 900 tokens.
 Causa más probable: EOS del modelo en esos contextos de harness (system prompts de
-5–12k que desplazan la trayectoria), pero marcado NO PROBADO: falta re-run en quietud
-con ajustes idénticos y `finish_reason` registrado.
+5–12k que desplazan la trayectoria). Re-run directo en quietud 2026-09-28
+(ventana `libros`/131072, gate 16,67, `stream:true`, `max_tokens:2000`):
+`finish_reason:"length"` verbatim con completion 2000 / prompt 73, llegando al
+"195" (cola SSE en `tests/harness-bench/results/finish-reason-128k-1790637136563.txt`).
+Conclusión: el motor NO corta en 127 por sí solo; el corte 1–127 de los 6 runs
+one-shot (omp/opencode/deepseek) es EOS condicionado por sus system prompts
+(o stop del harness), no un cap del proxy/motor.
 
 ## Presión durante la ventana fair (medido, no narrativa)
 
@@ -718,3 +727,57 @@ registran como hipótesis a instrumentar, no conclusiones:
 - Tiempo desde el stop previo (cooldown real vs 120 s del guard) y throttling
   térmico: la campaña arrancó a ~25 s de un stop; la re-medición con horas de
   margen. Registrar `starting_for_secs`, temperatura y relojes por carga.
+
+## Deriva térmica y `finish_reason` (ventana 2026-09-28, una sola carga 128K)
+
+Ventana: `POST /api/start {"profile":"libros","context":131072}` 23:09:18Z →
+`starting` pid 17144; `running` + `acceptance_ok:true` a los ~60 s con puerta
+`decode_tps = 16,67`, samples `[16,74, 16,50, 16,67]`, `engine_slow:true`
+(rama lenta del 128K, ver § "Varianza entre cargas"). Log: `n_ctx_slot =
+131072, kv_unified = 'false'` (línea 5935); veredicto `OK: 17 t/s (mediana de
+3)` (línea 5978). CPU pre-ventana 0 %, sin `llama-server.exe` previo.
+`POST /api/stop` → `stopped` 23:19:30Z, sin `llama-server.exe`; GUI viva
+(pid 11540). Tiempo de motor ≈ 10 min (60 s carga + 108 s finish_reason +
+327 s droop). Sin inestabilidad (sin stutter/fan-ramp/crash).
+Evidencia: `tests/harness-bench/results/finish-reason-128k-1790637136563.txt`
+(cola SSE) y `tests/harness-bench/results/droop-128k-2026-09-28T23-13-50-617Z.json`
+(timeline; el runner `droop-run-128k.mjs` era throwaway y se eliminó).
+
+### `finish_reason` del corte en 300 números: `length`, el motor pasa del 127
+
+Prompt determinista por gateway (`temperature:0`, `max_tokens:2000`,
+`stream:true`): HTTP 200 `text/event-stream`, 2002 chunks SSE, wall 107792 ms.
+Último chunk con contenido útil, verbatim:
+`data: {"choices":[{"finish_reason":"length","index":0,"delta":{}}], ... "usage":{"completion_tokens":2000,"prompt_tokens":73,...} ...}`
+seguido de `data: [DONE]`. Timings del motor: prompt 713,79 ms (43,43 t/s),
+decode 107044,5 ms (18,67 t/s), draft 1314/1370 (96 %). La cola llega al "195"
+(`...94, 195, 19` + corte por `length`, igual que la campaña original).
+Conclusión: **pregunta cerrada por lado motor** — NO hay EOS en 127 sin system
+prompt de harness; el corte 1–127 de los runs omp/opencode/deepseek es EOS
+condicionado por sus prompts (o stop del harness). Queda abierto solo el lado
+harness (`finish_reason` por pata — el bench no lo registra).
+
+### Deriva térmica: NO hay droop en ~3 min sostenidos (rama lenta, peor caso)
+
+Protocolo: probe 512-token-prompt/300-completion, 10 slices back-to-back
+(max 1200 cada uno, ~15,6 s por slice) y 3 re-probes con 30 s de idle.
+Nota: el prompt pedido de "512" resultó en prompt_n real 758 (2720 chars);
+los slices siguientes hitan caché (prompt_n 4, completion 252 fijos) — lo que
+miden es decode sostenido puro, que es lo que importa para droop.
+
+| # | tag | ts (UTC) | wall | compl | decode (timings) | gen_tps (métricas) |
+|---|---|---|---|---|---|---|
+| 0 | probe0-baseline | 23:14:23 | 33,1 s | 252 | 16,19 | 16,13 |
+| 1–10 | slice1…slice10 | 23:14:39 → 23:17:00 | 15,6–15,7 s c/u | 252 c/u | 16,32–16,35 | 16,26–16,29 |
+| 11 | reprobe1 (+30 s idle) | 23:17:46 | 15,7 s | 252 | 16,33 | 16,27 |
+| 12 | reprobe2 (+30 s idle) | 23:18:31 | 15,7 s | 252 | 16,32 | 16,25 |
+| 13 | reprobe3 (+30 s idle) | 23:19:17 | 15,7 s | 252 | 16,33 | 16,27 |
+
+Veredicto: **sin droop medible** — decode 16,19 → 16,32–16,35 sostenido
+(rango ±0,1 t/s, deriva +0,9 % hacia ARRIBA por calentamiento de caché, no
+caída) y los 3 re-probes idénticos (16,32–16,33). GPU (muestra barata
+post-ventana): 3D ~0,17–0,21 %, copy 0,11 % — motor ya parado, solo confirma
+que no quedó carga colgada. Inconcluso: NADA pendiente aquí salvo repetir en
+rama rápida si alguien quiere el par; la ausencia de droop en la rama lenta
+(peor caso térmico) es evidencia suficiente para descartar la deriva como
+explicación de la varianza entre cargas.
