@@ -114,6 +114,26 @@ pub struct LogEvent {
     pub line: String,
 }
 
+/// Parámetros ya resueltos de UN arranque lógico: lo que `start()` decidió
+/// (modelo+path, contexto, perfil, hilos, prioridad, puerto, mmproj). El
+/// reintento MTP dirigido relanza con ESTOS valores y solo omite `--spec-*`;
+/// nunca lee `st.context`/`st.model` (stale: `[last]` se persiste al final
+/// del `start()` original). Clonable para cruzar al hilo del poller.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct ResolvedStart {
+    model_filename: String,
+    model_path: PathBuf,
+    profile: crate::profiles::HardwareProfile,
+    profile_id: String,
+    context: usize,
+    threads: usize,
+    threads_batch: usize,
+    priority: String,
+    process_priority_class: u32,
+    llama_port: u16,
+    mmproj: Option<PathBuf>,
+}
 pub struct ProcessManager {
     child: Arc<Mutex<Option<Child>>>,
     status: Arc<RwLock<ServerStatus>>,
@@ -134,7 +154,13 @@ pub struct ProcessManager {
     log_file: PathBuf,
     /// Historial de arranques (epoch secs) para cooldown + tope horario (LM-NF-3).
     start_history: Arc<Mutex<Vec<u64>>>,
+    /// Reintento MTP ya consumido en el arranque vigente (una sola vez).
+    mtp_retry_done: Arc<AtomicBool>,
     config: Arc<ConfigStore>,
+    /// Parámetros resueltos del arranque vigente (para el reintento MTP).
+    /// `None` fuera de `starting`; se fija en `start()` y se limpia en
+    /// `stop()`/transición final. El reintento usa ESTO, nunca el status.
+    pending_start: Arc<Mutex<Option<ResolvedStart>>>,
     base_dir: PathBuf,
     bin_dir: PathBuf,
     models_dir: PathBuf,
@@ -175,7 +201,8 @@ impl ProcessManager {
         let start_instant: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let start_epoch = Arc::new(AtomicU64::new(0));
         let start_history: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
-        // Duraciones de cargas exitosas (clave = modelo + contexto), para ETA.
+        let mtp_retry_done = Arc::new(AtomicBool::new(false));
+        let pending_start: Arc<Mutex<Option<ResolvedStart>>> = Arc::new(Mutex::new(None));
         let load_times_path = Self::load_times_path();
         let load_times: Arc<Mutex<HashMap<String, u64>>> =
             Arc::new(Mutex::new(load_times_load(&load_times_path).unwrap_or_default()));
@@ -197,8 +224,11 @@ impl ProcessManager {
         let load_times_poll = Arc::clone(&load_times);
         let load_times_path_poll = load_times_path.clone();
         let models_dir_poll = models_dir.clone();
+        let bin_dir_poll = bin_dir.clone();
+        let base_dir_poll = base_dir.clone();
         let log_file_poll = log_file.clone();
-
+        let mtp_retry_poll = Arc::clone(&mtp_retry_done);
+        let pending_poll = Arc::clone(&pending_start);
         thread::spawn(move || {
             let mut consecutive_failures = 0u32;
             // La puerta de aceptación corre una sola vez por arranque (D1).
@@ -224,12 +254,36 @@ impl ProcessManager {
                 let mut auto_stop = false;
                 if let Some(exit_status) = exited {
                     let code = exit_status.to_string();
-                    let summary = {
+                    // Líneas recientes para el resumen Y para la firma MTP.
+                    let lines: Vec<String> = {
                         let logs = logs_for_err.read();
-                        let lines: Vec<String> = logs.iter().map(|l| l.line.clone()).collect();
-                        crash_summary(&lines, &code)
+                        logs.iter().map(|l| l.line.clone()).collect()
                     };
-                    let mut st = status_clone.write();
+                    let summary = crash_summary(&lines, &code);
+                    // Reintento MTP dirigido (NO es el auto-reintento genérico
+                    // que prohíbe LM-NF-3): solo en `starting`, solo con la
+                    // firma exacta, solo si spec está habilitada, solo una vez
+                    // por arranque, y sin consumir presupuesto de cooldown/tope
+                    // (es el mismo arranque lógico). Se ejecutainline: relanza
+                    // el hijo sin `--spec-*` con los mismos argv ya resueltos
+                    // (ver `retry_no_spec` abajo); si vuelve a fallar, `error`.
+                    let was_starting = status_clone.read().status == "starting";
+                    let spec_on = cfg_poll
+                        .get()
+                        .engine
+                        .speculation
+                        .as_ref()
+                        .is_some_and(|s| s.enabled);
+                    let mut mtp_retry = false;
+                    if mtp_retry_decision(
+                        was_starting,
+                        spec_on,
+                        mtp_retry_poll.load(Ordering::Relaxed),
+                        mtp_unsupported_signature(&lines),
+                    ) {
+                        mtp_retry_poll.store(true, Ordering::Relaxed);
+                        mtp_retry = true;
+                    }
                     // Watchdog (LM-NF-3): si el hijo muere en starting/running
                     // (incluidos los primeros ~90 s tras un arranque), se marca
                     // `error` con el resumen y NO se reintenta ni se rearranca
@@ -237,6 +291,7 @@ impl ProcessManager {
                     // transitorios repetidos = riesgo PSU. Reintento = Stop+Start
                     // manual (respetando cooldown + tope horario).
                     // Aviso P20 pendiente si el crash era visible (starting/running).
+                    let mut st = status_clone.write();
                     let mut crash_notify: Option<(String, String, String)> = None;
                     if st.status == "starting" || st.status == "running" {
                         st.status = "error".to_string();
@@ -254,6 +309,49 @@ impl ProcessManager {
                         ));
                     }
                     drop(st);
+                    // Reintento dirigido: relanzar el MISMO arranque sin spec.
+                    // Sin cooldown/tope (mismo arranque lógico: el guard ya
+                    // pasó y `record_start` NO se repite), sin tocar la puerta
+                    // (`starting` sigue, `gate_done` intacto). Si vuelve a
+                    // fallar → `error` normal (el flag ya está consumido).
+                    if mtp_retry {
+                        Self::push_log_to(
+                            &recent_logs_clone,
+                            &senders_clone,
+                            &seq_clone,
+                            "[LocalMind] El modelo no soporta decodificación especulativa (MTP): reintentando sin --spec-*",
+                            Some(&log_file_poll),
+                        );
+                        // Mismo arranque lógico: parámetros resueltos en
+                        // `start()` (NO `st.context`/`st.model`: stale). Sin
+                        // cooldown/tope (el guard ya pasó), sin tocar la
+                        // puerta (`starting` sigue, `gate_done` intacto).
+                        // `take()` = una sola vez aunque el poller repita.
+                        let params = pending_poll.lock().take();
+                        *child_clone.lock() = None;
+                        *start_instant_poll.lock() = Some(Instant::now());
+                        match params {
+                            Some(p) => Self::spawn_child_nospec(
+                                &child_clone,
+                                &recent_logs_clone,
+                                &senders_clone,
+                                &seq_clone,
+                                &log_file_poll,
+                                &status_clone,
+                                &cfg_poll,
+                                bin_dir_poll.clone(),
+                                base_dir_poll.clone(),
+                                p,
+                            ),
+                            None => Self::push_log_to(
+                                &recent_logs_clone,
+                                &senders_clone,
+                                &seq_clone,
+                                "[LocalMind] Reintento MTP omitido: sin parámetros del arranque vigente.",
+                                Some(&log_file_poll),
+                            ),
+                        }
+                    }
                     if let Some((title, body, tag)) = crash_notify {
                         let ncfg = cfg_poll.get().notifications;
                         if crate::notify::should_notify(ncfg.enabled, ncfg.on_failure) {
@@ -271,7 +369,6 @@ impl ProcessManager {
                         let st = status_clone.read();
                         (st.status.clone(), st.port)
                     };
-
                     if current_status == "starting" || current_status == "running" {
                         // Progreso/ETA (D4): sin bloquear el lock durante el HTTP.
                         let (elapsed_secs, model_snapshot, context_snapshot) = {
@@ -321,35 +418,64 @@ impl ProcessManager {
                             if let Some(outcome) = gate_outcome {
                                 match outcome {
                                     Ok((tps, _tokens, samples)) => {
-                                        // Carga exitosa: registrar duración (D4) y declarar running.
-                                        let secs = start_instant_poll
-                                            .lock()
-                                            .as_ref()
-                                            .map(|t| t.elapsed().as_secs())
-                                            .unwrap_or(0);
-                                        let key = load_key(&st.model, st.context);
-                                        load_times_poll.lock().insert(key.clone(), secs.max(1));
-                                        let _ = load_times_save(&load_times_path_poll, &load_times_poll.lock());
-                                        let slow_at = cfg_poll.get().engine.slow_gate_tps;
-                                        st.status = "running".to_string();
-                                        st.verifying = false;
-                                        st.starting_for_secs = 0;
-                                        st.eta_secs = 0;
-                                        st.decode_tps = Some(tps);
-                                        st.decode_tps_samples = samples.clone();
-                                        // engine_slow: solo informativo, sin
-                                        // reintentos (LM-NF-3 lo prohíbe).
-                                        st.engine_slow = gate_is_slow(tps, slow_at);
-                                        st.acceptance_ok = Some(true);
-                                        st.acceptance_error = None;
-                                        st.last_error = None;
-                                        pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mediana de {})", tps.round() as u64, samples.len()));
-                                        // Aviso P20: motor listo con modelo y velocidad.
-                                        pending_notify = Some((
-                                            "Motor listo".to_string(),
-                                            format!("«{}» cargando en la GPU ({} t/s)", st.model, tps.round() as u64),
-                                            "engine-ready".to_string(),
-                                        ));
+                                        // Verificación de contexto real (cinturón:
+                                        // el motor dice `n_ctx` en `/props`).
+                                        // Si difiere del pedido → `error` en
+                                        // español con ambos valores (nunca
+                                        // sustitución silenciosa, D2).
+                                        let req_ctx = st.context;
+                                        let props_ctx = Self::engine_n_ctx(port);
+                                        let mismatch = props_ctx.is_some_and(|n| n != req_ctx);
+                                        if mismatch {
+                                            let n = props_ctx.unwrap_or(0);
+                                            let msg = format!(
+                                                "El motor cargó con contexto {} pero se pidió {}.",
+                                                n, req_ctx
+                                            );
+                                            st.status = "error".to_string();
+                                            st.is_healthy = false;
+                                            st.verifying = false;
+                                            st.starting_for_secs = 0;
+                                            st.eta_secs = 0;
+                                            st.decode_tps = Some(tps);
+                                            st.decode_tps_samples = samples.clone();
+                                            st.engine_slow = gate_is_slow(tps, cfg_poll.get().engine.slow_gate_tps);
+                                            st.acceptance_ok = Some(false);
+                                            st.acceptance_error = Some(msg.clone());
+                                            st.last_error = Some(msg.clone());
+                                            pending_ok_log = Some(format!("[LocalMind] {}", msg));
+                                            *start_instant_poll.lock() = None;
+                                        } else {
+                                            // Carga exitosa: registrar duración (D4) y declarar running.
+                                            let secs = start_instant_poll
+                                                .lock()
+                                                .as_ref()
+                                                .map(|t| t.elapsed().as_secs())
+                                                .unwrap_or(0);
+                                            let key = load_key(&st.model, st.context);
+                                            load_times_poll.lock().insert(key.clone(), secs.max(1));
+                                            let _ = load_times_save(&load_times_path_poll, &load_times_poll.lock());
+                                            let slow_at = cfg_poll.get().engine.slow_gate_tps;
+                                            st.status = "running".to_string();
+                                            st.verifying = false;
+                                            st.starting_for_secs = 0;
+                                            st.eta_secs = 0;
+                                            st.decode_tps = Some(tps);
+                                            st.decode_tps_samples = samples.clone();
+                                            // engine_slow: solo informativo, sin
+                                            // reintentos (LM-NF-3 lo prohíbe).
+                                            st.engine_slow = gate_is_slow(tps, slow_at);
+                                            st.acceptance_ok = Some(true);
+                                            st.acceptance_error = None;
+                                            st.last_error = None;
+                                            pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mediana de {})", tps.round() as u64, samples.len()));
+                                            // Aviso P20: motor listo con modelo y velocidad.
+                                            pending_notify = Some((
+                                                "Motor listo".to_string(),
+                                                format!("«{}» cargando en la GPU ({} t/s)", st.model, tps.round() as u64),
+                                                "engine-ready".to_string(),
+                                            ));
+                                        }
                                     }
                                     Err(detail) => {
                                         st.status = "error".to_string();
@@ -471,13 +597,208 @@ impl ProcessManager {
             load_times,
             log_file,
             start_history,
+            mtp_retry_done,
             config,
+            pending_start,
             base_dir,
             bin_dir,
             models_dir,
         }
     }
 
+    /// Constructor del argv del motor (extraído de `start()` para que el
+    /// reintento MTP dirigido relance el MISMO arranque sin `--spec-*`.
+    /// `skip_spec` = true solo en ese reintento. Sin pánicos en flags:
+    /// el PSU-lock ya validó `extra_flags` en `start()`.
+    #[allow(clippy::too_many_arguments)]
+    fn build_engine_cmd(
+        llama_bin: &std::path::PathBuf,
+        base_dir: &std::path::PathBuf,
+        process_priority_class: u32,
+        model_path: &std::path::PathBuf,
+        context: usize,
+        threads: usize,
+        threads_batch: usize,
+        priority: &str,
+        engine: &crate::config::EngineConfig,
+        profile: &crate::profiles::HardwareProfile,
+        llama_port: u16,
+        skip_spec: bool,
+    ) -> std::process::Command {
+        let ubatch = "512";
+        let mut cmd = std::process::Command::new(llama_bin);
+        cmd.current_dir(base_dir);
+        cmd.creation_flags(CREATE_NO_WINDOW | process_priority_class);
+        cmd.args([
+            "-m",
+            model_path.to_str().unwrap(),
+            "-ngl",
+            "99",
+            "-c",
+            &context.to_string(),
+            "-ctk",
+            "q4_0",
+            "-ctv",
+            "q4_0",
+            "-a",
+            "localmind",
+            "--reuse-port",
+            "-t",
+            &threads.to_string(),
+            "-tb",
+            &threads_batch.to_string(),
+            "--prio",
+            priority,
+            "-b",
+            &engine.batch.to_string(),
+            "-ub",
+            ubatch,
+            "--device",
+            &engine.device,
+            "--split-mode",
+            "none",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &llama_port.to_string(),
+            "-np",
+            "1",
+            "--poll",
+            &engine.poll.to_string(),
+            "--prio-batch",
+            &engine.priority_batch,
+        ]);
+        if engine.flash_attention {
+            cmd.args(["-fa", "on"]);
+        }
+        if engine.metrics {
+            cmd.arg("--metrics");
+        }
+        if let Some(spec) = engine.speculation.as_ref().filter(|s| s.enabled && !skip_spec) {
+            cmd.args([
+                "--spec-type",
+                &spec.ty,
+                "--spec-draft-n-max",
+                &spec.draft_n_max.to_string(),
+                "--spec-draft-p-split",
+                &spec.draft_p_split.to_string(),
+            ]);
+        }
+        if engine.reasoning_preserve {
+            cmd.arg("--reasoning-preserve");
+        }
+        if profile.cache_ram > 0 {
+            cmd.args(["--cache-ram", &profile.cache_ram.to_string()]);
+        }
+        for flag in &profile.extra_flags {
+            cmd.arg(flag);
+        }
+        for flag in &engine.extra_flags {
+            cmd.arg(flag);
+        }
+        cmd
+    }
+    /// Relanzador MTP (solo lo usa el reintento dirigido): relanza el hijo SIN
+    /// `--spec-*` con los parámetros RESUELTOS del arranque vigente (`params`:
+    /// mismo modelo/path, contexto, perfil, hilos, prioridad, puerto, mmproj).
+    /// Difiere del primer spawn SOLO en omitir spec. NO toca cooldown/tope
+    /// (mismo arranque lógico), NO re-registra historial, NO revalida (ya
+    /// validado), NO re-resuelve fallbacks, NO lee `st.context`/`st.model`.
+    /// Reengancha stdout/stderr a los lectores; deja `starting` para la puerta.
+    fn spawn_child_nospec(
+        child: &Arc<Mutex<Option<std::process::Child>>>,
+        logs: &Arc<RwLock<VecDeque<LogEvent>>>,
+        senders: &Arc<Mutex<Vec<mpsc::Sender<String>>>>,
+        seq: &Arc<AtomicU64>,
+        log_file: &std::path::PathBuf,
+        status: &Arc<RwLock<ServerStatus>>,
+        config: &Arc<ConfigStore>,
+        bin_dir: std::path::PathBuf,
+        base_dir: std::path::PathBuf,
+        params: ResolvedStart,
+    ) {
+        let cfg = config.get();
+        let llama_bin = bin_dir.join("llama-server.exe");
+        let mut cmd = Self::build_engine_cmd(
+            &llama_bin,
+            &base_dir,
+            params.process_priority_class,
+            &params.model_path,
+            params.context,
+            params.threads,
+            params.threads_batch,
+            &params.priority,
+            &cfg.engine,
+            &params.profile,
+            params.llama_port,
+            true,
+        );
+        if let Some(mm) = params.mmproj.as_ref() {
+            cmd.args(["--mmproj", mm.to_str().unwrap()]);
+        }
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child_proc = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("Error al iniciar llama-server: {}", e);
+                Self::push_log_to(logs, senders, seq, &msg, Some(log_file));
+                let mut st = status.write();
+                st.status = "error".to_string();
+                st.last_error = Some(msg);
+                return;
+            }
+        };
+        let pid = child_proc.id();
+        let stdout = child_proc.stdout.take();
+        let stderr = child_proc.stderr.take();
+        Self::attach_reader_threads(stdout, stderr, logs, senders, seq, log_file);
+        *child.lock() = Some(child_proc);
+        {
+            let mut st = status.write();
+            st.status = "starting".to_string();
+            st.is_healthy = false;
+            st.pid = Some(pid);
+            st.last_error = None;
+            st.verifying = false;
+        }
+    }
+
+    fn attach_reader_threads(
+        stdout: Option<std::process::ChildStdout>,
+        stderr: Option<std::process::ChildStderr>,
+        logs: &Arc<RwLock<VecDeque<LogEvent>>>,
+        senders: &Arc<Mutex<Vec<mpsc::Sender<String>>>>,
+        seq: &Arc<AtomicU64>,
+        log_file: &std::path::PathBuf,
+    ) {
+        if let Some(out) = stdout {
+            let l_c = Arc::clone(logs); let s_c = Arc::clone(senders); let q_c = Arc::clone(seq); let f_c = log_file.clone();
+            std::thread::spawn(move || {
+                let reader = std::io::BufReader::new(out);
+                use std::io::BufRead;
+                for line in reader.lines().map_while(Result::ok) {
+                    let s = q_c.fetch_add(1, Ordering::Relaxed);
+                    { let mut l = l_c.write(); if l.len() >= 250 { l.pop_front(); } l.push_back(LogEvent { seq: s, line: line.clone() }); }
+                    { let mut x = s_c.lock(); x.retain(|tx| tx.send(line.clone()).is_ok()); }
+                    crate::filelog::write_log_line(&f_c, &line);
+                }
+            });
+        }
+        if let Some(err) = stderr {
+            let l_c = Arc::clone(logs); let s_c = Arc::clone(senders); let q_c = Arc::clone(seq); let f_c = log_file.clone();
+            std::thread::spawn(move || {
+                let reader = std::io::BufReader::new(err);
+                use std::io::BufRead;
+                for line in reader.lines().map_while(Result::ok) {
+                    let s = q_c.fetch_add(1, Ordering::Relaxed);
+                    { let mut l = l_c.write(); if l.len() >= 250 { l.pop_front(); } l.push_back(LogEvent { seq: s, line: line.clone() }); }
+                    { let mut x = s_c.lock(); x.retain(|tx| tx.send(line.clone()).is_ok()); }
+                    crate::filelog::write_log_line(&f_c, &line);
+                }
+            });
+        }
+    }
     fn health_check(port: u16) -> bool {
         matches!(
             ureq::get(&format!("http://127.0.0.1:{}/health", port))
@@ -499,6 +820,18 @@ impl ProcessManager {
             }
         }
         false
+    }
+
+    /// `n_ctx` real del motor vía `/props` (cinturón D2): `None` si el campo
+    /// falta o el endpoint no responde (sin falso error).
+    fn engine_n_ctx(port: u16) -> Option<usize> {
+        let text = ureq::get(&format!("http://127.0.0.1:{}/props", port))
+            .timeout(Duration::from_secs(5))
+            .call()
+            .ok()?
+            .into_string()
+            .ok()?;
+        props_n_ctx(&text)
     }
 
     /// Encontrar un puerto libre empezando en `preferred` (hasta +50 intentos).
@@ -834,10 +1167,35 @@ impl ProcessManager {
     }
 
     pub fn start(&self, req: StartRequest) -> Result<u32, String> {
+        // Validación del request explícito (nunca sustituir en silencio lo que
+        // el usuario pidió: D-1/contexto fantasma). Solo valida CAMPOS
+        // NOMBRADOS; omitidos resuelven por la precedencia habitual. Va ANTES
+        // del guardarraíl para no consumir cooldown/tope con un typo.
+        let cfg = self.config.get();
+        {
+            let valid_ids: Vec<String> = cfg.profiles.iter().map(|p| p.id.clone()).collect();
+            validate_req_profile(req.profile.as_deref(), &valid_ids)?;
+            validate_req_context(req.context)?;
+            let models = self.list_models();
+            let filenames: Vec<String> = models.iter().map(|m| m.filename.clone()).collect();
+            let names: Vec<String> = models.iter().map(|m| m.name.clone()).collect();
+            let rels: Vec<String> = models
+                .iter()
+                .filter_map(|m| {
+                    std::path::Path::new(&m.path)
+                        .strip_prefix(self.models_dir.clone())
+                        .ok()
+                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                })
+                .collect();
+            let mut known_models = filenames;
+            known_models.extend(names);
+            known_models.extend(rels);
+            validate_req_model(req.model.as_deref(), &known_models, &[], &cfg.engine.aliases)?;
+        }
         // Guardarraíles de energía (LM-NF-3): cooldown + tope horario + modo
         // seguro. Cada arranque lee ~13 GB a VRAM (el transitorio más grande
         // del sistema); se evalúan ANTES de tocar el motor en marcha.
-        let cfg = self.config.get();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -951,68 +1309,20 @@ impl ProcessManager {
 
         // Performance tuning seguro: uBatch fijado en 512 para evitar transitorios de energía
         let ubatch = "512";
-        let mut cmd = Command::new(&llama_bin);
-        cmd.current_dir(&self.base_dir);
-        cmd.creation_flags(CREATE_NO_WINDOW | process_priority_class);
-
-        cmd.args([
-            "-m",
-            model_path.to_str().unwrap(),
-            "-ngl",
-            "99",
-            "-c",
-            &context.to_string(),
-            "-ctk",
-            "q4_0",
-            "-ctv",
-            "q4_0",
-            "-a",
-            "localmind",
-            "--reuse-port",
-            "-t",
-            &threads.to_string(),
-            "-tb",
-            &threads_batch.to_string(),
-            "--prio",
+        let mut cmd = Self::build_engine_cmd(
+            &llama_bin,
+            &self.base_dir,
+            process_priority_class,
+            &model_path,
+            context,
+            threads,
+            threads_batch,
             &priority,
-            "-b",
-            &cfg.engine.batch.to_string(),
-            "-ub",
-            ubatch,
-            "--device",
-            &cfg.engine.device,
-            "--split-mode",
-            "none",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &llama_port.to_string(),
-            "-np",
-            "1",
-            "--poll",
-            &cfg.engine.poll.to_string(),
-            "--prio-batch",
-            &cfg.engine.priority_batch,
-        ]);
-        if cfg.engine.flash_attention {
-            cmd.args(["-fa", "on"]);
-        }
-
-        if cfg.engine.metrics {
-            cmd.arg("--metrics");
-        }
-
-        if let Some(spec) = cfg.engine.speculation.as_ref().filter(|s| s.enabled) {
-            cmd.args([
-                "--spec-type",
-                &spec.ty,
-                "--spec-draft-n-max",
-                &spec.draft_n_max.to_string(),
-                "--spec-draft-p-split",
-                &spec.draft_p_split.to_string(),
-            ]);
-        }
-
+            &cfg.engine,
+            &profile,
+            llama_port,
+            self.mtp_retry_done.load(std::sync::atomic::Ordering::Relaxed),
+        );
         if cfg.engine.reasoning_preserve {
             cmd.arg("--reasoning-preserve");
         }
@@ -1126,7 +1436,23 @@ impl ProcessManager {
         }
 
         *self.child.lock() = Some(child);
-
+        // Arranque fresco: el reintento MTP vuelve a estar disponible, y los
+        // parámetros RESUELTOS quedan guardados para el reintento (nunca
+        // `st.context`/`st.model`: `[last]` se persiste abajo, stale).
+        self.mtp_retry_done.store(false, Ordering::Relaxed);
+        *self.pending_start.lock() = Some(ResolvedStart {
+            model_filename: model_filename.clone(),
+            model_path: model_path.clone(),
+            profile: profile.clone(),
+            profile_id: profile_id.clone(),
+            context,
+            threads,
+            threads_batch,
+            priority: priority.clone(),
+            process_priority_class,
+            llama_port,
+            mmproj: self.find_mmproj(),
+        });
         {
             let mut st = self.status.write();
             st.status = "starting".to_string();
@@ -1196,7 +1522,9 @@ impl ProcessManager {
         *self.start_instant.lock() = None;
         // Invalida cualquier puerta de aceptación en curso (D1).
         self.start_epoch.fetch_add(1, Ordering::Relaxed);
-
+        // El próximo arranque tiene su propio reintento MTP disponible.
+        self.mtp_retry_done.store(false, Ordering::Relaxed);
+        *self.pending_start.lock() = None;
         self.log("[LocalMind] Servidor detenido. 100% de VRAM y memoria liberada.");
     }
 }
@@ -1325,10 +1653,107 @@ fn gate_median(samples: &[f64]) -> Option<f64> {
     Some(sorted[sorted.len() / 2])
 }
 
+/// Validar el `profile` explícito del request (puro): si se nombró uno que no
+/// existe entre los perfiles vigentes → 400 con los ids válidos. `None`/vacío
+/// (campo omitido) resuelve por la precedencia habitual, sin error.
+fn validate_req_profile(req_profile: Option<&str>, valid_ids: &[String]) -> Result<(), String> {
+    match req_profile.filter(|s| !s.is_empty()) {
+        None => Ok(()),
+        Some(id) if valid_ids.iter().any(|v| v == id) => Ok(()),
+        Some(id) => Err(format!(
+            "Perfil desconocido: '{}'. Válidos: {}.",
+            id,
+            valid_ids.join(", ")
+        )),
+    }
+}
+
+/// Validar el `context` explícito del request (puro): 1024..=1048576 en pasos
+/// de 1024 (misma regla que `profile_context_ok`). Omitido → precedencia
+/// habitual, sin error.
+fn validate_req_context(req_ctx: Option<usize>) -> Result<(), String> {
+    match req_ctx {
+        None => Ok(()),
+        Some(c) if crate::config::profile_context_ok(c) => Ok(()),
+        Some(c) => Err(format!(
+            "Contexto no válido: {}. Rango permitido: 1024..=1048576 en múltiplos de 1024.",
+            c
+        )),
+    }
+}
+
+/// Validar el `model` explícito del request (puro): basename/`rel` listado,
+/// `name` sin extensión, o alias configurado. Omitido → fallbacks habituales.
+fn validate_req_model(
+    req_model: Option<&str>,
+    filenames: &[String],
+    names: &[String],
+    aliases: &[String],
+) -> Result<(), String> {
+    match req_model.filter(|s| !s.is_empty()) {
+        None => Ok(()),
+        Some(m) => {
+            let hit_file = filenames.iter().any(|f| f == m);
+            let hit_name = names.iter().any(|n| n == m);
+            let hit_alias = aliases
+                .iter()
+                .any(|a| !a.is_empty() && m.to_lowercase().contains(&a.to_lowercase()));
+            if hit_file || hit_name || hit_alias {
+                Ok(())
+            } else {
+                Err(format!("Modelo desconocido: '{}'.", m))
+            }
+        }
+    }
+}
+
 /// `engine_slow` (puro): true si la mediana queda bajo el umbral configurable.
 /// Solo informativo — el llamador nunca reintenta por esto (LM-NF-3).
 fn gate_is_slow(median_tps: f64, slow_at: f64) -> bool {
     median_tps < slow_at
+}
+
+/// Firma MTP-no-soportado (pura y testeable): el motor murió en el arranque
+/// porque el modelo no trae capas MTP (`creating MTP draft context` →
+/// `model doesn't contain MTP layers` / `failed to create MTP context`).
+/// Solo dispara el reintento dirigido sin spec (una vez, mismo arranque).
+fn mtp_unsupported_signature(lines: &[String]) -> bool {
+    let joined = lines.join("\n").to_lowercase();
+    joined.contains("mtp")
+        && (joined.contains("draft context")
+            || joined.contains("doesn't contain mtp")
+            || joined.contains("failed to create mtp"))
+}
+
+/// Decisión del reintento MTP dirigido (pura y testeable): una sola vez por
+/// arranque (`retry_done`), solo en `starting`, solo con spec habilitada y
+/// solo con la firma exacta. No toca presupuesto: el llamador NO registra en
+/// el historial (mismo arranque lógico).
+fn mtp_retry_decision(
+    was_starting: bool,
+    spec_on: bool,
+    retry_done: bool,
+    signature: bool,
+) -> bool {
+    was_starting && spec_on && !retry_done && signature
+}
+
+/// `n_ctx` desde el cuerpo de `/props` (puro y testeable): busca `n_ctx`
+/// de nivel raíz o en `default_generation_settings.n_ctx`. Ausente o no
+/// numérico → `None` (sin falso error: el llamador sigue sin verificar).
+fn props_n_ctx(body: &str) -> Option<usize> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    if let Some(n) = v.get("n_ctx").and_then(|x| x.as_u64()) {
+        return usize::try_from(n).ok();
+    }
+    if let Some(n) = v
+        .get("default_generation_settings")
+        .and_then(|o| o.get("n_ctx"))
+        .and_then(|x| x.as_u64())
+    {
+        return usize::try_from(n).ok();
+    }
+    None
 }
 
 /// ETA en segundos: duración guardada para la misma clave; en frío,
@@ -1756,5 +2181,203 @@ mod tests {
         assert!(gate_is_slow(19.9, 20.0));
         assert!(!gate_is_slow(20.0, 20.0));
         assert!(!gate_is_slow(34.0, 20.0));
+    }
+
+    fn val_ids() -> Vec<String> {
+        vec!["velocidad".to_string(), "libros".to_string()]
+    }
+
+    #[test]
+    fn req_unknown_profile_refused_listing_ids() {
+        // `{"profile":"noexiste"}` → 400 con los ids válidos.
+        let err = validate_req_profile(Some("noexiste"), &val_ids()).unwrap_err();
+        assert!(err.contains("Perfil desconocido: 'noexiste'"), "{}", err);
+        assert!(err.contains("velocidad") && err.contains("libros"), "{}", err);
+        assert!(validate_req_profile(Some("libros"), &val_ids()).is_ok());
+        assert!(validate_req_profile(None, &val_ids()).is_ok());
+        assert!(validate_req_profile(Some(""), &val_ids()).is_ok());
+    }
+
+    #[test]
+    fn req_context_bounds() {
+        // 123 se rechaza; 4096 (múltiplo válido) pasa; omitido pasa.
+        let err = validate_req_context(Some(123)).unwrap_err();
+        assert!(err.contains("Contexto no válido: 123"), "{}", err);
+        assert!(err.contains("1024"), "{}", err);
+        assert!(validate_req_context(Some(4096)).is_ok());
+        assert!(validate_req_context(Some(262144)).is_ok());
+        assert!(validate_req_context(None).is_ok());
+    }
+
+    #[test]
+    fn req_model_known_and_unknown() {
+        let files = vec!["m.gguf".to_string(), "sub/x.gguf".to_string()];
+        let names = vec!["m".to_string(), "x".to_string()];
+        let aliases = vec!["localmind".to_string()];
+        assert!(validate_req_model(Some("m.gguf"), &files, &names, &aliases).is_ok());
+        assert!(validate_req_model(Some("sub/x.gguf"), &files, &names, &aliases).is_ok());
+        assert!(validate_req_model(Some("localmind"), &files, &names, &aliases).is_ok());
+        let err = validate_req_model(Some("otro.gguf"), &files, &names, &aliases).unwrap_err();
+        assert!(err.contains("Modelo desconocido: 'otro.gguf'"), "{}", err);
+        assert!(validate_req_model(None, &files, &names, &aliases).is_ok());
+    }
+
+    #[test]
+    fn req_omitted_fields_resolve_as_before() {
+        // Campos omitidos/vacíos no fallan: la precedencia sigue intacta.
+        assert!(validate_req_profile(None, &val_ids()).is_ok());
+        assert!(validate_req_context(None).is_ok());
+        // `resolve_context` sin nada explícito → contexto del perfil.
+        assert_eq!(
+            resolve_context(None, None, 32768, None, None, None, "velocidad", "m.gguf"),
+            32768
+        );
+    }
+
+    #[test]
+    fn req_refused_start_keeps_guard_window() {
+        // Un arranque rechazado por validación NO consume cooldown/tope: el
+        // check corre antes del guardarraíl y no toca `start_history`.
+        // (Contrato: `validate_*` no recibe ni muta el historial.)
+        let mut h: Vec<u64> = Vec::new();
+        assert!(validate_req_profile(Some("noexiste"), &val_ids()).is_err());
+        assert!(check_start_guard(120, 4, &mut h, 5000).is_ok());
+        assert!(h.is_empty());
+    }
+
+    fn mtp_lines() -> Vec<String> {
+        vec![
+            "creating MTP draft context against the target model".to_string(),
+            "model doesn't contain MTP layers".to_string(),
+            "failed to create MTP context".to_string(),
+            "exiting due to model loading error".to_string(),
+        ]
+    }
+
+    #[test]
+    fn mtp_signature_matches_real_log() {
+        // Positivo con la línea real del fallo (LFM2.5).
+        assert!(mtp_unsupported_signature(&mtp_lines()));
+        // Negativos: errores ajenos no disparan el reintento.
+        assert!(!mtp_unsupported_signature(&["couldn't bind to port 8080".to_string()]));
+        assert!(!mtp_unsupported_signature(&["CUDA error: out of memory".to_string()]));
+        assert!(!mtp_unsupported_signature(&[]));
+        // Solo "MTP" suelto sin draft/fallo → no dispara.
+        assert!(!mtp_unsupported_signature(&["mtp draft ok".to_string()]));
+    }
+
+    #[test]
+    fn mtp_retry_once_starting_spec_signature() {
+        // Solo starting + spec on + firma + no consumido → true.
+        assert!(mtp_retry_decision(true, true, false, true));
+        // Una vez consumido → false (una sola vez por arranque).
+        assert!(!mtp_retry_decision(true, true, true, true));
+        // En running (no starting) → false.
+        assert!(!mtp_retry_decision(false, true, false, true));
+        // Spec apagada → false (nada que omitir).
+        assert!(!mtp_retry_decision(true, false, false, true));
+        // Sin firma → false.
+        assert!(!mtp_retry_decision(true, true, false, false));
+    }
+
+    #[test]
+    fn props_n_ctx_shapes() {
+        // Raíz, anidado, ausente (sin falso error), no numérico.
+        assert_eq!(props_n_ctx(r#"{"n_ctx":65536}"#), Some(65536));
+        assert_eq!(
+            props_n_ctx(r#"{"default_generation_settings":{"n_ctx":131072}}"#),
+            Some(131072)
+        );
+        assert_eq!(props_n_ctx(r#"{"n_ctx_slot":32768}"#), None);
+        assert_eq!(props_n_ctx(r#"{"n_ctx":"mucho"}"#), None);
+        assert_eq!(props_n_ctx("no-json"), None);
+    }
+
+    fn argv_tokens(
+        engine: &crate::config::EngineConfig,
+        profile: &crate::profiles::HardwareProfile,
+        context: usize,
+        skip_spec: bool,
+    ) -> Vec<String> {
+        // Reconstruye el argv vía `build_engine_cmd` y lo aplana a tokens.
+        let cmd = ProcessManager::build_engine_cmd(
+            &PathBuf::from("llama-server.exe"),
+            &PathBuf::from("."),
+            0x00004000,
+            &PathBuf::from("m.gguf"),
+            context,
+            6,
+            4,
+            "2",
+            engine,
+            profile,
+            8080,
+            skip_spec,
+        );
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect()
+    }
+
+    fn spec_engine() -> crate::config::EngineConfig {
+        let mut e = crate::config::EngineConfig::default();
+        e.speculation = Some(crate::config::SpeculationConfig::default());
+        e
+    }
+
+    fn ctx_profile(context: usize) -> crate::profiles::HardwareProfile {
+        crate::config::HardwareProfile {
+            id: "t".to_string(),
+            name: String::new(),
+            description: String::new(),
+            context,
+            cache_ram: 0,
+            extra_flags: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn retry_argv_equals_first_minus_spec_32k() {
+        // 32768: el reintento difiere SOLO en los `--spec-*` (mismo `-c`).
+        let engine = spec_engine();
+        let profile = ctx_profile(32768);
+        let first = argv_tokens(&engine, &profile, 32768, false);
+        let retry = argv_tokens(&engine, &profile, 32768, true);
+        assert!(first.windows(2).any(|w| w[0] == "--spec-type"));
+        assert!(!retry.iter().any(|t| t.starts_with("--spec")));
+        // Mismo `-c 32768` en ambos (el bug stale era 32768 vs pedido).
+        assert!(retry.windows(2).any(|w| w[0] == "-c" && w[1] == "32768"));
+        // `retry` = `first` menos exactamente 6 tokens spec
+        // (`--spec-type X --spec-draft-n-max Y --spec-draft-p-split Z`).
+        assert_eq!(first.len(), retry.len() + 6);
+        let mut fi = first.iter().peekable();
+        let mut ri = retry.iter().peekable();
+        loop {
+            match (fi.peek(), ri.peek()) {
+                (Some(f), Some(r)) if f == r => {
+                    fi.next();
+                    ri.next();
+                }
+                (Some(f), _) if f.starts_with("--spec") => {
+                    // Saltar el par flag+valor SOLO en `first`.
+                    fi.next();
+                    fi.next();
+                }
+                (None, None) => break,
+                other => panic!("divergen: {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn retry_argv_equals_first_minus_spec_128k() {
+        // 131072: mismo contrato (el bug stale era `n_ctx_slot = 32768`).
+        let engine = spec_engine();
+        let profile = ctx_profile(131072);
+        let first = argv_tokens(&engine, &profile, 131072, false);
+        let retry = argv_tokens(&engine, &profile, 131072, true);
+        assert!(retry.windows(2).any(|w| w[0] == "-c" && w[1] == "131072"));
+        assert!(!retry.iter().any(|t| t.starts_with("--spec")));
+        assert!(first.windows(2).any(|w| w[0] == "--spec-type"));
     }
 }
