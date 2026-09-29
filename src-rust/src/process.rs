@@ -1243,16 +1243,13 @@ impl ProcessManager {
         // contexto real (ver `power_note_262k` abajo).
         let power_safe_on = engine.power_safe;
         let models = self.list_models();
-        let model_filename = req
-            .model
-            .clone()
-            .filter(|m| !m.is_empty())
-            .or_else(|| engine.aliases.iter().find_map(|al| {
-                models.iter().find(|m| m.filename.to_lowercase().contains(&al.to_lowercase())).map(|m| m.filename.clone())
-            }))
-            .or_else(|| models.first().map(|m| m.filename.clone()))
-            .or_else(|| cfg.last.model.as_ref().filter(|s| !s.is_empty()).cloned())
-            .ok_or_else(|| "No se encontró ningún modelo .gguf en la carpeta models/".to_string())?;
+        let model_filename = resolve_model_filename(
+            req.model.as_deref(),
+            &engine.aliases,
+            &models,
+            cfg.last.model.as_deref(),
+            &self.models_dir,
+        )?;
 
         // Acepta el basename plano (histórico) o el `rel` de /api/models
         // (`sub/model.gguf`); rechaza `..`, absolutas y escapes de models/.
@@ -1806,6 +1803,45 @@ fn resolve_model_path(models_dir: &Path, requested: &str) -> Result<PathBuf, Str
     Ok(candidate)
 }
 
+/// Precedencia del MODELO al arrancar (puro y testeable). Orden deliberado:
+/// 1) `req_model` explícito; 2) alias configurado (una petición de launcher
+/// también es explícita); 3) `last.model` de la sesión anterior; 4) primer
+/// `.gguf` de la carpeta. `last.model` va por ENCIMA del primer `.gguf` porque
+/// `models/` suele traer varios y arrancar siempre con el primero ignora la
+/// sesión en curso; ir por detrás era código muerto (`models.first()` es
+/// `Some` en cuanto hay un modelo, luego el `Err` final nunca se alcanzaba).
+/// `last.model` no pasa por `validate_req_model`, así que se guarda contra un
+/// archivo que ya no existe: degrada al primer `.gguf` en vez de volver un
+/// arranque válido un error duro. Sin pánicos.
+fn resolve_model_filename(
+    req_model: Option<&str>,
+    aliases: &[String],
+    models: &[ModelInfo],
+    last_model: Option<&str>,
+    models_dir: &Path,
+) -> Result<String, String> {
+    if let Some(m) = req_model.filter(|s| !s.is_empty()) {
+        return Ok(m.to_string());
+    }
+    if let Some(hit) = aliases.iter().find_map(|al| {
+        models
+            .iter()
+            .find(|m| m.filename.to_lowercase().contains(&al.to_lowercase()))
+            .map(|m| m.filename.clone())
+    }) {
+        return Ok(hit);
+    }
+    if let Some(last) = last_model.filter(|s| !s.is_empty()) {
+        if resolve_model_path(models_dir, last).is_ok() {
+            return Ok(last.to_string());
+        }
+    }
+    models
+        .first()
+        .map(|m| m.filename.clone())
+        .ok_or_else(|| "No se encontró ningún modelo .gguf en la carpeta models/".to_string())
+}
+
 /// Precedencia de contexto al arrancar (un perfil explícito nunca pierde contra
 /// una sesión vieja): 1) `req_ctx` explícito; 2) perfil explícito en el request
 /// → contexto de ESE perfil; 3) sin perfil explícito y última sesión con el
@@ -1924,6 +1960,129 @@ fn load_times_save(path: &Path, map: &HashMap<String, u64>) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mi_model(file: &str) -> ModelInfo {
+        ModelInfo {
+            filename: file.to_string(),
+            name: file.trim_end_matches(".gguf").to_string(),
+            size_gb: 1.0,
+            path: file.to_string(),
+        }
+    }
+
+    /// models_dir scratch con .gguf reales (la guarda de `last.model` mira el
+    /// disco, no solo la lista). `tag` mantiene el directorio propio de cada
+    /// test: corren en paralelo y comparten PID.
+    fn dir_con_modelos(tag: &str, files: &[&str]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lm-modelres-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in files {
+            std::fs::write(dir.join(f), b"gguf").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn last_model_gana_al_primer_gguf() {
+        // El bug: `last.model` estaba por detrás de `models.first()`, que es
+        // `Some` siempre que haya un modelo → la rama era inalcanzable.
+        let dir = dir_con_modelos("last-gana", &["aaa-2b.gguf", "bbb-27b.gguf"]);
+        let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
+        let got = resolve_model_filename(None, &[], &models, Some("bbb-27b.gguf"), &dir).unwrap();
+        assert_eq!(got, "bbb-27b.gguf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_model_inexistente_cae_al_primer_gguf() {
+        // `last.model` nunca se valida: si el archivo ya no está, degrada.
+        let dir = dir_con_modelos("last-inexistente", &["aaa-2b.gguf", "bbb-27b.gguf"]);
+        let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
+        let got = resolve_model_filename(None, &[], &models, Some("borrado-7b.gguf"), &dir).unwrap();
+        assert_eq!(got, "aaa-2b.gguf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn alias_manda_sobre_last_model() {
+        // El alias es petición explícita de un launcher: gana a `last.model`.
+        let dir = dir_con_modelos("alias-gana", &["aaa-2b.gguf", "bbb-27b.gguf"]);
+        let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
+        let aliases = vec!["aaa".to_string()];
+        let got = resolve_model_filename(None, &aliases, &models, Some("bbb-27b.gguf"), &dir).unwrap();
+        assert_eq!(got, "aaa-2b.gguf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn modelo_explicito_manda_sobre_todo() {
+        let dir = dir_con_modelos("explicito", &["aaa-2b.gguf", "bbb-27b.gguf"]);
+        let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
+        let aliases = vec!["aaa".to_string()];
+        let got = resolve_model_filename(
+            Some("bbb-27b.gguf"),
+            &aliases,
+            &models,
+            Some("aaa-2b.gguf"),
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(got, "bbb-27b.gguf");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_modelos_devuelve_error_en_espanol() {
+        let dir = std::env::temp_dir().join(format!("lm-modelres-vacio-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let err = resolve_model_filename(None, &[], &[], Some("borrado.gguf"), &dir).unwrap_err();
+        assert!(err.contains("No se encontró ningún modelo"), "{}", err);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn contexto_guardado_se_restaura_si_el_modelo_es_el_mismo() {
+        // Regla 3 de `resolve_context`. Estaba muerta en la práctica porque
+        // `model` nunca coincidía con `last.model` (siempre ganaba el primer
+        // .gguf o el alias); al arreglar la precedencia vuelve a aplicar.
+        assert_eq!(
+            resolve_context(
+                None,
+                None,
+                32768,
+                Some("libros"),
+                Some("LFM2.5-2.6B-Q4_K_M.gguf"),
+                Some(131072),
+                "libros",
+                "LFM2.5-2.6B-Q4_K_M.gguf",
+            ),
+            131072
+        );
+        // Mismo perfil, OTRO modelo → la sesión vieja no aplica.
+        assert_eq!(
+            resolve_context(
+                None,
+                None,
+                32768,
+                Some("libros"),
+                Some("otro.gguf"),
+                Some(131072),
+                "libros",
+                "LFM2.5-2.6B-Q4_K_M.gguf",
+            ),
+            32768
+        );
+        // Contexto explícito o perfil explícito ganan igual.
+        assert_eq!(
+            resolve_context(Some(65536), None, 32768, Some("libros"), None, Some(131072), "libros", "x.gguf"),
+            65536
+        );
+        assert_eq!(
+            resolve_context(None, Some("velocidad"), 32768, Some("libros"), None, Some(131072), "velocidad", "x.gguf"),
+            32768
+        );
+    }
 
     #[test]
     fn usage_non_stream() {
