@@ -651,6 +651,41 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
     b.style.display === 'block' && String(b.textContent || '').includes("Modelo desconocido: 'noexiste.gguf'."),
     JSON.stringify({ display: b.style.display, text: String(b.textContent || '').slice(0, 90) }));
 
+  // El prefijo traducido, no solo el error: `renderStatus` se corre primero y
+  // su rama de `error` reasignaba `textContent` al `last_error` crudo, dejando
+  // el banner como "Modelo desconocido: ..." sin el "Error al iniciar: ".
+  // Se compara por IGUALDAD (no `includes`) contra `T('err.startFail')`, en es
+  // y en en, para que la lookup de `T()` quede realmente ejercitada.
+  const ERR = "Modelo desconocido: 'noexiste.gguf'.";
+  ok('el banner de arranque rechazado conserva el prefijo traducido (es)',
+    b.style.display === 'block' && String(b.textContent || '') === a.T('err.startFail') + ERR,
+    JSON.stringify({ got: String(b.textContent || '').slice(0, 90), want: (a.T('err.startFail') + ERR).slice(0, 90) }));
+  ok('el prefijo de es no es vacío (el assert de igualdad no podría pasar)',
+    a.getLanguage() === 'es' && a.T('err.startFail') === 'Error al iniciar: ',
+    JSON.stringify({ lang: a.getLanguage(), prefix: a.T('err.startFail') }));
+
+  // Mismo escenario en inglés: la traduccion tiene que cambiar el prefijo, no
+  // solo el idioma del servidor (el error que devuelve el backend es el mismo).
+  const dEn = makeDoc();
+  const aEn = load(script, dEn, mkStorage(), mkNav(), fetchRejected);
+  aEn.setLanguage('en');
+  dEn.getElementById('model-select').value = 'noexiste.gguf';
+  await aEn.startEngine();
+  const bEn = dEn.getElementById('error-banner');
+  ok('el banner de arranque rechazado conserva el prefijo traducido (en)',
+    bEn.style.display === 'block' && String(bEn.textContent || '') === aEn.T('err.startFail') + ERR,
+    JSON.stringify({ got: String(bEn.textContent || '').slice(0, 90), want: (aEn.T('err.startFail') + ERR).slice(0, 90) }));
+  ok('el prefijo de en es el traducido y no el de es',
+    aEn.getLanguage() === 'en' && aEn.T('err.startFail') === 'Failed to start: ' && aEn.T('err.startFail') !== a.T('err.startFail'),
+    JSON.stringify({ en: aEn.T('err.startFail'), es: a.T('err.startFail') }));
+
+  // El poll de 800 ms NO debe borrar el prefijo (ver el bloque de persistencia
+  // de abajo): se compruebaEquality tambien despues del poll.
+  a.renderStatus({ status: 'stopped', is_healthy: false, last_error: null, acceptance_error: null });
+  ok('el prefijo sobrevive al poll en reposo',
+    b.style.display === 'block' && String(b.textContent || '') === a.T('err.startFail') + ERR,
+    JSON.stringify({ got: String(b.textContent || '').slice(0, 90) }));
+
   // El poll de 800 ms: /api/status responde `stopped` (estado de reposo real).
   a.renderStatus({ status: 'stopped', is_healthy: false, last_error: null, acceptance_error: null });
   ok('el banner sigue visible en reposo tras un arranque rechazado',

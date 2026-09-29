@@ -3694,11 +3694,18 @@
 
       const res = await api.startServer({ model, profile, context, threads: String(threads), priority: String(priority) });
       if (res && res.error) {
+        // `renderStatus` va PRIMERO y el banner con prefijo DESPUÉS.
+        // Al revés, `renderStatus` reasignaba `textContent` al `last_error`
+        // crudo y el prefijo traducido se perdia en cada arranque rechazado:
+        // el usuario leia "Modelo desconocido: 'noexiste.gguf'." en vez de
+        // "Error al iniciar: Modelo desconocido: 'noexiste.gguf'.".
+        // Aqui se paints el estado (franja, estado del motor) y despues se
+        // escribe el mensaje final, que es el que el usuario debe leer.
+        renderStatus({ status: 'error', last_error: res.error });
         if (errBanner) {
           errBanner.textContent = T('err.startFail') + res.error;
           errBanner.style.display = 'block';
         }
-        renderStatus({ status: 'error', last_error: res.error });
       }
     }
 
@@ -4361,6 +4368,17 @@
       const errBanner = document.getElementById('error-banner');
       if (errBanner) {
         if (status === 'error' && (st.last_error || st.acceptance_error || '')) {
+          // Aquí el error llega CRUDO y sin prefijo a propósito: este camino es
+          // un fallo POSTERIOR (el motor arrancó y se cayó, o la puerta de
+          // aceptación falló), no un arranque rechazado. Ponerle
+          // "Error al iniciar:" sería falso. El arranque rechazado lo escribe
+          // `startEngine`, que conoce el motivo y le pone su prefijo.
+          //
+          // Los dos caminos no se pisan: `POST /api/start` responde 400 SIN
+          // guardar `last_error` en el status (el proceso ni llega a
+          // lanzarse), así que el poller ve `stopped` con `last_error` null y
+          // no entra en esta rama. Por eso el prefijo de `startEngine`
+          // sobrevive a los polls siguientes.
           errBanner.textContent = st.last_error || st.acceptance_error;
           errBanner.style.display = 'block';
         } else if (st.acceptance_ok === false && (st.acceptance_error || '')) {
