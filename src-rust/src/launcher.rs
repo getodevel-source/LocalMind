@@ -62,13 +62,25 @@ pub fn agent_kind(id: AgentId) -> &'static str {
     }
 }
 
-/// Id de modelo CLI para `pi`/`omp` (alias estables, sin cambios).
-pub fn cli_model(id: AgentId) -> &'static str {
+/// Id de modelo CLI para `pi`/`omp`/`opencode`, como lo pide el binario:
+/// `<provider>/<id>`.
+///
+/// `served` es el id REALMENTE servido por el motor (`agents::served_model_id`,
+/// p. ej. `Ternary-Bonsai-2-27B-PTQ1_0`). Antes esto era un literal por agente
+/// (`localmind/qwen3.8-27b`), así que con Bonsai cargado el lanzador escribía
+/// "Qwen" en el config privado del agente: la etiqueta mentía. Ahora el nombre
+/// que ve el agente es el del motor que lo va a atender.
+///
+/// El prefijo `localmind/` se conserva porque es el nombre del provider en la
+/// config privada, no un alias de modelo: el id que va detrás es el que decide
+/// qué se anuncia. Los agentes ya configurados con el alias `localmind` (o con
+/// el nombre del modelo anterior) siguen conectando porque el proxy reescribe
+/// cualquier `model` pedido al servido (D-2).
+pub fn cli_model(id: AgentId, served: &str) -> String {
+    let model = if served.trim().is_empty() { "localmind" } else { served.trim() };
     match id {
-        AgentId::Pi => "localmind/localmind",
-        AgentId::Omp => "localmind/qwen3.8-27b",
-        AgentId::OpenCode => "localmind/qwen3.8-27b",
-        _ => "",
+        AgentId::Pi | AgentId::Omp | AgentId::OpenCode => format!("localmind/{}", model),
+        _ => String::new(),
     }
 }
 
@@ -376,6 +388,7 @@ pub fn effort_flag(effort: Option<&str>) -> &'static str {
 /// `agent_path` es el dir privado ya escrito por `agents::write_agent_dir`.
 /// `http_port` es el puerto del GATEWAY (no el del motor): el CLI habla con
 /// `http://127.0.0.1:<http_port>/v1` para pasar por clave/aliasing/usage.
+/// `served` = id del modelo realmente cargado (ver `cli_model`).
 pub fn cli_inner_cmd(
     id: AgentId,
     cd_prefix: &str,
@@ -384,11 +397,13 @@ pub fn cli_inner_cmd(
     agent_path: &str,
     effort: Option<&str>,
     allow_home: &str,
+    served: &str,
 ) -> String {
     let bin = agent_bin(id).unwrap_or("");
+    let model = cli_model(id, served);
     let model_flag = match id {
-        AgentId::Pi => format!("--provider localmind --model {}", cli_model(id)),
-        _ => format!("--model {}", cli_model(id)),
+        AgentId::Pi => format!("--provider localmind --model {}", model),
+        _ => format!("--model {}", model),
     };
     format!(
         "{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && set \"OPENAI_API_KEY={}\" && set \"PI_CODING_AGENT_DIR={}\" && {} {}{}{}",
@@ -647,11 +662,11 @@ mod tests {
         );
         // El CLI habla con el GATEWAY y lleva la clave (puerta con Bearer).
         assert_eq!(
-            cli_inner_cmd(AgentId::Pi, "", 17861, "CLAVE-GW", "C:\\dir", Some("max"), ""),
-            "set \"OPENAI_BASE_URL=http://127.0.0.1:17861/v1\" && set \"OPENAI_API_KEY=CLAVE-GW\" && set \"PI_CODING_AGENT_DIR=C:\\dir\" && pi --provider localmind --model localmind/localmind --thinking max"
+            cli_inner_cmd(AgentId::Pi, "", 17861, "CLAVE-GW", "C:\\dir", Some("max"), "", "M-VIVO"),
+            "set \"OPENAI_BASE_URL=http://127.0.0.1:17861/v1\" && set \"OPENAI_API_KEY=CLAVE-GW\" && set \"PI_CODING_AGENT_DIR=C:\\dir\" && pi --provider localmind --model localmind/M-VIVO --thinking max"
         );
         // omp igual: gateway + clave, sin hardcodear 8080.
-        let omp = cli_inner_cmd(AgentId::Omp, "", 17860, "K2", "C:\\d", Some("low"), "");
+        let omp = cli_inner_cmd(AgentId::Omp, "", 17860, "K2", "C:\\d", Some("low"), "", "M-VIVO");
         assert!(omp.contains("http://127.0.0.1:17860/v1"));
         assert!(omp.contains("OPENAI_API_KEY=K2"));
         assert!(!omp.contains("http://127.0.0.1:8080/v1"));
@@ -668,9 +683,9 @@ mod tests {
         assert_eq!(effort_flag(Some("high")), " --thinking high");
         assert_eq!(effort_flag(Some("max")), " --thinking max");
         // La línea construida solo lleva `--thinking low` cuando no se pidió effort.
-        let sin_effort = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", None, "");
+        let sin_effort = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", None, "", "M-VIVO");
         assert!(sin_effort.contains("--thinking low"), "{}", sin_effort);
-        let con_max = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", Some("max"), "");
+        let con_max = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", Some("max"), "", "M-VIVO");
         assert!(con_max.contains("--thinking max"), "{}", con_max);
         assert!(!con_max.contains("--thinking low"), "{}", con_max);
     }
@@ -718,7 +733,7 @@ mod tests {
         assert_eq!(agent_label(AgentId::OpenCode), "OpenCode");
         assert_eq!(agent_kind(AgentId::OpenCode), "cli");
         assert_eq!(agent_bin(AgentId::OpenCode), Some("opencode"));
-        assert_eq!(cli_model(AgentId::OpenCode), "localmind/qwen3.8-27b");
+        assert_eq!(cli_model(AgentId::OpenCode, "Ternary-Bonsai-2-27B-PTQ1_0"), "localmind/Ternary-Bonsai-2-27B-PTQ1_0");
         // Desconocidos siguen a 400.
         assert_eq!(parse_agent_id("codex"), None);
         assert_eq!(parse_agent_id("opencode3"), None);
@@ -865,5 +880,66 @@ mod tests {
         assert_eq!(write_deepseek_patch(&home, &a2).unwrap(), false);
         assert_eq!(write_deepseek_patch(&home, &b).unwrap(), true);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- LM-MOD-3: lo que el lanzador anuncia sale del motor, no de un literal ----
+
+    /// El id que va al `--model` del binario y al config privado es el del
+    /// modelo realmente servido, para los TRES agentes con config.
+    ///
+    /// Falla sobre el código original: `cli_model` devolvía
+    /// `localmind/qwen3.8-27b` para omp y opencode y `localmind/localmind`
+    /// para pi, con independencia del modelo cargado (el defecto reportado:
+    /// con Bonsai cargado, OMP respondía `"model":"localmind/qwen3.8-27b"`).
+    #[test]
+    fn el_lanzador_anuncia_el_modelo_servido_no_un_literal() {
+        let bonsai = "Ternary-Bonsai-2-27B-PTQ1_0";
+        let qwen = "Qwen3.8-27B-IQ4_XS_4BPW";
+
+        for id in [AgentId::Pi, AgentId::Omp, AgentId::OpenCode] {
+            let con_bonsai = cli_model(id, bonsai);
+            let con_qwen = cli_model(id, qwen);
+            assert_ne!(con_bonsai, con_qwen, "{:?}: el id no depende del modelo servido", id);
+            assert!(con_bonsai.contains("Bonsai"), "{:?} no anuncia Bonsai: {}", id, con_bonsai);
+            assert!(con_qwen.contains("Qwen"), "{:?} no anuncia Qwen: {}", id, con_qwen);
+            // El prefijo de provider se conserva: no es un alias de modelo.
+            assert!(con_bonsai.starts_with("localmind/"), "{:?} perdió el provider: {}", id, con_bonsai);
+        }
+
+        // El `--model` que se ejecuta lleva el mismo id que la respuesta JSON.
+        let linea = cli_inner_cmd(AgentId::Omp, "", 17860, "K", "C:\\d", Some("low"), "", bonsai);
+        assert!(linea.contains("--model localmind/Ternary-Bonsai-2-27B-PTQ1_0"), "{}", linea);
+        assert!(!linea.contains("qwen3.8-27b"), "la línea aún nombra al modelo viejo: {}", linea);
+    }
+
+    /// Sin id servido (`""` = motor sin modelo) el lanzador cae al alias
+    /// estable `localmind`, que el proxy reescribe al servido (D-2). No inventa
+    /// un nombre de modelo ni deja el de la sesión anterior pegado.
+    #[test]
+    fn sin_modelo_servido_el_lanzador_usa_el_alias_estable() {
+        for id in [AgentId::Pi, AgentId::Omp, AgentId::OpenCode] {
+            assert_eq!(cli_model(id, ""), "localmind/localmind", "{:?}", id);
+            assert_eq!(cli_model(id, "   "), "localmind/localmind", "{:?}", id);
+        }
+        // `web` y `deepseek` no pasan id por `--model` (van por otro camino).
+        assert_eq!(cli_model(AgentId::Web, "M"), "");
+        assert_eq!(cli_model(AgentId::DeepSeek, "M"), "");
+    }
+
+    /// El patch de Cordis nombra el modelo servido y su contexto vivo.
+    /// Falla sobre el código original, que fijaba `"localmind"` en el patch.
+    #[test]
+    fn el_patch_de_deepseek_nombra_el_modelo_y_el_contexto_vivos() {
+        let a = deepseek_profile_patch(17861, 32768, "Ternary-Bonsai-2-27B-PTQ1_0");
+        assert!(a.contains("model: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
+        assert!(a.contains("id: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
+        assert!(a.contains("contextWindow: 32768"), "{}", a);
+        // Cambiar de modelo cambia el patch (se reescribe en cada lanzamiento).
+        let b = deepseek_profile_patch(17861, 32768, "Qwen3.8-27B-IQ4_XS_4BPW");
+        assert_ne!(a, b);
+        // Cambiar de contexto también (nada queda colgado de una sesión vieja).
+        let c = deepseek_profile_patch(17861, 262144, "Ternary-Bonsai-2-27B-PTQ1_0");
+        assert!(c.contains("contextWindow: 262144"), "{}", c);
+        assert_ne!(a, c);
     }
 }

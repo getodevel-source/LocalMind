@@ -1533,6 +1533,30 @@ fn launch_cli(
         return;
     }
     let context = st.context;
+    // Id del modelo REALMENTE servido: con el motor vivo sale de `st.model`
+    // (p. ej. `Ternary-Bonsai-2-27B-PTQ1_0.gguf` → `Ternary-Bonsai-2-27B-PTQ1_0`).
+    // Es el dato que va al config privado del agente, al `--model` del binario
+    // y a la respuesta del endpoint: los tres coinciden con lo que sirve el
+    // motor. El guard de arriba ya-cvita el motor apagado, así que aquí el id
+    // nunca es el de la sesión anterior.
+    let served = match crate::agents::served_model_id(&st) {
+        Some(m) => m,
+        None => {
+            // Motor vivo sin nombre de modelo: no hay id honesto que escribir,
+            // y escribir el de la sesión anterior sería la misma mentira que
+            // se corrige aquí. Se rechaza el lanzamiento en vez de mentir.
+            mgr.log(&format!(
+                "[LocalMind] {} sin nombre de modelo en el estado: no se escribe config (quedaría con un id inventado).",
+                crate::launcher::agent_label(id)
+            ));
+            let _ = req.respond(json_response_for_origin(
+                409,
+                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
+                origin,
+            ));
+            return;
+        }
+    };
     // `http_port` es el puerto del GATEWAY ligado (propagado desde `start`);
     // el del motor (`st.port`) es solo interno (health/slots/metrics).
     let agent = match id {
@@ -1549,9 +1573,9 @@ fn launch_cli(
             return;
         }
     };
-    let cli_model = crate::launcher::cli_model(id);
+    let cli_model = crate::launcher::cli_model(id, &served);
     let label = crate::launcher::agent_label(id);
-    let agent_dir = match crate::agents::write_agent_dir(agent, http_port, context, gateway_key) {
+    let agent_dir = match crate::agents::write_agent_dir(agent, http_port, context, gateway_key, &served) {
         Ok(d) => d,
         Err(e) => {
             let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
@@ -1580,6 +1604,7 @@ fn launch_cli(
         &agent_path,
         req_effort,
         &allow_home,
+        &served,
     );
 
     // Terminal del sistema con verificación + fallback (`wt` → `cmd start`):
@@ -1630,12 +1655,33 @@ fn launch_deepseek(
         Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
         _ => String::new(),
     };
-    // Patch Cordis generado con valores VIVOS (gateway + contexto): el fichero
-    // estático con 17860 hardcodeado queda obsoleto en cuanto el HTTP liga
-    // otro puerto. Solo se reescribe si cambia (mtime estable).
+    // Patch Cordis generado con valores VIVOS (gateway + contexto + modelo): el
+    // fichero estático con 17860 hardcodeado queda obsoleto en cuanto el HTTP
+    // liga otro puerto. Solo se reescribe si cambia (mtime estable).
+    //
+    // Mismo guard que `launch_cli`/`launch_opencode`: sin motor no se escribe
+    // ninguna config. Antes se escribía igual, con el contexto por defecto
+    // (32768) y el alias `localmind` fijo, y se abría una terminal contra un
+    // motor que no estaba sirviendo nada.
     let st = mgr.get_status();
+    if !crate::agents::engine_live(&st) {
+        let err = crate::agents::engine_down_error(&st);
+        let _ = req.respond(json_response_for_origin(409, err, origin));
+        return;
+    }
+    let served = match crate::agents::served_model_id(&st) {
+        Some(m) => m,
+        None => {
+            let _ = req.respond(json_response_for_origin(
+                409,
+                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
+                origin,
+            ));
+            return;
+        }
+    };
     let home = crate::launcher::deepseek_home().unwrap_or_else(|| crate::agents::agent_dir("deepseek"));
-    let patch = crate::launcher::deepseek_profile_patch(http_port, st.context, "localmind");
+    let patch = crate::launcher::deepseek_profile_patch(http_port, st.context, &served);
     match crate::launcher::write_deepseek_patch(&home, &patch) {
         Ok(_) => {}
         Err(e) => {
@@ -1699,20 +1745,31 @@ fn launch_opencode(
         let _ = req.respond(json_response_for_origin(409, err, origin));
         return;
     }
-    // Alias corto para el payload (`qwen3.8-27b`); el flag lleva el prefijo.
+    // Id corto = el REALMENTE servido por el motor (p. ej.
+    // `Ternary-Bonsai-2-27B-PTQ1_0`); el flag lleva el prefijo de provider.
     // baseURL = GATEWAY (contabilidad/aliasing), no el motor.
     // La config se escribe como FICHERO en el dir privado (no por env: el
     // `set "VAR=<json>"` de cmd.exe corrompía el JSON con `\"` literales y
     // opencode ignoraba el provider → `ProviderModelNotFoundError`).
-    let full = crate::launcher::cli_model(crate::launcher::AgentId::OpenCode);
-    let model_id = full.strip_prefix("localmind/").unwrap_or(full);
+    let model_id = match crate::agents::served_model_id(&st) {
+        Some(m) => m,
+        None => {
+            let _ = req.respond(json_response_for_origin(
+                409,
+                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
+                origin,
+            ));
+            return;
+        }
+    };
+    let full = crate::launcher::cli_model(crate::launcher::AgentId::OpenCode, &model_id);
     let home = crate::agents::agent_dir("opencode");
     if let Err(e) = std::fs::create_dir_all(&home) {
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo crear {}: {}", home.display(), e) }).to_string(), origin));
         return;
     }
     let gateway_key_live = crate::auth::load_or_create_key();
-    let content = crate::launcher::opencode_config_json(http_port, st.context, model_id, Some(&gateway_key_live));
+    let content = crate::launcher::opencode_config_json(http_port, st.context, &model_id, Some(&gateway_key_live));
     match crate::launcher::write_opencode_config(&home, &content) {
         Ok(_) => {}
         Err(e) => {
@@ -1725,7 +1782,7 @@ fn launch_opencode(
         .map(|a| PathBuf::from(a).join("LocalMind").join("gateway.key"))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let inner = crate::launcher::opencode_inner_cmd(model_id, req_task);
+    let inner = crate::launcher::opencode_inner_cmd(&model_id, req_task);
     let cd_prefix = match req_dir {
         Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
         _ => String::new(),
@@ -2530,7 +2587,7 @@ mod proxy {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
-                // ---- LM-MOD-3: el id anunciado sigue al motor, D-2 intacto ----
+        // ---- LM-MOD-3: el id anunciado sigue al motor, D-2 intacto ----
 
         fn store_de_prueba(dir: &std::path::Path) -> crate::config::ConfigStore {
             let _ = std::fs::create_dir_all(dir);
@@ -2648,8 +2705,6 @@ mod proxy {
             assert!(!crate::agents::engine_live(&parado));
             let _ = std::fs::remove_dir_all(&dir);
         }
-
-        #[test]
 
         #[test]
         fn header_parse_de_literal_no_pania() {

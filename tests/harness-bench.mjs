@@ -265,8 +265,10 @@ function npmShim(name) {
   return name; // fall back to PATH
 }
 
-// agents.rs pi_models_json (vision=false): live port/context/key.
-function piModelsJson(httpPort, context, key) {
+// agents.rs pi_models_json (vision=false): live port/context/key + the model
+// the engine ACTUALLY serves (servedModel). The `localmind` alias is kept
+// behind it (D-2 rewrites any requested model to the served one).
+function piModelsJson(httpPort, context, key, servedModel) {
   const maxToks = Math.min(Math.floor(context / 2), 16384);
   const entry = (id, name) => ({
     id,
@@ -288,7 +290,7 @@ function piModelsJson(httpPort, context, key) {
             baseUrl: `http://127.0.0.1:${httpPort}/v1`,
             apiKey: key,
             api: "openai-completions",
-            models: [entry("localmind", "LocalMind Active Model"), entry("qwen3.8-27b", "Qwen 3.8 27B (LocalMind)")],
+            models: [entry(servedModel, servedModel), entry("localmind", "LocalMind (alias)")],
           },
         },
       },
@@ -299,32 +301,42 @@ function piModelsJson(httpPort, context, key) {
 }
 
 // agents.rs omp_models_yml (vision=false) + omp_config_yml.
-function ompModelsYml(httpPort, context, key) {
+function ompModelsYml(httpPort, context, key, servedModel) {
   const m = (id, name) =>
     `      - id: ${id}\n        name: ${name}\n        reasoning: true\n        input: [text]\n        contextWindow: ${context}\n        maxTokens: 16384\n        cost:\n          input: 0\n          output: 0\n          cacheRead: 0\n          cacheWrite: 0\n        thinkingLevelMap:\n          minimal: low\n          low: low\n          medium: medium\n          high: xhigh\n          xhigh: xhigh\n          max: null\n        compat:\n          supportsReasoningEffort: false\n          reasoningContentField: reasoning_content\n          supportsDeveloperRole: false\n`;
   return (
     `providers:\n  localmind:\n    baseUrl: http://127.0.0.1:${httpPort}/v1\n    apiKey: ${key}\n    api: openai-completions\n    models:\n` +
-    m("qwen3.8-27b", "Qwen 3.8 27B (LocalMind)") +
-    m("localmind", "LocalMind Active Model")
+    m(servedModel, servedModel) +
+    m("localmind", "LocalMind (alias)")
   );
 }
 const OMP_CONFIG_YML = "modelRoles:\n  default: localmind/localmind\n";
 
-// launcher.rs deepseek_profile_patch (model alias `localmind`, maxTokens 4096).
-function deepseekPatch(httpPort, context) {
+// agents::served_model_id (Rust), misma derivacion: el filename servido sin
+// `.gguf`. Sin motor en marcha no hay modelo vivo -> alias estable `localmind`,
+// que el proxy reescribe al servido (D-2). Nunca un nombre fijo de un modelo
+// que quiza no es el cargado: el bench debe medir lo que mide el producto.
+function servedModelFrom(st) {
+  const m = st && typeof st.model === "string" ? st.model.trim() : "";
+  if (!m) return "localmind";
+  return m.replace(/\.gguf$/i, "").trim() || "localmind";
+}
+
+// launcher.rs deepseek_profile_patch (live served model id, maxTokens 4096).
+function deepseekPatch(httpPort, context, servedModel) {
   return (
     `# LocalMind: punto del harness dsh contra el modelo local (generado).\n` +
     `# - Proveedor OpenAI-compatible en http://127.0.0.1:${httpPort}/v1 (protocolo openai-completions).\n` +
     `# - Clave via env LOCALMIND_API_KEY (el lanzador la lee de %APPDATA%\\LocalMind\\gateway.key).\n` +
     `# - Compat: el gateway/proxy LocalMind solo habla chat/completions clasico:\n` +
     `#   sin rol "developer" (usa "system") y cap de salida como "max_tokens".\n` +
-    `- id: agent-default-model\n  config:\n    provider: localmind\n    model: localmind\n` +
+    `- id: agent-default-model\n  config:\n    provider: localmind\n    model: ${servedModel}\n` +
     `- id: llm-pi-ai\n  config:\n    providers:\n      localmind:\n` +
     `        displayName: LocalMind\n        apiKeyEnv: LOCALMIND_API_KEY\n` +
     `        api: openai-completions\n        baseURL: http://127.0.0.1:${httpPort}/v1\n` +
     `        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n` +
-    `          supportsReasoningEffort: false\n        models:\n          - id: localmind\n` +
-    `            name: LocalMind local model\n            contextWindow: ${context}\n            maxTokens: 4096\n`
+    `          supportsReasoningEffort: false\n        models:\n          - id: ${servedModel}\n` +
+    `            name: ${servedModel}\n            contextWindow: ${context}\n            maxTokens: 4096\n`
   );
 }
 
@@ -368,7 +380,7 @@ function writeIfChanged(path, content) {
 // Build the per-harness spec: binary, argv tail, env additions, config files.
 // `phase` is "reaction" | "throughput" (only selects the prompt).
 function harnessSpec(id, prompt, ctx) {
-  // ctx: { httpPort, liveContext, key, agentsBase, thinking }
+  // ctx: { httpPort, liveContext, servedModel, key, agentsBase, thinking }
   // thinking: "max" (app default, matches launcher.rs effort_flag default),
   // "low"|"off" (--fair: explicit level for pi/omp --thinking, which accepts
   // off/minimal/low/medium/high/xhigh/max).
@@ -377,11 +389,12 @@ function harnessSpec(id, prompt, ctx) {
   switch (id) {
     case "pi": {
       // launcher.rs cli_inner_cmd(Pi) default: --thinking max; --fair uses low/off.
-      const files = [{ path: join(home, "models.json"), content: piModelsJson(ctx.httpPort, ctx.liveContext, ctx.key) }];
+      const files = [{ path: join(home, "models.json"), content: piModelsJson(ctx.httpPort, ctx.liveContext, ctx.key, ctx.servedModel) }];
       return {
         id,
         bin: npmShim("pi"),
-        argv: ["--provider", "localmind", "--model", "localmind/localmind", "--thinking", thinking, "-p", prompt],
+        // launcher.rs cli_inner_cmd(Pi, served): --provider localmind --model localmind/<served>
+        argv: ["--provider", "localmind", "--model", `localmind/${ctx.servedModel}`, "--thinking", thinking, "-p", prompt],
         env: {
           OPENAI_BASE_URL: `http://127.0.0.1:${ctx.httpPort}/v1`,
           OPENAI_API_KEY: ctx.key,
@@ -392,10 +405,10 @@ function harnessSpec(id, prompt, ctx) {
       };
     }
     case "omp": {
-      // launcher.rs cli_inner_cmd(Omp): --model localmind/qwen3.8-27b
+      // launcher.rs cli_inner_cmd(Omp, served): --model localmind/<served>
       // --thinking max (+ -p for one-shot).
       const files = [
-        { path: join(home, "models.yml"), content: ompModelsYml(ctx.httpPort, ctx.liveContext, ctx.key) },
+        { path: join(home, "models.yml"), content: ompModelsYml(ctx.httpPort, ctx.liveContext, ctx.key, ctx.servedModel) },
         { path: join(home, "config.yml"), content: OMP_CONFIG_YML },
       ];
       return {
@@ -404,7 +417,7 @@ function harnessSpec(id, prompt, ctx) {
         bin: existsSync(join(process.env.LOCALAPPDATA || "", "omp", "omp.exe"))
           ? join(process.env.LOCALAPPDATA, "omp", "omp.exe")
           : "omp",
-        argv: ["--model", "localmind/qwen3.8-27b", "--thinking", thinking, "-p", prompt],
+        argv: ["--model", `localmind/${ctx.servedModel}`, "--thinking", thinking, "-p", prompt],
         env: {
           OPENAI_BASE_URL: `http://127.0.0.1:${ctx.httpPort}/v1`,
           OPENAI_API_KEY: ctx.key,
@@ -417,7 +430,7 @@ function harnessSpec(id, prompt, ctx) {
     case "opencode": {
       // server.rs launch_opencode: config FILE with inline live key
       // (<home>/config/opencode/opencode.json) + XDG isolation + key via env.
-      const modelId = "qwen3.8-27b";
+      const modelId = ctx.servedModel;
       const files = [
         {
           path: join(home, "config", "opencode", "opencode.json"),
@@ -445,7 +458,7 @@ function harnessSpec(id, prompt, ctx) {
       const files = [
         {
           path: join(home, "profiles", "headless", "cordis.patch.yml"),
-          content: deepseekPatch(ctx.httpPort, ctx.liveContext),
+          content: deepseekPatch(ctx.httpPort, ctx.liveContext, ctx.servedModel),
         },
       ];
       return {
@@ -656,7 +669,11 @@ async function runControl(base, key) {
       method: "POST",
       headers: { ...authHeaders(key), "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "qwen3.8-27b",
+        // Alias estable a proposito (D-2): el proxy reescribe cualquier
+        // `model` pedido al realmente servido, asi que este pie demuestra en el
+        // propio bench que un cliente configurado con `localmind` -- el nombre
+        // con el que hay agentes en la calle -- sigue llegando al motor vivo.
+        model: "localmind",
         messages: [{ role: "user", content: THROUGHPUT_PROMPT }],
         stream: true,
         max_tokens: 4096,
@@ -752,8 +769,13 @@ async function main() {
     stPre = parseJson((await apiGet(OPTS.baseUrl, KEY, "/api/status")).text);
   }
   const liveContext = stPre && Number(stPre.context) > 0 ? Number(stPre.context) : OPTS.context;
+  // Same derivation as agents::served_model_id (Rust): the served filename
+  // without `.gguf`. With the engine down there is no live model, so we fall
+  // back to the stable alias `localmind` -- which the proxy rewrites to the
+  // served id anyway (D-2), so the bench still measures the real path.
+  const servedModel = servedModelFrom(stPre);
 
-  const launchCtx = { httpPort: HTTP_PORT, liveContext, key: KEY, agentsBase: ABase, thinking: OPTS.fair ? OPTS.thinking : "max" };
+  const launchCtx = { httpPort: HTTP_PORT, liveContext, servedModel, key: KEY, agentsBase: ABase, thinking: OPTS.fair ? OPTS.thinking : "max" };
 
   // --dry-run: print exact commands/env (key redacted), touch nothing.
   if (OPTS.dryRun) {
@@ -775,7 +797,7 @@ async function main() {
         console.log(`argv: ${spec.bin} ${spec.argv.map((a) => JSON.stringify(a)).join(" ")}`);
       }
     }
-    console.log(`\ncontrol: POST ${OPTS.baseUrl}/v1/chat/completions (streaming, model qwen3.8-27b, 300-number prompt)`);
+    console.log(`\ncontrol: POST ${OPTS.baseUrl}/v1/chat/completions (streaming, model ${servedModel}, 300-number prompt)`);
     return 0;
   }
 
@@ -790,6 +812,9 @@ async function main() {
   const liveCtx = {
     ...launchCtx,
     liveContext: Number(eng.status.context) || liveContext,
+    // Re-derive from the engine we actually ensured: this is the live source
+    // of truth the product reads, not the pre-flight guess.
+    servedModel: servedModelFrom(eng.status),
     thinking: OPTS.fair ? OPTS.thinking : "max",
   };
 
@@ -802,7 +827,7 @@ async function main() {
         method: "POST",
         headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "qwen3.8-27b", stream: false, temperature: 0, max_tokens: 8,
+          model: "localmind", stream: false, temperature: 0, max_tokens: 8,
           chat_template_kwargs: { enable_thinking: false },
           messages: [{ role: "user", content: "Responde exactamente: OK" }],
         }),
