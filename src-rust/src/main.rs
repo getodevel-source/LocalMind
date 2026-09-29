@@ -59,11 +59,16 @@ fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
 /// Pura: el hook en sí (que captura `PanicHookInfo`, no `Send + Sync`) queda
 /// fuera, así que esto se puede testear sin matar el proceso de test.
 ///
-/// `panic = "abort"` mata el proceso entero sin desenrollar: sin esta línea,
-/// un pánico no deja NADA en `logs/localmind.log` (el stderr del hijo va
-/// pipeado pero no se persiste, y el panic muchas veces ocurre en un hilo sin
-/// stderr). Es una breadcrumb, NO un crash dump: dice qué y dónde, no el
-/// estado de memoria.
+/// `panic = "abort"` mata el proceso entero sin desenrollar. El stderr del
+/// MOTOR sí queda persistido: `attach_reader_threads` (`process.rs`) escribe
+/// stdout y stderr del hijo en `logs/localmind.log` por
+/// `filelog::write_log_line` desde 2840237. Lo que NO tiene esa ruta es un
+/// pánico del PROPIO LocalMind: el archivo se escribe solo por llamadas
+/// explícitas (nada lo hereda por herencia), la app es GUI sin consola
+/// (`windows_subsystem = "windows"`), y `abort()` no desenrolla ni deja que un
+/// `Drop` vacíe nada. El mensaje del pánico no llegaría, literalmente, a
+/// ningún lado: sin esta línea, un pánico de LocalMind no deja rastro. Es una
+/// breadcrumb, NO un crash dump: dice qué y dónde, no el estado de memoria.
 fn panic_log_line(secs_epoch: u64, payload: &str, file: &str, line: u32) -> String {
     format!(
         "[{}] [LocalMind] PANIC: {} ({}:{})",
@@ -75,7 +80,7 @@ fn panic_log_line(secs_epoch: u64, payload: &str, file: &str, line: u32) -> Stri
 /// reemplazarlo, así el backtrace por defecto de Rust se sigue viendo.
 ///
 /// ¿Corre con `panic = "abort"`? Sí, verificado empíricamente: una sonda
-/// release con `panic = "abort", lto, strip`+e`opt-level=3` escribió su
+/// release con `panic = "abort", lto, strip, opt-level=3` escribió su
 /// marcador desde el hook y luego murió con 0xC0000409. El hook se invoca
 /// antes del `abort()`.
 ///

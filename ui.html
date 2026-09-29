@@ -4374,11 +4374,17 @@
           // "Error al iniciar:" sería falso. El arranque rechazado lo escribe
           // `startEngine`, que conoce el motivo y le pone su prefijo.
           //
-          // Los dos caminos no se pisan: `POST /api/start` responde 400 SIN
-          // guardar `last_error` en el status (el proceso ni llega a
-          // lanzarse), así que el poller ve `stopped` con `last_error` null y
-          // no entra en esta rama. Por eso el prefijo de `startEngine`
-          // sobrevive a los polls siguientes.
+          // Los dos caminos no se pisan SI el status llega limpio, y la
+          // precondición la garantiza el servidor, no esta función: `start()`
+          // borra `last_error`/`acceptance_error`/`acceptance_ok` al ABRIR el
+          // intento (no solo al lograrse), así que tras un arranque rechazado
+          // el poller ve esas tres a null y no entra en ninguna de las dos
+          // ramas de abajo. Antes de ese borrado el arranque rechazado
+          // heredaba el error del arranque anterior y el poller pintaba aquí un
+          // mensaje viejo, tapando el "Error al iniciar: ..." recién escrito.
+          // La exclusividad no es incondicional: si el motor se cae o falla la
+          // puerta DESPUÉS de abrirse el intento, esta rama gana, y es lo
+          // correcto (ese error sí acaba de ocurrir).
           errBanner.textContent = st.last_error || st.acceptance_error;
           errBanner.style.display = 'block';
         } else if (st.acceptance_ok === false && (st.acceptance_error || '')) {
@@ -4387,9 +4393,9 @@
         } else if (status === 'online' || status === 'starting') {
           // Solo se oculta al llegar a un estado nuevo y sano. `stopped` es el estado
           // en reposo, no de recuperacion: un arranque rechazado deja el motor ahi
-          // (la validacion falla antes de lanzar el proceso y `last_error` sigue en
-          // null), asi que ocultarlo en `stopped` borraba el error del usuario al
-          // siguiente poll. `startEngine` ya limpia el banner al empezar un intento.
+          // (el status llega con `last_error` en null, ver el bloque de arriba), asi
+          // que ocultarlo en `stopped` borraba el error del usuario al siguiente poll.
+          // `startEngine` ya limpia el banner al empezar un intento.
           errBanner.style.display = 'none';
           errBanner.textContent = '';
         }
