@@ -252,7 +252,7 @@ const SECTIONS = [
   ]},
   { name: "Interfaz", qs: [
     { id:"P15", sec:"Interfaz", q:"¿Qué hacemos con dashboard.html y chat.html?",
-      why:"Son archivos muertos: llaman rutas que ya no existen (/api/open-omp, /ws/logs) y fijan 127.0.0.1:8080 (dashboard.html:457-490, chat.html:174-176). El servidor sólo sirve / → ui.html (server.rs:198-212).",
+      why:"Son archivos muertos: llaman rutas que ya no existen (/api/open-omp, /ws/logs) y fijan 127.0.0.1:8080. El servidor sólo sirve / → ui.html. Eliminados: ninguna ruta, test ni paso de empaquetado los alcanzaba.",
       opts:[
         { t:"Eliminarlos", d:"Saca código que ya no está en el contrato y confunde auditorías.", rec:true },
         { t:"Rescatar ideas (chat con imagen) y después borrarlos", d:"Conserva lo útil, elimina el resto." },
