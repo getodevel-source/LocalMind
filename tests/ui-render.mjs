@@ -626,3 +626,65 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
     b.style.display === 'block' && String(b.textContent || '').includes('contexto inválido'),
     JSON.stringify(String(b.textContent || '').slice(0, 80)));
 }
+
+// ---- el error de un arranque rechazado no se autodestruye al volver a reposo ----
+{
+  // Reproduce la secuencia real: POST /api/start devuelve 400 (validacion, el
+  // proceso nunca llega a lanzarse) y el poller de /api/status encuentra el motor
+  // en `stopped` sin `last_error`. Antes el `else` de renderStatus ocultaba el
+  // banner en ese `stopped` y el mensaje duraba ~200 ms.
+  const d = makeDoc();
+  const fetchRejected = async (url) => {
+    if (String(url).includes('/api/start')) {
+      return { ok: false, status: 400, json: async () => ({ error: "Modelo desconocido: 'noexiste.gguf'." }) };
+    }
+    if (String(url).includes('/api/status')) {
+      return { ok: true, json: async () => ({ status: 'stopped', is_healthy: false, last_error: null, acceptance_error: null }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  const a = load(script, d, mkStorage(), mkNav(), fetchRejected);
+  d.getElementById('model-select').value = 'noexiste.gguf';
+  await a.startEngine();
+  const b = d.getElementById('error-banner');
+  ok('arranque rechazado muestra el banner',
+    b.style.display === 'block' && String(b.textContent || '').includes("Modelo desconocido: 'noexiste.gguf'."),
+    JSON.stringify({ display: b.style.display, text: String(b.textContent || '').slice(0, 90) }));
+
+  // El poll de 800 ms: /api/status responde `stopped` (estado de reposo real).
+  a.renderStatus({ status: 'stopped', is_healthy: false, last_error: null, acceptance_error: null });
+  ok('el banner sigue visible en reposo tras un arranque rechazado',
+    b.style.display === 'block' && String(b.textContent || '').includes("Modelo desconocido: 'noexiste.gguf'."),
+    JSON.stringify({ display: b.style.display, text: String(b.textContent || '').slice(0, 90) }));
+
+  // Y sigue visible en los polls siguientes: no es un frame, es persistente.
+  a.renderStatus({ status: 'stopped', is_healthy: false });
+  ok('el error de arranque persiste en los siguientes polls',
+    b.style.display === 'block' && String(b.textContent || '').includes("Modelo desconocido: 'noexiste.gguf'."),
+    JSON.stringify({ display: b.style.display }));
+
+  // Contracara: un estado sano nuevo sí oculta el banner (no se queda pegado).
+  a.renderStatus({ status: 'running', is_healthy: true });
+  ok('un estado sano oculta el banner', b.style.display === 'none', JSON.stringify({ display: b.style.display }));
+
+  // `starting` también es un intento nuevo: oculta y limpia el texto.
+  const d2 = makeDoc();
+  const a2 = load(script, d2, mkStorage(), mkNav(), fetchRejected);
+  d2.getElementById('model-select').value = 'noexiste.gguf';
+  await a2.startEngine();
+  const b2 = d2.getElementById('error-banner');
+  a2.renderStatus({ status: 'starting' });
+  ok('starting oculta y limpia el banner', b2.style.display === 'none' && String(b2.textContent || '') === '',
+    JSON.stringify({ display: b2.style.display, text: String(b2.textContent || '').slice(0, 60) }));
+
+  // Y un intento nuevo borra el error anterior: no queda mensaje rancio.
+  const d3 = makeDoc();
+  const a3 = load(script, d3, mkStorage(), mkNav(), fetchRejected);
+  d3.getElementById('model-select').value = 'noexiste.gguf';
+  await a3.startEngine();
+  const b3 = d3.getElementById('error-banner');
+  d3.getElementById('model-select').value = 'bueno.gguf';
+  a3.renderStatus({ status: 'starting' });
+  ok('un intento nuevo limpia el error anterior', b3.style.display === 'none' && String(b3.textContent || '') === '',
+    JSON.stringify({ display: b3.style.display, text: String(b3.textContent || '').slice(0, 60) }));
+}

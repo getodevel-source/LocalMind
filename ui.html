@@ -4366,9 +4366,17 @@
         } else if (st.acceptance_ok === false && (st.acceptance_error || '')) {
           errBanner.textContent = st.acceptance_error;
           errBanner.style.display = 'block';
-        } else {
+        } else if (status === 'online' || status === 'starting') {
+          // Solo se oculta al llegar a un estado nuevo y sano. `stopped` es el estado
+          // en reposo, no de recuperacion: un arranque rechazado deja el motor ahi
+          // (la validacion falla antes de lanzar el proceso y `last_error` sigue en
+          // null), asi que ocultarlo en `stopped` borraba el error del usuario al
+          // siguiente poll. `startEngine` ya limpia el banner al empezar un intento.
           errBanner.style.display = 'none';
+          errBanner.textContent = '';
         }
+        // En cualquier otro estado (sobre todo `stopped`) el banner no se toca:
+        // si hay un error visible, persiste hasta el proximo intento.
       }
     }
 
