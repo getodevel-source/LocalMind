@@ -53,7 +53,7 @@ const stubs = [{}, {}, {}];
 
 function load(script, doc, storage, nav, fetchImpl) {
   const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
-    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache };');
+    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache, getProfileFallback };');
   return factory(doc, mkWindow(), storage || mkStorage(), nav || mkNav(), mkES, fetchImpl || stubFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
 }
 
@@ -534,6 +534,57 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   ok('version badge falls back to version field', (await run({ version: '1.2.3' })) === '1.2.3');
   ok('version badge falls back to local', (await run(null)) === 'local');
   void mkApi;
+}
+
+// ---- fix-sprint: el build del motor se muestra en Specs, no en el badge ----
+{
+  // Corre la `refreshVersion` REAL (no el mapeo a mano de arriba): `api.getVersion`
+  // va por `fetch('/api/version')`, así que alcanza con un fetch stub.
+  const d = makeDoc();
+  const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
+    script + '\n;return { refreshVersion };');
+  const versionFetch = async (url) => {
+    if (String(url) === '/api/version') {
+      return { ok: true, json: async () => ({ app: '2.0.0', engine_build: '10743', engine_path: 'C:\\bin\\llama-server.exe' }) };
+    }
+    throw new Error('no network: ' + url);
+  };
+  const f = factory(d, { location: { href: '' } }, mkStorage(), mkNav(), mkES, versionFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
+  d.getElementById('app-version').textContent = '';
+  await f.refreshVersion();
+  const build = String(d.getElementById('spec-engine-build').textContent ?? '');
+  const path = String(d.getElementById('spec-engine-path').textContent ?? '');
+  ok('version muestra el build del motor', build.includes('10743'), `spec-engine-build=${JSON.stringify(build)}`);
+  ok('version muestra la ruta del motor', path.includes('llama-server.exe'), `spec-engine-path=${JSON.stringify(path)}`);
+  // El badge del header NO se ensancha con el build (layout 900x700 / 1180x820).
+  const badge = String(d.getElementById('app-version').textContent ?? '');
+  ok('el badge del header no lleva el build', !badge.includes('10743') && badge === 'v2.0.0', `badge=${JSON.stringify(badge)}`);
+  // El build tampoco se inventa cuando /api/version no lo trae.
+  const d2 = makeDoc();
+  const noBuild = async () => ({ ok: true, json: async () => ({ app: '2.0.0' }) });
+  const f2 = factory(d2, { location: { href: '' } }, mkStorage(), mkNav(), mkES, noBuild, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
+  await f2.refreshVersion();
+  // El mock no aplica el texto por defecto del HTML, así que "intacto" = vacío:
+  // lo que importa es que no se invente un build.
+  const b2 = String(d2.getElementById('spec-engine-build').textContent ?? '');
+  ok('sin engine_build no se inventa un build', b2 === '', `spec-engine-build=${JSON.stringify(b2)}`);
+}
+
+// ---- fix-sprint: los labels de perfil fallback no llevan emoji ----
+{
+  const d = makeDoc();
+  const fb = load(script, d).getProfileFallback();
+  ok('fallback de perfiles sin emoji', Array.isArray(fb) && fb.length === 4, `len=${Array.isArray(fb) ? fb.length : 'n/a'}`);
+  const ids = fb.map(p => p.id);
+  const wantIds = ['velocidad', 'multi_doc', 'libros', 'max_contexto'];
+  ok('fallback conserva los cuatro ids', JSON.stringify(ids) === JSON.stringify(wantIds), JSON.stringify(ids));
+  // `id` y `context` los consume onProfileChange (#context-select): byte-idénticos.
+  const ctxs = fb.map(p => p.context);
+  ok('fallback conserva los cuatro contextos', JSON.stringify(ctxs) === JSON.stringify([32768, 65536, 131072, 262144]), JSON.stringify(ctxs));
+  const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+  const conEmoji = fb.filter(p => EMOJI.test(p.label)).map(p => p.id);
+  ok('ningún label de perfil fallback tiene emoji', conEmoji.length === 0, conEmoji.length ? JSON.stringify(conEmoji) : JSON.stringify(fb.map(p => p.label.slice(0, 18))));
+  ok('los labels de perfil fallback siguen teniendo texto', fb.every(p => typeof p.label === 'string' && p.label.trim().length > 0));
 }
 
 // ---- failing start (400, Spanish error) surfaces in error banner ----

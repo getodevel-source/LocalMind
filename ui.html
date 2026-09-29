@@ -1912,6 +1912,11 @@
                 <td>Flash Attention activado</td>
               </tr>
               <tr>
+                <td data-i18n="specs.rowEngine">Motor de Inferencia</td>
+                <td id="spec-engine-build" data-i18n="specs.detecting">Detectando...</td>
+                <td id="spec-engine-path">--</td>
+              </tr>
+              <tr>
                 <td data-i18n="specs.rowPower">Protección Eléctrica</td>
                 <td data-i18n="specs.rowPowerVal">Modo Silencioso &amp; Anti-Apagón</td>
                 <td data-i18n="specs.rowPowerState">Prioridad equilibrada + Auto-stop</td>
@@ -2149,6 +2154,7 @@
         'specs.rowGpu': 'GPU Principal',
         'specs.rowCpu': 'Procesador (CPU)',
         'specs.rowKv': 'KV Cache',
+        'specs.rowEngine': 'Motor de Inferencia',
         'logs.boot': 'LocalMind Studio inicializado. Presiona \'Iniciar Motor\' para arrancar el servidor.',
         'telemetry.title': 'Telemetría', 'telemetry.live': 'Telemetría en vivo',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Caché',
@@ -2356,6 +2362,7 @@
         'specs.rowGpu': 'Primary GPU',
         'specs.rowCpu': 'Processor (CPU)',
         'specs.rowKv': 'KV Cache',
+        'specs.rowEngine': 'Inference Engine',
         'logs.boot': 'LocalMind Studio initialized. Press \'Start Engine\' to boot the server.',
         'telemetry.title': 'Telemetry', 'telemetry.live': 'Live telemetry',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Cache',
@@ -2889,16 +2896,16 @@
     function getProfileFallback() {
       return [
         { id: 'velocidad', context: 32768,
-          label: '⚡ Chat diario — el más rápido (32K, todo en GPU)',
+          label: 'Chat diario — el más rápido (32K, todo en GPU)',
           hint: 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).' },
         { id: 'multi_doc', context: 65536,
-          label: '📚 Multi-documento — varios PDFs y archivos (64K)',
+          label: 'Multi-documento — varios PDFs y archivos (64K)',
           hint: 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.' },
         { id: 'libros', context: 131072,
-          label: '📖 Libros y repos largos — 128K de contexto',
+          label: 'Libros y repos largos — 128K de contexto',
           hint: 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.' },
         { id: 'max_contexto', context: 262144,
-          label: '🌌 Máximo contexto físico — 262K (el límite del modelo)',
+          label: 'Máximo contexto físico — 262K (el límite del modelo)',
           hint: 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.' }
       ];
     }
@@ -4137,9 +4144,20 @@
     }
     async function refreshVersion() {
       const badge = document.getElementById('app-version');
-      if (!badge) return;
+      // Specs: el build del motor y su ruta (los envía /api/version; antes
+      // nadie los mostraba). Va en la tabla y NO en el badge del header: ensanchar
+      // la cinta de arriba rompe los layouts de 900x700 y 1180x820.
+      const buildEl = document.getElementById('spec-engine-build');
+      const pathEl = document.getElementById('spec-engine-path');
+      const showEngine = (build, path) => {
+        if (buildEl) buildEl.textContent = build;
+        if (pathEl) pathEl.textContent = path;
+      };
+      if (!badge) { return; }
       try {
         const v = await api.getVersion();
+        const build = v && typeof v.engine_build === 'string' ? v.engine_build.trim() : '';
+        if (build) showEngine(build, (typeof v.engine_path === 'string' && v.engine_path) || '--');
         const ver = v && (typeof v.app === 'string' && v.app ? v.app : (typeof v.version === 'string' && v.version ? v.version : ''));
         if (ver) {
           badge.textContent = 'v' + ver;
