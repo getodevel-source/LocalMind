@@ -610,6 +610,11 @@ impl ProcessManager {
     /// reintento MTP dirigido relance el MISMO arranque sin `--spec-*`.
     /// `skip_spec` = true solo en ese reintento. Sin pánicos en flags:
     /// el PSU-lock ya validó `extra_flags` en `start()`.
+    ///
+    /// D-47: esta es la FUENTE ÚNICA de las flags del motor. `start()` ya no
+    /// las vuelve a anexar: cada flag llega al hijo exactamente una vez y el
+    /// argv del log es, por fin, el argv del hijo. `api_key` es la clave del
+    /// gateway, que el motor exige vía `--api-key` (D-45).
     #[allow(clippy::too_many_arguments)]
     fn build_engine_cmd(
         llama_bin: &std::path::PathBuf,
@@ -1352,14 +1357,15 @@ impl ProcessManager {
             self.mtp_retry_done.load(std::sync::atomic::Ordering::Relaxed),
             api_key,
         );
-        if cfg.engine.reasoning_preserve {
-            cmd.arg("--reasoning-preserve");
-        }
 
-        if profile.cache_ram > 0 {
-            cmd.args(["--cache-ram", &profile.cache_ram.to_string()]);
-        }
-
+        // D-47: `build_engine_cmd` YA anexa `--reasoning-preserve`,
+        // `--cache-ram` y todas las `extra_flags` (perfil + engine). Este bloque
+        // los repetía y el hijo los recibía dos veces
+        // (`DEPRECATED: argument '--reasoning-preserve' specified multiple
+        // times`), con el efecto peor que el ruido: el argv del log dejaba de
+        // ser el argv del hijo, que es justo lo que lo hace evidencia.
+        // No se reimplementan aquí: la fuente única es `build_engine_cmd`.
+        //
         // `--cache-reuse` NO se pasa: el build 10683 lo rechaza en este
         // contexto (`cache_reuse is not supported by this context`, medido
         // 2026-09-27 en 4 combinaciones: mínimo/-kvu/-np2/--cache-prompt) y la
@@ -1368,19 +1374,21 @@ impl ProcessManager {
 
         // Candado PSU (LM-NF-3): ni el perfil ni el engine global pueden subir
         // `-ub`/`-b`/spec por config. La función nombra la flag ofensora.
+        //
+        // D-47: la INSPECCIÓN se queda aquí, donde estaba, aunque ya no se
+        // anexe nada después. El orden es deliberado: la lista se valida sobre
+        // `all_extra` ANTES de que ninguna de esas flags llegue al comando. Se
+        // conserva esa propiedad (el candado corre antes del `spawn()` de abajo
+        // y devuelve `Err` sin lanzar el proceso), y lo que se elimina es solo
+        // el segundo `cmd.arg()`: las flags ya iban anexadas dentro de
+        // `build_engine_cmd`, así que el candado igual inspeccionaba antes de
+        // que el hijo las viera.
         let mut all_extra: Vec<String> = Vec::new();
         all_extra.extend(profile.extra_flags.iter().cloned());
         all_extra.extend(cfg.engine.extra_flags.iter().cloned());
         if let Some(err) = crate::config::psu_unsafe_flag(&all_extra) {
             self.log(&err);
             return Err(err);
-        }
-        for flag in &profile.extra_flags {
-            cmd.arg(flag);
-        }
-
-        for flag in &cfg.engine.extra_flags {
-            cmd.arg(flag);
         }
 
         if let Some(mm) = self.find_mmproj() {
@@ -2255,6 +2263,54 @@ mod tests {
         let i = argv.iter().position(|a| a == "--api-key").expect("--api-key");
         assert_eq!(argv.get(i + 1).map(String::as_str), Some(key));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D-47: cada flag del motor llega al hijo UNA sola vez. Antes
+    /// `build_engine_cmd` las anexaba y `start()` las repetía, así que el hijo
+    /// veía `--reasoning-preserve` y las `extra_flags` duplicadas
+    /// (`DEPRECATED: argument ... specified multiple times`).
+    #[test]
+    fn argv_no_repite_las_flags_del_motor() {
+        let mut engine = crate::config::EngineConfig::default();
+        engine.reasoning_preserve = true;
+        engine.extra_flags = vec!["--jinja".to_string(), "--no-warmup".to_string()];
+        let mut profile = crate::profiles::HardwareProfile::default();
+        profile.cache_ram = 8192;
+        profile.extra_flags = vec!["--mlock".to_string()];
+
+        let tokens = argv_tokens(&engine, &profile, 32768, false);
+        let count = |flag: &str| tokens.iter().filter(|t| t.as_str() == flag).count();
+
+        assert_eq!(count("--reasoning-preserve"), 1, "--reasoning-preserve duplicado: {:?}", tokens);
+        assert_eq!(count("--mlock"), 1, "extra_flags del perfil duplicada: {:?}", tokens);
+        assert_eq!(count("--jinja"), 1, "extra_flags del engine duplicada: {:?}", tokens);
+        assert_eq!(count("--no-warmup"), 1, "extra_flags del engine duplicada: {:?}", tokens);
+        // Y la banderola de la puerta PSU no se cuela en el argv.
+        assert_eq!(count("--cache-reuse"), 0, "--cache-reuse nunca se pasa: {:?}", tokens);
+    }
+
+    /// El valor repetido también tenía que ser correcto, no solo único: cada
+    /// flag que depende de un valor debe ir seguida del suyo.
+    #[test]
+    fn argv_no_repite_los_valores_de_las_flags() {
+        let mut engine = crate::config::EngineConfig::default();
+        engine.reasoning_preserve = true;
+        let mut profile = crate::profiles::HardwareProfile::default();
+        profile.cache_ram = 8192;
+
+        let tokens = argv_tokens(&engine, &profile, 32768, false);
+        let values = |flag: &str| -> Vec<String> {
+            tokens
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.as_str() == flag)
+                .map(|(i, _)| tokens.get(i + 1).cloned().unwrap_or_default())
+                .collect()
+        };
+        assert_eq!(values("--cache-ram"), vec!["8192".to_string()], "cache-ram: {:?}", tokens);
+        assert_eq!(values("-c"), vec!["32768".to_string()], "contexto duplicado: {:?}", tokens);
+        assert_eq!(values("-t"), vec!["6".to_string()], "hilos duplicados: {:?}", tokens);
+        assert_eq!(values("--port"), vec!["8080".to_string()], "puerto duplicado: {:?}", tokens);
     }
 
     /// La cabecera que los clientes internos mandan al motor tiene que ser la
