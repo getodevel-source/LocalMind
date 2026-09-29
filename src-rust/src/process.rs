@@ -624,6 +624,7 @@ impl ProcessManager {
         profile: &crate::profiles::HardwareProfile,
         llama_port: u16,
         skip_spec: bool,
+        api_key: &str,
     ) -> std::process::Command {
         let ubatch = "512";
         let mut cmd = std::process::Command::new(llama_bin);
@@ -678,6 +679,14 @@ impl ProcessManager {
         if engine.metrics {
             cmd.arg("--metrics");
         }
+        // LM-NF-6 / P29: el puerto crudo del motor deja de ser una puerta
+        // abierta. El build 10743 acepta `--api-key` y rechaza sin el
+        // `Authorization: Bearer <clave>` (`unauthorized: Invalid API Key`),
+        // así que el mismo puerto deja de servir el modelo a cualquier proceso
+        // local sin credenciales. Reutiliza la clave del gateway: no se acuña
+        // una segunda. Los 8 puntos que hablan con el motor (health/slots/
+        // props/chat en `process.rs`, metrics/chat en `server.rs`) la envían.
+        cmd.args(["--api-key", api_key]);
         if let Some(spec) = engine.speculation.as_ref().filter(|s| s.enabled && !skip_spec) {
             cmd.args([
                 "--spec-type",
@@ -736,6 +745,9 @@ impl ProcessManager {
             &params.profile,
             params.llama_port,
             true,
+            // Misma clave que el primer arranque: el reintento relanza el mismo
+            // login del motor, no uno nuevo.
+            crate::auth::gateway_key(),
         );
         if let Some(mm) = params.mmproj.as_ref() {
             let mm_arg = mm.to_string_lossy().to_string();
@@ -807,6 +819,7 @@ impl ProcessManager {
     fn health_check(port: u16) -> bool {
         matches!(
             ureq::get(&format!("http://127.0.0.1:{}/health", port))
+                .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
                 .timeout(Duration::from_millis(600))
                 .call(),
             Ok(resp) if resp.status() == 200
@@ -815,7 +828,11 @@ impl ProcessManager {
 
     fn check_slots_busy(port: u16) -> bool {
         let url = format!("http://127.0.0.1:{}/slots", port);
-        if let Ok(resp) = ureq::get(&url).timeout(Duration::from_millis(400)).call() {
+        if let Ok(resp) = ureq::get(&url)
+            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+            .timeout(Duration::from_millis(400))
+            .call()
+        {
             if let Ok(slots) = resp.into_json::<Vec<serde_json::Value>>() {
                 return slots.iter().any(|s| {
                     s.get("is_processing")
@@ -831,6 +848,7 @@ impl ProcessManager {
     /// falta o el endpoint no responde (sin falso error).
     fn engine_n_ctx(port: u16) -> Option<usize> {
         let text = ureq::get(&format!("http://127.0.0.1:{}/props", port))
+            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
             .timeout(Duration::from_secs(5))
             .call()
             .ok()?
@@ -895,6 +913,7 @@ impl ProcessManager {
         });
         let start = Instant::now();
         let resp = ureq::post(&url)
+            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
             .timeout(Duration::from_secs(120))
             .send_json(body);
         let elapsed_ms = start.elapsed().as_millis().max(1) as u64;
@@ -1310,6 +1329,8 @@ impl ProcessManager {
         if !llama_bin.exists() {
             return Err(format!("No se encontró llama-server en {:?}", llama_bin));
         }
+        // LM-NF-6 / P29: una sola clave para gateway y motor.
+        let api_key = crate::auth::gateway_key();
 
         // Puerto dinámico del motor: preferido desde config; si está ocupado, +1 hasta libre.
         let llama_port = Self::find_free_port(cfg.engine.llama_port);
@@ -1329,6 +1350,7 @@ impl ProcessManager {
             &profile,
             llama_port,
             self.mtp_retry_done.load(std::sync::atomic::Ordering::Relaxed),
+            api_key,
         );
         if cfg.engine.reasoning_preserve {
             cmd.arg("--reasoning-preserve");
@@ -2143,6 +2165,7 @@ mod tests {
             &crate::config::HardwareProfile::default(),
             8080,
             false,
+            "clave-de-prueba-123",
         );
         let argv: Vec<String> = cmd
             .get_args()
@@ -2153,6 +2176,97 @@ mod tests {
         let i = argv.iter().position(|a| a == "-m").expect("-m en el argv");
         assert!(!argv[i + 1].is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D-45: el puerto crudo del motor deja de ser una puerta abierta. El argv
+    /// debe llevar `--api-key` con la MISMA clave que el gateway, no una
+    /// acuñada aparte: si divergieran, el motor exigiría una credencial que el
+    /// proxy no tiene y todo el tráfico interno (health, puerta de aceptación,
+    /// metrics) respondería 401.
+    #[test]
+    fn argv_lleva_la_clave_del_gateway_al_motor() {
+        let dir = std::env::temp_dir().join(format!("lm-argv-key-{}", std::process::id()));
+        let key = "clave-de-prueba-123";
+        let cmd = ProcessManager::build_engine_cmd(
+            &dir.join("llama-server.exe"),
+            &dir,
+            0,
+            &dir.join("m.gguf"),
+            32768,
+            6,
+            512,
+            "0",
+            &crate::config::EngineConfig::default(),
+            &crate::config::HardwareProfile::default(),
+            8080,
+            false,
+            key,
+        );
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let i = argv
+            .iter()
+            .position(|a| a == "--api-key")
+            .expect("--api-key en el argv");
+        assert_eq!(
+            argv.get(i + 1).map(String::as_str),
+            Some(key),
+            "--api-key debe ir seguido de la clave del gateway"
+        );
+        // La clave no puede colarse por otro lado del argv (p. ej. suelta).
+        assert_eq!(
+            argv.iter().filter(|a| a.as_str() == key).count(),
+            1,
+            "la clave aparece una sola vez: {:?}",
+            argv
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El reintento MTP relanza el mismo arranque sin `--spec-*`, pero con la
+    /// MISMA clave: si la olvidara, el motor pediría credenciales y el
+    /// reintento moriría en 401 en vez de probar la hipótesis de decodificación
+    /// especulativa.
+    #[test]
+    fn argv_del_reintento_mtp_tambien_lleva_la_clave() {
+        let dir = std::env::temp_dir().join(format!("lm-argv-mtpkey-{}", std::process::id()));
+        let key = "clave-de-prueba-123";
+        let cmd = ProcessManager::build_engine_cmd(
+            &dir.join("llama-server.exe"),
+            &dir,
+            0,
+            &dir.join("m.gguf"),
+            32768,
+            6,
+            512,
+            "0",
+            &crate::config::EngineConfig::default(),
+            &crate::config::HardwareProfile::default(),
+            8080,
+            true, // skip_spec = el reintento MTP
+            key,
+        );
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let i = argv.iter().position(|a| a == "--api-key").expect("--api-key");
+        assert_eq!(argv.get(i + 1).map(String::as_str), Some(key));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// La cabecera que los clientes internos mandan al motor tiene que ser la
+    /// que el motor acepta: `Authorization: Bearer <clave>`. El build 10743
+    /// acepta `Authorization` y `X-Api-Key`; se usa `Authorization` para no
+    /// inventar un segundo esquema.
+    #[test]
+    fn cabecera_al_motor_es_bearer() {
+        assert_eq!(
+            crate::auth::bearer("clave-de-prueba-123"),
+            "Bearer clave-de-prueba-123"
+        );
     }
 
     #[test]
@@ -2543,6 +2657,7 @@ mod tests {
             profile,
             8080,
             skip_spec,
+            "clave-de-prueba-123",
         );
         cmd.get_args()
             .map(|a| a.to_string_lossy().to_string())

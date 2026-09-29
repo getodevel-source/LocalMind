@@ -1074,6 +1074,8 @@ fn handle_request(
             return;
         }
         match ureq::get(&format!("http://127.0.0.1:{}/metrics", st.port))
+            // El motor exige `--api-key` (D-45): sin la cabecera responde 401.
+            .set("Authorization", &crate::auth::bearer(&gateway_key))
             .timeout(Duration::from_secs(2))
             .call()
         {
@@ -1789,6 +1791,9 @@ fn handle_chat_completions(
     let t0 = Instant::now();
     match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
         .set("Content-Type", "application/json")
+        // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
+        // proxy devolvería el error del motor al cliente en vez de traducirlo.
+        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
         .send_bytes(&payload_bytes)
     {
         Ok(resp) => {
@@ -1896,6 +1901,9 @@ fn handle_anthropic_messages(
     let model_for_log = if req_model.is_empty() { served.clone() } else { req_model.clone() };
     match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
         .set("Content-Type", "application/json")
+        // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
+        // proxy devolvería el error del motor al cliente en vez de traducirlo.
+        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
         .send_bytes(&payload)
     {
         Ok(resp) => {
@@ -2011,6 +2019,9 @@ fn handle_responses(
     let model_for_log = if req_model.is_empty() { served.clone() } else { req_model.clone() };
     match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
         .set("Content-Type", "application/json")
+        // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
+        // proxy devolvería el error del motor al cliente en vez de traducirlo.
+        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
         .send_bytes(&payload)
     {
         Ok(resp) => {

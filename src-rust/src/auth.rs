@@ -8,6 +8,7 @@
 //!   Anthropic) o cookie `lm_key=<key>`.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tiny_http::Header;
 
 /// Nombre de la cookie que lleva la clave para la WebView (mismo origen).
@@ -76,6 +77,30 @@ pub fn load_or_create_key() -> String {
 /// Valor para `Set-Cookie` en `/`, `/index.html`, `/localmind.ico`, `/localmind.png`.
 pub fn set_cookie_value(key: &str) -> String {
     format!("{}={}; Path=/; HttpOnly; SameSite=Strict", KEY_COOKIE_NAME, key)
+}
+
+/// La MISMA clave del gateway, cacheada por proceso.
+///
+/// `load_or_create_key()` va al disco en cada llamada. El motor la necesita en
+/// dos sitios que no pueden arrastrarla por firma: `build_engine_cmd` es una
+/// `fn` asociada (no método) y la alimentan el reintento MTP y el poller; los
+/// handlers del proxy tampoco la reciben por parámetro. En vez de cambiar esas
+/// firmas se cachea una vez y se reparte desde aquí.
+///
+/// El valor no puede quedar obsoleto en la práctica: el servidor ya toma una
+/// instantánea al arrancar (`server.rs`) y la usa durante toda la vida del
+/// proceso, así que cachear aquí solo replica ese comportamiento.
+static CACHED_KEY: OnceLock<String> = OnceLock::new();
+
+pub fn gateway_key() -> &'static str {
+    CACHED_KEY.get_or_init(load_or_create_key)
+}
+
+/// Cabecera `Authorization` que el MOTOR espera cuando se le pasa
+/// `--api-key` (D-45). Mismo esquema `Bearer` que ya valida el gateway: una
+/// sola forma de hablar con la clave, no dos literales repartidos.
+pub fn bearer(key: &str) -> String {
+    format!("Bearer {}", key)
 }
 
 fn header_value<'a>(headers: &'a [Header], name: &str) -> Option<&'a str> {
