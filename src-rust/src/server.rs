@@ -329,22 +329,23 @@ fn rewrite_model_to_served(body_bytes: &[u8], served: &str) -> Vec<u8> {
     body_bytes.to_vec()
 }
 
-/// Id servido por el motor: nombre del archivo sin `.gguf` (p. ej. el alias que
-/// llama.cpp publica con `-a localmind` es `localmind`; si el estado trae el
-/// filename se recorta la extensión para que `/v1/models` y el proxy hablen el
-/// mismo id).
+/// Id servido por el motor para las superficies HTTP (`/v1/models` y el
+/// rewrite del proxy). Delega en `agents::served_model_id`, la MISMA función
+/// que escriben los lanzadores en la config de cada agente: si divergieran,
+/// el agente anunciaría un modelo y el proxy respondería por otro.
+///
+/// El fallback (motor sin modelo) mantiene el alias estable para que
+/// `/v1/models` SIEMPRE conteste y el proxy siga teniendo un id al que
+/// reescribir aunque el motor esté apagado (D-2).
 fn served_model_id(st: &ServerStatus, cfg: &ConfigStore) -> String {
-    let m = st.model.trim();
-    if !m.is_empty() {
-        return m.strip_suffix(".gguf").unwrap_or(m).to_string();
-    }
-    // Sin motor con modelo: primer alias configurado (estable para CLIs).
-    cfg.get()
-        .engine
-        .aliases
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "localmind".to_string())
+    crate::agents::served_model_id(st).unwrap_or_else(|| {
+        cfg.get()
+            .engine
+            .aliases
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "localmind".to_string())
+    })
 }
 
 /// Cuerpo `GET /v1/models` (forma OpenAI): id servido + alias estables.
@@ -2528,6 +2529,127 @@ mod proxy {
             assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
             let _ = std::fs::remove_dir_all(&dir);
         }
+
+                // ---- LM-MOD-3: el id anunciado sigue al motor, D-2 intacto ----
+
+        fn store_de_prueba(dir: &std::path::Path) -> crate::config::ConfigStore {
+            let _ = std::fs::create_dir_all(dir);
+            crate::config::ConfigStore::load_from_path(&dir.join("localmind.toml"))
+        }
+
+        /// El id que anuncia `/v1/models` y al que el proxy reescribe ES el
+        /// modelo realmente servido, y cambia con él.
+        ///
+        /// Falla sobre el código original solo en la parte de "cambia con él":
+        /// allí el literal `qwen3.8-27b` convivía con el filename, así que la
+        /// lista podía anunciar los dos. Aquí se exige una sola verdad.
+        #[test]
+        fn v1_models_anuncia_el_servido_y_no_un_nombre_fijo() {
+            let dir = std::env::temp_dir().join(format!("lm-test-v1m-{}", std::process::id()));
+            let cfg = store_de_prueba(&dir);
+            let st = |model: &str, port: u16| ServerStatus {
+                status: "running".to_string(),
+                is_healthy: true,
+                model: model.to_string(),
+                port,
+                ..Default::default()
+            };
+
+            let bonsai: serde_json::Value =
+                serde_json::from_str(&models_list_json(&st("Ternary-Bonsai-2-27B-PTQ1_0.gguf", 8080), &cfg)).unwrap();
+            let ids: Vec<String> = bonsai["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["id"].as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(ids[0], "Ternary-Bonsai-2-27B-PTQ1_0", "el id servido no encabeza la lista: {:?}", ids);
+            // El alias de compat sigue publicado (agentes en la calle lo usan).
+            assert!(ids.iter().any(|i| i == "localmind"), "se perdió el alias localmind: {:?}", ids);
+
+            // Con Qwen cargado, la lista cambia: no es un literal con aliases.
+            let qwen: serde_json::Value =
+                serde_json::from_str(&models_list_json(&st("Qwen3.8-27B-IQ4_XS_4BPW.gguf", 8080), &cfg)).unwrap();
+            let qwen_ids: Vec<String> = qwen["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["id"].as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(qwen_ids[0], "Qwen3.8-27B-IQ4_XS_4BPW", "{:?}", qwen_ids);
+            assert_ne!(ids[0], qwen_ids[0]);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// D-2 intacto: un agente configurado con `localmind`, y otro con el
+        /// nombre del modelo ANTERIOR, siguen llegando al motor con el id
+        /// servido. Esto es la red de seguridad que hace seguro cambiar la
+        /// etiqueta: se cambia lo que se ANUNCIA, no lo que se ACEPTA.
+        #[test]
+        fn un_alias_o_un_modelo_viejo_siempre_llega_al_servido() {
+            let dir = std::env::temp_dir().join(format!("lm-test-rw-{}", std::process::id()));
+            let cfg = store_de_prueba(&dir);
+            let st = ServerStatus {
+                status: "running".to_string(),
+                is_healthy: true,
+                model: "Ternary-Bonsai-2-27B-PTQ1_0.gguf".to_string(),
+                port: 8080,
+                ..Default::default()
+            };
+            let served = served_model_id(&st, &cfg);
+            assert_eq!(served, "Ternary-Bonsai-2-27B-PTQ1_0");
+
+            let get = |b: &[u8]| {
+                serde_json::from_slice::<serde_json::Value>(&rewrite_model_to_served(b, &served)).unwrap()
+            };
+            // Alias de compat.
+            let v = get(br#"{"model":"localmind","messages":[]}"#);
+            assert_eq!(v["model"], serde_json::json!("Ternary-Bonsai-2-27B-PTQ1_0"));
+            // Con prefijo de provider (como lo escribe el lanzador).
+            let v = get(br#"{"model":"localmind/localmind","messages":[]}"#);
+            assert_eq!(v["model"], serde_json::json!("Ternary-Bonsai-2-27B-PTQ1_0"));
+            // El modelo ANTERIOR: el caso de un config escrito antes del cambio.
+            let v = get(br#"{"model":"qwen3.8-27b","messages":[]}"#);
+            assert_eq!(v["model"], serde_json::json!("Ternary-Bonsai-2-27B-PTQ1_0"));
+            // Un nombre inventado tampoco se rechaza (nunca se rechaza).
+            let v = get(br#"{"model":"modelo-que-no-existe","messages":[]}"#);
+            assert_eq!(v["model"], serde_json::json!("Ternary-Bonsai-2-27B-PTQ1_0"));
+            // El resto del payload no se toca.
+            let v = get(br#"{"model":"localmind","temperature":0,"stream":true}"#);
+            assert_eq!(v["temperature"], serde_json::json!(0));
+            assert_eq!(v["stream"], serde_json::json!(true));
+            // Un body sin `model` se devuelve intacto (no se inventa un campo).
+            let out = rewrite_model_to_served(br#"{"messages":[]}"#, &served);
+            assert_eq!(out, br#"{"messages":[]}"#.to_vec());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// Motor apagado: `/v1/models` SIGUE contestando (compat) y usa el
+        /// alias estable, no el nombre del modelo de la sesión anterior.
+        /// La etiqueta honesta de "no hay modelo" la pone la UI y el 409 del
+        /// lanzador; aquí la red de seguridad nunca se queda sin responder.
+        #[test]
+        fn motor_apagado_responde_con_el_alias_y_no_con_el_viejo() {
+            let dir = std::env::temp_dir().join(format!("lm-test-off-{}", std::process::id()));
+            let cfg = store_de_prueba(&dir);
+            // `ServerStatus` conserva el `model` de la sesión anterior al parar.
+            let parado = ServerStatus { status: "stopped".to_string(), port: 0, ..Default::default() };
+            let cuerpo = models_list_json(&parado, &cfg);
+            let v: serde_json::Value = serde_json::from_str(&cuerpo).unwrap();
+            let ids: Vec<String> = v["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["id"].as_str().unwrap().to_string())
+                .collect();
+            assert!(!ids.is_empty(), "/v1/models dejó de contestar con el motor apagado");
+            assert!(ids.iter().any(|i| i == "localmind"), "sin alias de compat: {:?}", ids);
+            // El lanzador, en cambio, NO escribe nada: eso ya lo hace el 409.
+            assert!(!crate::agents::engine_live(&parado));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
 
         #[test]
         fn header_parse_de_literal_no_pania() {

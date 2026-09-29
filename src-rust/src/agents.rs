@@ -34,13 +34,37 @@ pub fn engine_live(st: &ServerStatus) -> bool {
     st.port > 0 && st.status == "running"
 }
 
-/// El id servido por el motor: `st.model` (p. ej. `qwen3.8-27b-....gguf`
-/// sin extensión o el nombre tal cual lo publica `ServerStatus`).
+/// Id de modelo que el motor está sirviendo AHORA: el nombre del archivo sin
+/// la extensión `.gguf` (p. ej. `Ternary-Bonsai-2-27B-PTQ1_0.gguf` →
+/// `Ternary-Bonsai-2-27B-PTQ1_0`).
 ///
-/// Los CLIs se configuran con los alias estables (`localmind`, `qwen3.8-27b`)
-/// y el proxy reescribe cualquier `model` pedido al id servido (LM-PXY-4/5).
-/// Aquí solo se necesita el contexto y el puerto vivos; el id se conserva en
-/// los alias estables que ya conocen pi/omp.
+/// Es la MISMA forma que publica `/v1/models` y que reescribe el proxy, así que
+/// el id que se escribe en la config privada de cada agente y el que anuncia el
+/// gateway no pueden divergir.
+///
+/// `None` = no hay modelo servido (motor apagado, arrancando o sin nombre). No
+/// se inventa un id: el llamador decide (los lanzadores responden 409 y la UI
+/// dice que el motor no está en marcha) en vez de escribir un nombre viejo como
+/// si fuera el actual.
+pub fn served_model_id(st: &ServerStatus) -> Option<String> {
+    let m = st.model.trim();
+    if m.is_empty() {
+        return None;
+    }
+    let stem = if let Some(s) = m.strip_suffix(".gguf") {
+        s
+    } else if let Some(s) = m.strip_suffix(".GGUF") {
+        s
+    } else {
+        m
+    };
+    if stem.trim().is_empty() {
+        None
+    } else {
+        Some(stem.to_string())
+    }
+}
+
 pub fn agent_dir(agent: &str) -> PathBuf {
     let base = std::env::var("APPDATA")
         .map(PathBuf::from)
