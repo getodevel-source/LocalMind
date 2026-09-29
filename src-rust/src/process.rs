@@ -145,8 +145,10 @@ pub struct ProcessManager {
     last_activity: Arc<AtomicU64>,
     /// Instante en que empezó el arranque vigente (para `starting_for_secs` y ETA).
     start_instant: Arc<Mutex<Option<Instant>>>,
-    /// Generación de arranque: se incrementa en cada `start()`/`stop()` para que el
-    /// poller detecte un arranque nuevo aunque haya estado bloqueado en la puerta.
+    /// Generación de arranque: se incrementa al ABRIR cada `start()` (tb. si se
+    /// rechaza) y en cada `stop()`, para que el poller detecte un arranque nuevo
+    /// aunque haya estado bloqueado en la puerta, y para que el veredicto de una
+    /// puerta en vuelo se descarte si pertenece a un intento ya cerrado.
     start_epoch: Arc<AtomicU64>,
     /// Duraciones de cargas exitosas (clave = modelo + contexto), para ETA.
     load_times: Arc<Mutex<HashMap<String, u64>>>,
@@ -1245,6 +1247,19 @@ impl ProcessManager {
             st.acceptance_error = None;
             st.acceptance_ok = None;
         }
+        // Un intento —incluso uno que vaya a ser RECHAZADO— abre una
+        // generación nueva. La puerta de aceptación del intento ANTERIOR puede
+        // seguir en vuelo (hasta ~120 s de probe HTTP) y, sin esto, su veredicto
+        // aterrizaba DESPUÉS del `= None` de arriba y volvía a pintar la
+        // pizarra con un `last_error`/`acceptance_error` que el rechazo acababa
+        // de borrar. El poller ya sabe descartar esos veredictos: al terminar
+        // la puerta compara el epoch vigente contra el suyo, así que moverlo
+        // ANTES de validar deja esa puerta con el veredicto muerto.
+        // Solo cambia el camino que `stop()` y el `spawn()` ya cubrían: ellos
+        // matan el motor viejo, pero las validaciones que rechazan devuelven
+        // ANTES de `stop()` (ver el orden en el resto de esta fn), y eran las
+        // que dejaban la puerta viva.
+        self.start_epoch.fetch_add(1, Ordering::Relaxed);
         // Validación del request explícito (nunca sustituir en silencio lo que
         // el usuario pidió: D-1/contexto fantasma). Solo valida CAMPOS
         // NOMBRADOS; omitidos resuelven por la precedencia habitual. Va ANTES
@@ -2360,6 +2375,51 @@ mod tests {
              el temporal: {:?}",
             escrito
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Un `POST /api/start` RECHAZADO deja la pizarra limpia, pero eso no
+    /// alcanzaba: la puerta de aceptación del `starting` anterior puede seguir
+    /// en vuelo (son ~120 s de probe HTTP contra el motor) y su veredicto
+    /// aterrizaba después del `= None`, repoblando `last_error` /
+    /// `acceptance_error`. El epoch es el mecanismo que ya descarta esos
+    /// veredictos (`start_epoch == my_epoch` en el poller); lo que faltaba era
+    /// moverlo en el camino de rechazo, que devuelve antes de `stop()`.
+    ///
+    /// Lo que se verifica acá es la SEÑAL de invalidación (que el rechazo mueve
+    /// el epoch), no el descarte: el descarte ocurre dentro del hilo poller,
+    /// comparando contra el epoch que este test acaba de mover. Ejercitar el
+    /// poller real exigiría un `llama-server` escuchando en un puerto y por lo
+    /// tanto está fuera de una corrida offline.
+    #[test]
+    fn intento_rechazado_invalida_la_puerta_en_vuelo() {
+        let dir = std::env::temp_dir()
+            .join(format!("lm-epoch-{}-{}", "rechazo", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        );
+        let antes = mgr.start_epoch.load(Ordering::Relaxed);
+        let res = mgr.start(StartRequest {
+            model: Some("noexiste.gguf".to_string()),
+            profile: None,
+            context: None,
+            threads: None,
+            priority: None,
+        });
+        assert!(res.is_err(), "un modelo desconocido debe rechazarse");
+        assert!(
+            mgr.start_epoch.load(Ordering::Relaxed) > antes,
+            "un intento rechazado debe invalidar la puerta en vuelo: sin este \
+             bump, su veredicto se escribe después del `= None` de la pizarra"
+        );
+        drop(mgr);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
