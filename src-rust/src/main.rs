@@ -153,7 +153,7 @@ fn main() {
     // D-46: ANTES de cualquier otra cosa, para que un pánico temprano (config,
     // servidor, WebView) también deje rastro. Usa el MISMO archivo que
     // `ProcessManager::log`: no hay un canal nuevo ni un archivo nuevo.
-    install_panic_hook(crate::filelog::logs_dir(&base_dir).join("localmind.log"));
+    install_panic_hook(crate::filelog::log_file(&base_dir));
     let config = Arc::new(ConfigStore::load(&base_dir));
     let cfg_now = config.get();
 

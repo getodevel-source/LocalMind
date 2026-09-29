@@ -168,6 +168,21 @@ pub struct ProcessManager {
 
 impl ProcessManager {
     pub fn new(base_dir: PathBuf, config: Arc<ConfigStore>) -> Self {
+        let log_file = crate::filelog::log_file(&base_dir);
+        Self::new_with_log_file(base_dir, config, log_file)
+    }
+
+    /// Núcleo con la ruta del log EXPLÍCITA, para que un test pueda construir
+    /// un `ProcessManager` sin escribir en el log real del dueño. Mismo criterio
+    /// que `ConfigStore::load_from_path`: la env global se resuelve una vez
+    /// (`new()`) y el núcleo puro recibe el path, porque los tests corren en
+    /// paralelo y `set_var` sería una data race. No es una API pública: solo la
+    /// usan `new()` y los tests de este módulo.
+    fn new_with_log_file(
+        base_dir: PathBuf,
+        config: Arc<ConfigStore>,
+        log_file: PathBuf,
+    ) -> Self {
         let bin_dir = base_dir.join("bin");
         let models_dir = base_dir.join("models");
 
@@ -206,8 +221,6 @@ impl ProcessManager {
         let load_times_path = Self::load_times_path();
         let load_times: Arc<Mutex<HashMap<String, u64>>> =
             Arc::new(Mutex::new(load_times_load(&load_times_path).unwrap_or_default()));
-        // Log a archivo con rotación (P30): perezoso, best-effort.
-        let log_file = crate::filelog::logs_dir(&base_dir).join("localmind.log");
 
         // Background poller: monitors health AND child process liveness
         let status_clone = Arc::clone(&status);
@@ -2233,7 +2246,11 @@ mod tests {
         let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
             &dir.join("config.toml"),
         ));
-        let mgr = ProcessManager::new(dir.clone(), cfg);
+        let mgr = ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        );
         // Estado previo: el motor murió y el poller dejó su error, más un
         // veredicto viejo de la puerta (mismo arranque, mismo banner).
         {
@@ -2268,6 +2285,81 @@ mod tests {
             "el veredicto de la puerta pertenece al arranque anterior, no a este"
         );
         drop(mgr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `cargo test` escribía en el log REAL del dueño. Medido: 6498 → 6499
+    /// líneas en `%APPDATA%\LocalMind\logs\localmind.log` con UN solo
+    /// `ProcessManager` construido en un temporal. El culpable no es `log()`
+    /// sino el `Drop` de CUALQUIER `ProcessManager`: `stop()` escribe
+    /// "Servidor detenido. 100% de VRAM y memoria liberada." y el archivo lo
+    /// recibía porque `logs_dir` resuelve `%APPDATA%` e ignora el `base_dir`
+    /// que recibe.
+    ///
+    /// No se toca esa precedencia (`%APPDATA%` gana sobre `base_dir` en
+    /// producción: el log va al perfil del usuario, no junto al exe). Lo que se
+    /// arregla es la CONSTRUCCIÓN: `new()` resuelve la ruta real y la entrega
+    /// a `new_with_log_file`, así que un test puede darle la de su temporal sin
+    /// tocar env global (los tests corren en paralelo; `set_var` sería data
+    /// race, el mismo motivo por el que existe `ConfigStore::load_from_path`).
+    #[test]
+    fn process_manager_de_test_escribe_en_su_temporal_y_no_en_el_log_real() {
+        let dir = std::env::temp_dir()
+            .join(format!("lm-logdir-{}-{}", "aislamiento", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Validez del propio test: si la ruta que resuelve la app real coincidiera
+        // con el temporal, "escribir en el temporal" sería escribir en el log
+        // real y el assert de abajo no probaría nada.
+        let real = crate::filelog::log_file(&dir);
+        let scratch = scratch_log(&dir);
+        assert_ne!(
+            real,
+            scratch,
+            "si la resolución de producción cayera en el temporal, este test \
+             no distinguiría nada; la precedencia de `%APPDATA%` cambió"
+        );
+
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch.clone());
+        assert_eq!(
+            mgr.log_file,
+            scratch,
+            "el `ProcessManager` debe escribir en la ruta que le dieron, no en la \
+             que resolvería `base_dir`"
+        );
+
+        // `log()` reparte a TRES destinos: anillo, SSE y archivo. Solo el
+        // archivo se redirige; los otros dos se comprueban para que la
+        // corrección no los rompa en silencio.
+        let rx = mgr.subscribe_logs();
+        mgr.log("[LocalMind] linea de prueba de aislamiento");
+        let ring = mgr.get_recent_logs();
+        assert_eq!(ring.len(), 1, "el anillo en memoria no se toca");
+        assert_eq!(ring[0], "[LocalMind] linea de prueba de aislamiento");
+        assert_eq!(
+            rx.try_recv().expect("suscriptor SSE"),
+            "[LocalMind] linea de prueba de aislamiento",
+            "los suscriptores de /api/events no se tocan"
+        );
+
+        // El camino que realmente fugaba: `Drop` → `stop()`.
+        drop(mgr);
+        let escrito = std::fs::read_to_string(&scratch).unwrap_or_default();
+        assert!(
+            escrito.contains("linea de prueba de aislamiento"),
+            "la línea de `log()` debe estar en el temporal: {:?}",
+            escrito
+        );
+        assert!(
+            escrito.contains("Servidor detenido"),
+            "el `Drop` escribía en el log real del dueño; ahora debe escribir en \
+             el temporal: {:?}",
+            escrito
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2560,6 +2652,14 @@ mod tests {
                 Some("velocidad"), Some("m.gguf"), Some(131072), "velocidad", "m.gguf"),
             32768
         );
+    }
+
+    /// Log de un `ProcessManager` de test: SIEMPRE dentro de su temporal.
+    /// Deliberadamente NO es `filelog::log_file`, que resuelve `%APPDATA%` y
+    /// por tanto el log real del dueño. Passar esa por accidente devuelve el
+    /// defecto que este archivo acaba de cerrar, así que el nombre lo dice.
+    fn scratch_log(dir: &std::path::Path) -> PathBuf {
+        dir.join("logs").join(crate::filelog::LOG_FILE_NAME)
     }
 
     fn scratch_models(tag: &str) -> PathBuf {
