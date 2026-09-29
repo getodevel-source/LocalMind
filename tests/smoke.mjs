@@ -11,8 +11,11 @@
 //   Key resolution (automatic, in order): env LM_KEY, else
 //   %APPDATA%/LocalMind/gateway.key (trimmed; ignored if empty/absent).
 //   A known key is sent as `Authorization: Bearer <key>` on every request.
-// Contract: docs/SRS.md §3.5 + src-rust/src/server.rs. GET-only (+1 OPTIONS).
-// Never starts/stops the engine, never POSTs.
+// Contract: docs/SRS.md §3.5 + src-rust/src/server.rs. GET-only, salvo el
+// preflight OPTIONS y UN POST de contrato: `POST /api/start` con el tipo de
+// `context` equivocado, que el servidor debe rechazar con 400 (check 14).
+// Ese POST no enciende el motor ni cambia estado: se rechaza antes de arrancar.
+// Never starts/stops the engine.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +73,25 @@ async function get(path, { timeout = TIMEOUT_MS, headers = {} } = {}) {
     const res = await fetch(BASE + path, {
       signal: ctrl.signal,
       headers: { ...authHeaders(), ...headers },
+    });
+    const text = await res.text();
+    return { res, text };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// POST con cuerpo. Único uso en el script (ver check 14): un cuerpo que el
+// servidor RECHAZA con 400, así que no muta estado ni toca el motor.
+async function post(path, body, { timeout = TIMEOUT_MS, headers = {} } = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(new Error(`timeout after ${timeout}ms`)), timeout);
+  try {
+    const res = await fetch(BASE + path, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...headers },
+      body,
     });
     const text = await res.text();
     return { res, text };
@@ -348,6 +370,25 @@ async function main() {
           `branch=model-list status=${r.res.status} ids=${ids ? JSON.stringify(ids) : "n/a"}${hasAliases ? "" : " (expected ids to include localmind + qwen3.8-27b)"}${j.ok ? "" : " jsonError=" + j.error}`
         );
       }
+    }
+  }
+
+  // --- 14. POST /api/start con cuerpo mal formado (debe ser 400) ---
+  {
+    // Único POST del script. `{"context":"abc"}` tiene el tipo equivocado: el
+    // servidor lo rechaza ANTES de arrancar nada, así que no enciende el motor
+    // ni cambia estado. Antes de este check arrancaba con defaults y 200.
+    let r = null;
+    try {
+      r = await post("/api/start", JSON.stringify({ context: "abc" }));
+    } catch (e) {
+      report(false, "POST /api/start (cuerpo mal formado)", `request failed: ${e?.cause?.code || e.message}`);
+    }
+    if (r) {
+      const j = parseJson(r.text);
+      const msg = j.ok && typeof j.value.error === "string" ? j.value.error : "";
+      const ok = r.res.status === 400 && msg.includes("JSON inválido");
+      report(ok, "POST /api/start (cuerpo mal formado)", `status=${r.res.status} error=${JSON.stringify(trunc(msg))}${ok ? "" : " (expected 400 + error containing 'JSON inválido')"}`);
     }
   }
 

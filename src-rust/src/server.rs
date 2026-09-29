@@ -78,6 +78,58 @@ fn unauthorized_json_for_origin(origin: Option<&str>) -> Response<Cursor<Vec<u8>
     json_response_for_origin(401, r#"{"error":"unauthorized"}"#.to_string(), origin)
 }
 
+// ---------------------------------------------------------------------------
+// Parseo y validación de cuerpos POST (puros, testeables sin socket)
+// ---------------------------------------------------------------------------
+// conventions: `Result<_, String>` con mensajes en español, sin I/O y sin
+// `unwrap`, igual que `translate.rs`: todo fallo del cliente es un 4xx que el
+// handler convierte en respuesta.
+
+/// `POST /api/start`: un cuerpo MAL FORMADO no puede degradarse a un arranque
+/// con defaults. Antes, `serde_json::from_str(...).unwrap_or(default)` hacía
+/// que `{"context":"abc"}` pasara todos los `validate_req_*` en vacío y
+/// arrancara el motor con 200. Ahora es 400. Un cuerpo VACÍO sigue siendo
+/// `StartRequest::default()` (llamadores que hacen POST sin cuerpo).
+fn parse_start_body(body: &str) -> Result<StartRequest, String> {
+    if body.trim().is_empty() {
+        return Ok(StartRequest {
+            model: None,
+            profile: None,
+            context: None,
+            threads: None,
+            priority: None,
+        });
+    }
+    serde_json::from_str::<StartRequest>(body).map_err(|e| format!("JSON inválido: {}", e))
+}
+
+/// `POST /api/profiles/import`: el import NO puede saltarse los validadores que
+/// `/api/profiles/save` sí aplica. Reusa los mismos predicados y nombra el
+/// campo culpable, en el mismo formato `campo inválido: <campo>`.
+fn parse_profiles_import(body: &str) -> Result<Vec<crate::config::HardwareProfile>, String> {
+    let imported: Vec<crate::config::HardwareProfile> = serde_json::from_str(body)
+        .map_err(|e| format!("JSON inválido: {}", e))?;
+    if imported.is_empty() {
+        return Err("La lista de perfiles está vacía".to_string());
+    }
+    for p in &imported {
+        let bad = |campo: &str| format!("campo inválido: {}", campo);
+        if !crate::config::profile_id_ok(&p.id) {
+            return Err(bad("id"));
+        }
+        if !crate::config::profile_context_ok(p.context) {
+            return Err(bad("context"));
+        }
+        if !crate::config::profile_cache_ram_ok(p.cache_ram) {
+            return Err(bad("cache_ram"));
+        }
+        if !crate::config::profile_flags_ok(&p.extra_flags) {
+            return Err(bad("extra_flags"));
+        }
+    }
+    Ok(imported)
+}
+
 /// Añadir CORS a una respuesta ya construida: fijas + `Origin` si es loopback.
 fn add_cors_for<R: Read>(resp: &mut Response<R>, origin: Option<&str>) {
     if let Some(o) = cors_origin_header(origin) {
@@ -560,19 +612,16 @@ fn handle_request(
     if method == "POST" && url == "/api/profiles/import" {
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
-        match serde_json::from_str::<Vec<crate::config::HardwareProfile>>(&body) {
-            Ok(imported) if !imported.is_empty() => {
+        match parse_profiles_import(&body) {
+            Ok(imported) => {
                 cfg.update(|c| {
                     c.profiles = imported;
                 });
                 let _ = cfg.save();
                 let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok","message":"Perfiles actualizados"}"#.into(), origin_ref));
             }
-            Ok(_) => {
-                let _ = req.respond(json_response_for_origin(400, r#"{"error":"La lista de perfiles está vacía"}"#.into(), origin_ref));
-            }
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin_ref));
+                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin_ref));
             }
         }
         return;
@@ -1047,13 +1096,15 @@ fn handle_request(
     if method == "POST" && url == "/api/start" {
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
-        let start_req: StartRequest = serde_json::from_str(&body).unwrap_or(StartRequest {
-            model: None,
-            profile: None,
-            context: None,
-            threads: None,
-            priority: None,
-        });
+        let start_req: StartRequest = match parse_start_body(&body) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = req.respond(
+                    json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()),
+                );
+                return;
+            }
+        };
         match mgr.start(start_req) {
             Ok(pid) => {
                 let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"starting","pid":{}}}"#, pid), origin.as_deref()));
@@ -2455,6 +2506,54 @@ mod proxy {
             let err2 = apply(&store, r#"{"engine":{"speculation":{"enabled":"si"}}}"#).unwrap_err();
             assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn api_start_rechaza_cuerpo_malformado() {
+            // Un tipo equivocado NO puede degradarse a un arranque con
+            // defaults (que devolvía 200 y encendía el motor).
+            let err = super::super::parse_start_body(r#"{"context":"abc"}"#).unwrap_err();
+            assert!(err.starts_with("JSON inválido"), "{}", err);
+            // Tampoco un cuerpo que no es un objeto.
+            let err2 = super::super::parse_start_body("[1,2,3]").unwrap_err();
+            assert!(err2.starts_with("JSON inválido"), "{}", err2);
+            // Cuerpo VACÍO: sigue siendo default (POST sin cuerpo, no rompe).
+            let d = super::super::parse_start_body("").unwrap();
+            assert!(d.model.is_none() && d.context.is_none() && d.priority.is_none());
+            let ws = super::super::parse_start_body("   ").unwrap();
+            assert!(ws.profile.is_none());
+            // Bien formado: pasa intacto.
+            let ok = super::super::parse_start_body(r#"{"model":"a.gguf","context":32768}"#).unwrap();
+            assert_eq!(ok.model.as_deref(), Some("a.gguf"));
+            assert_eq!(ok.context, Some(32768));
+        }
+
+        #[test]
+        fn profiles_import_rechaza_flags_invalidas() {
+            // El import no puede saltarse los validadores de /profiles/save.
+            let perfil = |id: &str, ctx: u64, flags: &str| {
+                format!(
+                    r#"[{{"id":"{}","name":"N","description":"","context":{},"cache_ram":0,"extra_flags":{}}}]"#,
+                    id, ctx, flags
+                )
+            };
+            // Flag con inyección de shell (mismo charset que `profile_flag_ok`).
+            let err = super::super::parse_profiles_import(&perfil("velocidad", 32768, r#"["-flag & calc.exe"]"#))
+                .unwrap_err();
+            assert!(err.contains("extra_flags"), "{}", err);
+            // Contexto fuera de rango / no múltiplo de 1024.
+            let err2 = super::super::parse_profiles_import(&perfil("velocidad", 1023, "[]")).unwrap_err();
+            assert!(err2.contains("context"), "{}", err2);
+            // Id inválido.
+            let err3 = super::super::parse_profiles_import(&perfil("Perfil Mal", 32768, "[]")).unwrap_err();
+            assert!(err3.contains("id"), "{}", err3);
+            // Lista vacía y JSON roto.
+            assert!(super::super::parse_profiles_import("[]").unwrap_err().contains("vacía"));
+            assert!(super::super::parse_profiles_import("{").unwrap_err().starts_with("JSON inválido"));
+            // Perfil válido: pasa intacto.
+            let ok = super::super::parse_profiles_import(&perfil("libros", 131072, r#"["--no-mmap"]"#)).unwrap();
+            assert_eq!(ok.len(), 1);
+            assert_eq!(ok[0].context, 131072);
         }
     }
 }

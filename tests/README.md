@@ -1,8 +1,11 @@
 # LocalMind smoke test (read-only)
 
-`tests/smoke.mjs` — GET-only health check of the LocalMind HTTP API on
-loopback. Contract: `docs/SRS.md` §3.5 + `src-rust/src/server.rs`.
-No external dependencies, Node >= 18 (global `fetch`).
+`tests/smoke.mjs` — health check of the LocalMind HTTP API on loopback.
+Read-only: the script never starts/stops the engine, and its only POST
+(check 14) is a malformed `/api/start` body the server rejects with 400
+before touching anything. Contract: `docs/SRS.md` §3.5 +
+`src-rust/src/server.rs`. No external dependencies, Node >= 18 (global
+`fetch`).
 
 ## What it checks
 
@@ -31,7 +34,7 @@ No external dependencies, Node >= 18 (global `fetch`).
    `{"error":"engine_down"}` (`server.rs:328-333`). Prints the branch.
 10. `OPTIONS /api/start` with `Origin: http://localhost` → preflight
     answered (2xx + `Access-Control-Allow-Origin`); prints status and
-    the `Access-Control-*` headers. Never POSTs.
+    the `Access-Control-*` headers.
 11. `GET /definitely-not-a-route` → 404 `{"error":"not_found"}`
     (`server.rs:649`).
 12. `GET /api/events` → within 8 s either a `data:` event line arrives
@@ -41,6 +44,11 @@ No external dependencies, Node >= 18 (global `fetch`).
     the CLI aliases (`localmind`, `qwen3.8-27b`); when the server
     enforces the key and none is known, 401/403 is the expected branch.
     Prints the branch and the ids found.
+14. `POST /api/start` with `{"context":"abc"}` (wrong type) → 400 with an
+    `error` containing `JSON inválido`. This is the script's only POST: the
+    request is rejected before the engine is touched, so it starts no engine
+    and mutates no state. It guards the fix that stopped a malformed body from
+    silently booting the engine with defaults and answering 200.
 Every check prints `PASS/FAIL <check> — <observed>`. Exit code 0 only
 if every check passed, else 1 plus a summary block of failures with
 raw observed status/body (truncated to 400 chars).
