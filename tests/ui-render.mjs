@@ -53,7 +53,7 @@ const stubs = [{}, {}, {}];
 
 function load(script, doc, storage, nav, fetchImpl) {
   const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
-    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache, getProfileFallback };');
+    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache, getProfileFallback, servedModelName, updateLauncherHint };');
   return factory(doc, mkWindow(), storage || mkStorage(), nav || mkNav(), mkES, fetchImpl || stubFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
 }
 
@@ -507,8 +507,73 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   a.renderLauncherAgents([{ id: 'pi', label: 'Pi', kind: 'cli', available: true }]);
   d.getElementById('launcher-agent-select').value = 'pi';
   a.onLauncherAgentChange();
+  a.updateLauncherHint({ status: 'running', is_healthy: true, model: 'Qwen3.8-27B-IQ4_XS_4BPW.gguf' });
   const h = String(d.getElementById('launcher-agent-hint').textContent ?? '');
-  ok('launcher hint merges agent + trade-off', h.includes('localmind/') && h.includes('Bajo'), JSON.stringify(h.slice(0, 120)));
+  // El nombre del hint es el del modelo realmente cargado. Antes llevaba el
+  // prefijo `localmind/` delante de un nombre que `/v1/models` no publica
+  // (`localmind/Ternary-...`), o sea un id que no existe.
+  ok('launcher hint merges agent + trade-off',
+    h.includes('Qwen3.8-27B-IQ4_XS_4BPW') && h.includes('Bajo') && !h.includes('localmind/'),
+    JSON.stringify(h.slice(0, 140)));
+}
+
+// ---- LM-MOD-3: la UI nombra el modelo que sirve el motor, no un literal ----
+{
+  // Derivación pura: el filename servido sin `.gguf` (misma forma que Rust).
+  // Con motor en marcha, que es la precondición (igual que `engine_live`).
+  const d0 = makeDoc();
+  const a0 = load(script, d0);
+  const vivo = (model) => ({ status: 'running', is_healthy: true, port: 8080, model });
+  ok('served model id drops the .gguf extension',
+    a0.servedModelName(vivo('Ternary-Bonsai-2-27B-PTQ1_0.gguf')) === 'Ternary-Bonsai-2-27B-PTQ1_0',
+    a0.servedModelName(vivo('Ternary-Bonsai-2-27B-PTQ1_0.gguf')));
+  ok('served model id is not a constant',
+    a0.servedModelName(vivo('Ternary-Bonsai-2-27B-PTQ1_0.gguf'))
+      !== a0.servedModelName(vivo('Qwen3.8-27B-IQ4_XS_4BPW.gguf')));
+  ok('no served model when the engine is down',
+    a0.servedModelName({ status: 'stopped' }) === '' && a0.servedModelName({}) === '' && a0.servedModelName(null) === '');
+  // El caso trampa: al PARAR, el backend conserva `model` de la sesión anterior.
+  // Sin exigir motor en marcha, la UI lo pintaría como si siguiera cargado.
+  ok('a stopped engine does not resurrect the previous model',
+    a0.servedModelName({ status: 'stopped', is_healthy: false, port: 0, model: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf' }) === ''
+      && a0.servedModelName({ status: 'error', is_healthy: false, port: 8080, model: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf' }) === ''
+      && a0.servedModelName({ status: 'running', port: 8080, model: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf' }) === 'Ternary-Bonsai-2-27B-PTQ1_0');
+
+  // El Specs se alimenta del status, no de un texto fijo.
+  const d = makeDoc();
+  const a = load(script, d);
+  a.renderLauncherAgents([{ id: 'omp', label: 'OMP', kind: 'cli', available: true }]);
+  d.getElementById('launcher-agent-select').value = 'omp';
+  a.onLauncherAgentChange();
+
+  a.renderStatus({ status: 'running', is_healthy: true, model: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf' });
+  const specBonsai = String(d.getElementById('spec-model-id').textContent ?? '');
+  const hintBonsai = String(d.getElementById('launcher-agent-hint').textContent ?? '');
+  ok('specs model id follows the engine (Bonsai)',
+    specBonsai === 'Ternary-Bonsai-2-27B-PTQ1_0' && !/qwen/i.test(specBonsai), JSON.stringify(specBonsai));
+  ok('launcher hint follows the engine (Bonsai)',
+    hintBonsai.includes('Ternary-Bonsai-2-27B-PTQ1_0') && !/qwen/i.test(hintBonsai), JSON.stringify(hintBonsai.slice(0, 140)));
+
+  // Cambio de modelo en caliente: las dos superficies cambian con el.
+  a.renderStatus({ status: 'running', is_healthy: true, model: 'Qwen3.8-27B-IQ4_XS_4BPW.gguf' });
+  const specQwen = String(d.getElementById('spec-model-id').textContent ?? '');
+  const hintQwen = String(d.getElementById('launcher-agent-hint').textContent ?? '');
+  ok('specs model id follows the engine (Qwen)',
+    specQwen === 'Qwen3.8-27B-IQ4_XS_4BPW' && !/bonsai/i.test(specQwen), JSON.stringify(specQwen));
+  ok('launcher hint follows the engine (Qwen)',
+    hintQwen.includes('Qwen3.8-27B-IQ4_XS_4BPW') && !/bonsai/i.test(hintQwen), JSON.stringify(hintQwen.slice(0, 140)));
+  ok('the two surfaces agree on the model', specQwen === hintQwen.split(' · ')[0].split(/conectada a |connected to /).pop());
+
+  // Motor apagado: ni el Specs ni el hint presentan el modelo anterior como si
+  // siguiera cargado. El Specs cae al alias que SIEMPRE resuelve; el hint lo dice.
+  a.renderStatus({ status: 'stopped', is_healthy: false, model: 'Qwen3.8-27B-IQ4_XS_4BPW.gguf' });
+  const specOff = String(d.getElementById('spec-model-id').textContent ?? '');
+  const hintOff = String(d.getElementById('launcher-agent-hint').textContent ?? '');
+  ok('stopped engine does not pass a stale model off as live',
+    specOff === 'localmind' && !hintOff.includes('Qwen') && !hintOff.includes('Bonsai'),
+    JSON.stringify({ specOff, hintOff: hintOff.slice(0, 140) }));
+  ok('stopped engine says there is no model',
+    /sin modelo/.test(hintOff), JSON.stringify(hintOff.slice(0, 140)));
 }
 
 // ---- fix-sprint: version badge reads app with version fallback ----

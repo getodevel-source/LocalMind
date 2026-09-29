@@ -1941,7 +1941,7 @@
             <span data-i18n="specs.epBody">Cualquier herramienta compatible con la API de OpenAI puede conectarse directamente con la URL base</span>
             <code>http://127.0.0.1:8080/v1</code>
             <span data-i18n="specs.epBody2">con la clave de <code>%APPDATA%\LocalMind\gateway.key</code> en <code>Authorization: Bearer</code> y el ID de modelo</span>
-            <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code>qwen3.8-27b</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
+            <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code id="spec-model-id">localmind</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
           </p>
         </div>
       </div>
@@ -2171,6 +2171,7 @@
         'launch.defaultFolder': '(Ubicación predeterminada)',
         'launch.clearTitle': 'Restablecer a default',
         'launch.cliDesc': 'Sesión CLI conectada a ',
+        'launch.cliNoModel': 'Sesión CLI sin modelo: inicia el motor para conectar',
         'launch.effort': 'Nivel de Razonamiento (Effort)',
         'launch.effortHint': 'Bajo = respuestas más rápidas; Alto/Máximo = más razonamiento antes de contestar',
         'launch.agent': 'Agente / interfaz',
@@ -2379,6 +2380,7 @@
         'launch.defaultFolder': '(Default location)',
         'launch.clearTitle': 'Reset to default',
         'launch.cliDesc': 'CLI session connected to ',
+        'launch.cliNoModel': 'CLI session with no model: start the engine to connect',
         'launch.effort': 'Reasoning Level (Effort)',
         'launch.effortHint': 'Low = faster answers; High/Max = more reasoning before answering',
         'launch.agent': 'Agent / interface',
@@ -3857,9 +3859,33 @@
         hint.textContent = T('launch.webDesc') + ' · ' + trade;
         return;
       }
-      const active = (st && st.model) || '';
-      const activeModelName = active ? String(active).split('/').pop() : 'localmind';
-      hint.textContent = T('launch.cliDesc') + 'localmind/' + activeModelName + ' · ' + trade;
+      const activeModelName = servedModelName(st);
+      if (!activeModelName) {
+        // Sin motor no hay modelo que anunciar. Antes caía al alias `localmind`
+        // y lo pintaba como `localmind/localmind`, o sea un alias presentado
+        // como si fuera el modelo actual. Se dice lo que es.
+        hint.textContent = T('launch.cliNoModel') + ' · ' + trade;
+        return;
+      }
+      hint.textContent = T('launch.cliDesc') + activeModelName + ' · ' + trade;
+    }
+
+    // Id del modelo realmente servido, con la MISMA forma que anuncia
+    // `/v1/models` y que escribe el lanzador en la config de cada agente
+    // (`agents::served_model_id` en Rust): el nombre del archivo sin `.gguf`.
+    //
+    // Exige motor EN MARCHA, igual que `agents::engine_live` en Rust. No es
+    // un detalle: al parar, el backend conserva `model` de la sesión anterior
+    // (`ProcessManager::stop` no lo borra), así que leer solo `st.model`
+    // pintaría el modelo viejo como si siguiera cargado. Vacío = no hay
+    // modelo en marcha; quien llama lo dice en vez de inventar un nombre.
+    function servedModelName(st) {
+      if (!st || typeof st !== 'object') return '';
+      const live = st.is_healthy === true || (st.status === 'running' && st.port > 0);
+      if (!live) return '';
+      const m = typeof st.model === 'string' ? st.model.trim() : '';
+      if (!m) return '';
+      return m.replace(/\.gguf$/i, '').trim();
     }
 
     function launcherSetBusy(busy) {
@@ -4316,6 +4342,12 @@
       // Launcher selector: enabled only when healthy (engine must serve agents).
       const launcherBtn = document.getElementById('btn-launcher-open');
       if (launcherBtn) launcherBtn.disabled = !healthy;
+      // Specs: el id de modelo que anuncia el gateway. Antes fijo
+      // (`qwen3.8-27b`) y por tanto mentía con cualquier otro modelo cargado.
+      // `localmind` es el alias que siempre resuelve, así que es el valor
+      // honesto cuando el motor no está en marcha.
+      const specModel = document.getElementById('spec-model-id');
+      if (specModel) specModel.textContent = servedModelName(st) || 'localmind';
       updateLauncherHint(st);
       set('chat-status-hint', chatHintText);
       // Engine-verification telemetry (additive; blank when keys absent/null).
