@@ -831,6 +831,22 @@ impl ProcessManager {
         )
     }
 
+    /// Línea de arranque del log. D-44: describe lo que se PASA, no lo que se
+    /// configuró. Antes anunciaba `cache-reuse: <n>` leyendo
+    /// `engine.cache_reuse`, pero `--cache-reuse` está deliberadamente
+    /// descartado (el build lo rechaza en este contexto) y nunca llega al
+    /// hijo: el log describía un argv que el proceso no recibió. Se quita la
+    /// afirmación en vez de inventar un valor.
+    ///
+    /// El contexto y los hilos sí son verdad (van como `-c`/`-t`), igual que
+    /// el puerto (`--port`) y el uBatch (`-ub`).
+    fn start_banner(context: usize, threads: usize, ubatch: &str, port: u16) -> String {
+        format!(
+            "[LocalMind] Contexto: {} tokens | Hilos: {} | uBatch: {} | Puerto: {}",
+            context, threads, ubatch, port
+        )
+    }
+
     fn check_slots_busy(port: u16) -> bool {
         let url = format!("http://127.0.0.1:{}/slots", port);
         if let Ok(resp) = ureq::get(&url)
@@ -1402,10 +1418,7 @@ impl ProcessManager {
         self.log("================================================================");
         self.log(&format!("[LocalMind] Cargando modelo: {}", model_filename));
         self.log(&format!("[LocalMind] Perfil: {}", profile.name));
-        self.log(&format!(
-            "[LocalMind] Contexto: {} tokens | Hilos: {} | uBatch: {} | Puerto: {} | cache-reuse: {}",
-            context, threads, ubatch, llama_port, cfg.engine.cache_reuse
-        ));
+        self.log(&Self::start_banner(context, threads, ubatch, llama_port));
         // Aviso power_safe en 262K (SIN restringir: el dueño trabaja en
         // 128K-262K siempre). Visible en log/SSE/archivo P30.
         if power_safe_on && context >= 262144 {
@@ -2311,6 +2324,25 @@ mod tests {
         assert_eq!(values("-c"), vec!["32768".to_string()], "contexto duplicado: {:?}", tokens);
         assert_eq!(values("-t"), vec!["6".to_string()], "hilos duplicados: {:?}", tokens);
         assert_eq!(values("--port"), vec!["8080".to_string()], "puerto duplicado: {:?}", tokens);
+    }
+
+    /// D-44: el banner de arranque describe el argv REAL. `--cache-reuse` está
+    /// deliberadamente descartado (el build lo rechaza), así que anunciarlo es
+    /// mentir sobre lo que se pasó.
+    #[test]
+    fn banner_de_arranque_no_anuncia_cache_reuse() {
+        let b = ProcessManager::start_banner(32768, 6, "512", 8080);
+        assert!(
+            !b.to_lowercase().contains("cache-reuse"),
+            "el banner no puede afirmar cache-reuse: {:?}",
+            b
+        );
+        assert!(!b.contains("--cache-reuse"), "tampoco la flag literal: {:?}", b);
+        // Lo que sí se pasa sigue estando, que es lo que hace útil el banner.
+        assert!(b.contains("Contexto: 32768"), "{:?}", b);
+        assert!(b.contains("Hilos: 6"), "{:?}", b);
+        assert!(b.contains("uBatch: 512"), "{:?}", b);
+        assert!(b.contains("Puerto: 8080"), "{:?}", b);
     }
 
     /// La cabecera que los clientes internos mandan al motor tiene que ser la
