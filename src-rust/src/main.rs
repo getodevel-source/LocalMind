@@ -55,6 +55,57 @@ fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
     Icon::from_rgba(img.into_raw(), width, height).ok()
 }
 
+/// Formatear la línea que el hook de pánico escribe en el log (D-46).
+/// Pura: el hook en sí (que captura `PanicHookInfo`, no `Send + Sync`) queda
+/// fuera, así que esto se puede testear sin matar el proceso de test.
+///
+/// `panic = "abort"` mata el proceso entero sin desenrollar: sin esta línea,
+/// un pánico no deja NADA en `logs/localmind.log` (el stderr del hijo va
+/// pipeado pero no se persiste, y el panic muchas veces ocurre en un hilo sin
+/// stderr). Es una breadcrumb, NO un crash dump: dice qué y dónde, no el
+/// estado de memoria.
+fn panic_log_line(secs_epoch: u64, payload: &str, file: &str, line: u32) -> String {
+    format!(
+        "[{}] [LocalMind] PANIC: {} ({}:{})",
+        secs_epoch, payload, file, line
+    )
+}
+
+/// Instalar el hook de pánico (D-46). Envuelve el hook previo en vez de
+/// reemplazarlo, así el backtrace por defecto de Rust se sigue viendo.
+///
+/// ¿Corre con `panic = "abort"`? Sí, verificado empíricamente: una sonda
+/// release con `panic = "abort", lto, strip`+e`opt-level=3` escribió su
+/// marcador desde el hook y luego murió con 0xC0000409. El hook se invoca
+/// antes del `abort()`.
+///
+/// Lo que NO cubre: `abort()` explícito, SIGSEGV/stack overflow y un panic
+/// dentro de un `Drop` durante el desenrollado quedan fuera. Sigue siendo una
+/// breadcrumb, no un volcado.
+fn install_panic_hook(log_file: PathBuf) {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<payload no downcast>".to_string());
+        let (file, line) = info
+            .location()
+            .map(|l| (l.file().to_string(), l.line()))
+            .unwrap_or_else(|| ("<sin ubicacion>".to_string(), 0));
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        // Primero el archivo: es la evidencia que sobrevive al proceso. Si el
+        // archivo no se puede escribir, el hook previo (stderr) sigue después.
+        crate::filelog::write_log_line(&log_file, &panic_log_line(secs, &payload, &file, line));
+        prev(info);
+    }));
+}
+
 /// Single-instance: intento crear un lock file exclusivo en %TEMP%; si ya existe,
 /// enfocar la ventana existente (trae al frente vía PowerShell) y salir.
 fn acquire_single_instance() -> Option<std::fs::File> {
@@ -94,6 +145,10 @@ fn main() {
     }
 
     let base_dir = get_base_dir();
+    // D-46: ANTES de cualquier otra cosa, para que un pánico temprano (config,
+    // servidor, WebView) también deje rastro. Usa el MISMO archivo que
+    // `ProcessManager::log`: no hay un canal nuevo ni un archivo nuevo.
+    install_panic_hook(crate::filelog::logs_dir(&base_dir).join("localmind.log"));
     let config = Arc::new(ConfigStore::load(&base_dir));
     let cfg_now = config.get();
 
@@ -172,4 +227,49 @@ fn main() {
             *control_flow = ControlFlow::Exit;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D-46: la línea de la breadcrumb de pánico. Un test del formateo puro:
+    /// no aborta el proceso de test (que sería imposible de asertar).
+    #[test]
+    fn panic_line_dice_que_where_y_cuando() {
+        let l = panic_log_line(1700000000, "index out of bounds", "src\\process.rs", 412);
+        assert!(l.starts_with("[1700000000] "), "{:?}", l);
+        assert!(l.contains("PANIC"), "{:?}", l);
+        assert!(l.contains("index out of bounds"), "{:?}", l);
+        assert!(l.contains("src\\process.rs:412"), "{:?}", l);
+    }
+
+    /// El payload de un pánico no siempre es un `&str` ni un `String`: hay
+    /// tipos propios. La línea debe salir igual, no romperse.
+    #[test]
+    fn panic_line_tolera_payload_no_texto() {
+        let l = panic_log_line(1, "<payload no downcast>", "<sin ubicacion>", 0);
+        assert!(l.contains("<payload no downcast>"), "{:?}", l);
+        assert!(l.contains("<sin ubicacion>:0"), "{:?}", l);
+    }
+
+    /// La breadcrumb va al archivo que rota `filelog`, no a uno nuevo: la línea
+    /// tiene que pasar por el mismo formato que el resto del log.
+    #[test]
+    fn panic_line_pasa_por_el_formato_de_filelog() {
+        let dir = std::env::temp_dir().join(format!("lm-panic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("localmind.log");
+        // Un payload con salto de línea: el formateo de `filelog` lo sanea, así
+        // que un panic con mensaje multilínea no rompe el archivo de log.
+        crate::filelog::write_log_line(&base, &panic_log_line(7, "a\nb\0c", "f.rs", 9));
+        let text = std::fs::read_to_string(&base).unwrap();
+        // `write_log_line` antepone SU propio epoch UTC (no el de la línea) y
+        // `format_line` sanea \n, \r y \0 a espacio: el archivo tiene UNA línea
+        // lógica, que es lo que permite seguir un pánico al leer el log.
+        assert!(text.contains("[LocalMind] PANIC: a b c (f.rs:9)"), "{:?}", text);
+        assert_eq!(text.matches('\n').count(), 1, "una sola linea: {:?}", text);
+        assert!(!text.contains('\0'), "{:?}", text);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
