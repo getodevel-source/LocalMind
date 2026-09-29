@@ -720,10 +720,25 @@ impl ConfigStore {
     pub fn load_from_path(path: &Path) -> Self {
         let path = path.to_path_buf();
         let raw = std::fs::read_to_string(&path).ok();
-        let mut cfg = raw
-            .as_ref()
-            .and_then(|r| toml::from_str::<AppConfig>(r).ok())
-            .unwrap_or_default();
+        // Un TOML ILEGIBLE no es lo mismo que un archivo ausente. El ausente es
+        // el primer arranque: se calla. El ilegible deja defaults en memoria y
+        // sin esta nota el siguiente `save()` sobrescribe la config del usuario
+        // con defaults y nadie se entera nunca.
+        let mut ilegible_note: Option<String> = None;
+        let mut cfg = match raw.as_ref() {
+            Some(text) => match toml::from_str::<AppConfig>(text) {
+                Ok(c) => c,
+                Err(e) => {
+                    ilegible_note = Some(format!(
+                        "[LocalMind] No se pudo leer la configuración de {}: {}. Se usan los valores por defecto; corregir o borrar el archivo restaura la config.",
+                        path.display(),
+                        e
+                    ));
+                    AppConfig::default()
+                }
+            },
+            None => AppConfig::default(),
+        };
         // Migración: ids de perfiles de la era anterior → nombres actuales.
         let legacy = ["turbo", "balanced", "deep", "ultra"];
         if cfg.profiles.iter().any(|p| legacy.contains(&p.id.as_str())) {
@@ -779,7 +794,9 @@ impl ConfigStore {
         let store = Self {
             path,
             inner: Arc::new(RwLock::new(cfg)),
-            pending_note: Arc::new(RwLock::new(tuned_note)),
+            // La nota de ilegibilidad pisa a la de migración: solo una de las
+            // dos puede ocurrir, y perder la config es lo grave.
+            pending_note: Arc::new(RwLock::new(ilegible_note.or(tuned_note))),
         };
         store
     }
@@ -1157,5 +1174,40 @@ mod tests {
             assert_eq!(cfg.profiles_version, PROFILES_VERSION, "tag={}", tag);
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    #[test]
+    fn config_toml_ilegible_deja_nota() {
+        // Un TOML corrupto es indistinguible de uno ausente si se traga el
+        // error: ambos dan defaults. La diferencia que importa es que el
+        // corrupto avise (si no, el próximo `save()` lo pisa en silencio).
+        let dir = std::env::temp_dir().join(format!("lm-bad-toml-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("localmind.toml");
+        let roto = "esto no [es TOML = \"valido\"\n[[[";
+        std::fs::write(&path, roto).unwrap();
+        let store = ConfigStore::load_from_path(&path);
+        let note = store.take_migration_note().expect("un TOML ilegible debe dejar nota");
+        assert!(note.contains(&path.display().to_string()), "{}", note);
+        // Carga: defaults en memoria, archivo corrupto intacto en disco.
+        assert_eq!(store.get().profiles_version, PROFILES_VERSION);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), roto);
+        // La nota se consume una sola vez.
+        assert!(store.take_migration_note().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_toml_ausente_no_deja_nota() {
+        // Primer arranque: ausencia de archivo es normal y debe ser silencioso.
+        let dir = std::env::temp_dir().join(format!("lm-no-toml-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = ConfigStore::load_from_path(&dir.join("localmind.toml"));
+        assert!(store.take_migration_note().is_none());
+        // Defaults completos (perfiles repuestos, D-1).
+        assert!(!store.get().profiles.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
