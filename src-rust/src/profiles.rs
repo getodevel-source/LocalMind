@@ -31,11 +31,13 @@ pub fn get_hardware_profiles(cfg: &AppConfig) -> Vec<HardwareProfileDto> {
     cfg.profiles.iter().cloned().map(Into::into).collect()
 }
 
-/// Resolver un perfil por id; fallback al primero disponible.
+/// Resolver un perfil por id; fallback al primero disponible. Sin pánicos: con
+/// `panic = "abort"` un `expect` acá mataría el proceso entero, y el caso
+/// "lista vacía" solo se alcanza si el TOML se editó a mano.
 pub fn resolve_profile(profiles: &[HardwareProfile], id: &str) -> HardwareProfile {
     profiles
         .iter()
         .find(|p| p.id == id)
         .cloned()
-        .unwrap_or_else(|| profiles.first().cloned().expect("no hardware profiles configured"))
+        .unwrap_or_else(|| profiles.first().cloned().unwrap_or_default())
 }

@@ -629,9 +629,13 @@ impl ProcessManager {
         let mut cmd = std::process::Command::new(llama_bin);
         cmd.current_dir(base_dir);
         cmd.creation_flags(CREATE_NO_WINDOW | process_priority_class);
+        // Sin `unwrap`: con `panic = "abort"` una ruta no-UTF-8 mataría el
+        // proceso entero (WebView + HTTP + motor huérfano). En Windows la ruta
+        // es UTF-8 siempre; `to_string_lossy` solo evita el panic.
+        let model_arg = model_path.to_string_lossy().to_string();
         cmd.args([
             "-m",
-            model_path.to_str().unwrap(),
+            model_arg.as_str(),
             "-ngl",
             "99",
             "-c",
@@ -734,7 +738,8 @@ impl ProcessManager {
             true,
         );
         if let Some(mm) = params.mmproj.as_ref() {
-            cmd.args(["--mmproj", mm.to_str().unwrap()]);
+            let mm_arg = mm.to_string_lossy().to_string();
+            cmd.args(["--mmproj", mm_arg.as_str()]);
         }
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -1120,7 +1125,12 @@ impl ProcessManager {
                 if !path.is_file() {
                     continue;
                 }
-                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                // `file_name()` es `None` solo en `..`; se salta igual que el
+                // no-archivo de arriba en vez de arriesgar un `unwrap`.
+                let Some(fname) = path.file_name() else {
+                    continue;
+                };
+                let name = fname.to_string_lossy().to_string();
                 if name.ends_with(".gguf") && !name.to_lowercase().contains("mmproj") {
                     let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                     let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
@@ -1352,7 +1362,8 @@ impl ProcessManager {
         }
 
         if let Some(mm) = self.find_mmproj() {
-            cmd.args(["--mmproj", mm.to_str().unwrap()]);
+            let mm_arg = mm.to_string_lossy().to_string();
+            cmd.args(["--mmproj", mm_arg.as_str()]);
         }
 
         cmd.stdout(Stdio::piped());
@@ -1803,16 +1814,17 @@ fn resolve_model_path(models_dir: &Path, requested: &str) -> Result<PathBuf, Str
     Ok(candidate)
 }
 
-/// Precedencia del MODELO al arrancar (puro y testeable). Orden deliberado:
-/// 1) `req_model` explícito; 2) alias configurado (una petición de launcher
-/// también es explícita); 3) `last.model` de la sesión anterior; 4) primer
-/// `.gguf` de la carpeta. `last.model` va por ENCIMA del primer `.gguf` porque
-/// `models/` suele traer varios y arrancar siempre con el primero ignora la
-/// sesión en curso; ir por detrás era código muerto (`models.first()` es
-/// `Some` en cuanto hay un modelo, luego el `Err` final nunca se alcanzaba).
-/// `last.model` no pasa por `validate_req_model`, así que se guarda contra un
-/// archivo que ya no existe: degrada al primer `.gguf` en vez de volver un
-/// arranque válido un error duro. Sin pánicos.
+/// Precedencia del MODELO al arrancar (puro y testeable, sin pánicos).
+///
+/// `last.model` va por ENCIMA del primer `.gguf` porque `models/` suele traer
+/// varios y arrancar siempre con el primero ignora la sesión en curso: antes
+/// iba detrás y era código muerto (`models.first()` es `Some` en cuanto hay un
+/// modelo, luego la rama nunca se alcanzaba). Como `last.model` NO pasa por
+/// `validate_req_model`, se guarda contra un archivo que ya no existe y degrada
+/// al primer `.gguf` en vez de volver un arranque válido un error duro.
+/// Orden: 1) `req_model` explícito; 2) alias configurado (una petición de
+/// launcher también es explícita, por eso el alias gana a `last.model`);
+/// 3) `last.model` de la sesión anterior; 4) primer `.gguf` de la carpeta.
 fn resolve_model_filename(
     req_model: Option<&str>,
     aliases: &[String],
@@ -2082,6 +2094,65 @@ mod tests {
             resolve_context(None, Some("velocidad"), 32768, Some("libros"), None, Some(131072), "velocidad", "x.gguf"),
             32768
         );
+    }
+
+    /// PathBuf cuyos bytes NO son UTF-8 válido (lone surrogate en Windows,
+    /// 0x80 en Unix). Con `panic = "abort"` el anterior `to_str().unwrap()`
+    /// en el argv mataba el proceso entero.
+    fn path_no_utf8() -> std::path::PathBuf {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            std::path::PathBuf::from(std::ffi::OsString::from_wide(&[0x0061, 0xD800, 0x0062]))
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![0x61, 0x80, 0x62]))
+        }
+    }
+
+    #[test]
+    fn path_no_utf8_convierte_sin_pania() {
+        let p = path_no_utf8();
+        // El presupuesto del test: el path ES no-UTF-8, así que el `unwrap`
+        // anterior habría entrado en panic (y con abort, terminado el proceso).
+        assert!(p.to_str().is_none(), "el fixture debe ser no-UTF-8");
+        let s = p.to_string_lossy().to_string();
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn argv_con_modelo_no_utf8_no_pania() {
+        // El argv real del motor con un path de modelo no-UTF-8: no debe
+        // entrar en panic ni truncar silenciosamente la ruta.
+        let dir = std::env::temp_dir().join(format!("lm-argv-utf8-{}", std::process::id()));
+        let bin = dir.join("llama-server.exe");
+        let base = dir.clone();
+        let model = path_no_utf8();
+        let cmd = ProcessManager::build_engine_cmd(
+            &bin,
+            &base,
+            0,
+            &model,
+            32768,
+            6,
+            512,
+            "0",
+            &crate::config::EngineConfig::default(),
+            &crate::config::HardwareProfile::default(),
+            8080,
+            false,
+        );
+        let argv: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        // `-m` presente y seguido de algo (el reemplazo de bytes no puede
+        // dejar el argumento vacío).
+        let i = argv.iter().position(|a| a == "-m").expect("-m en el argv");
+        assert!(!argv[i + 1].is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

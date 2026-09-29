@@ -56,6 +56,19 @@ fn cors_origin_header(origin: Option<&str>) -> Option<Header> {
     Header::from_bytes(&b"Access-Control-Allow-Origin"[..], o.as_bytes()).ok()
 }
 
+/// `Set-Cookie` de sesión. El valor sale de la clave local (64 hex de
+/// `generate_key()` o del `gateway.key` de disco), así que es DINÁMICO: una
+/// clave alterada con un byte de control haría fallar el parseo. Se devuelve
+/// `Option` —igual que `cors_origin_header`— para que el llamante responda 500
+/// en vez de entrar en `unwrap` con `panic = "abort"`.
+fn session_cookie_header(gateway_key: &str) -> Option<Header> {
+    Header::from_bytes(
+        &b"Set-Cookie"[..],
+        crate::auth::set_cookie_value(gateway_key).as_bytes(),
+    )
+    .ok()
+}
+
 /// Respuesta JSON con CORS solo para origen loopback (o sin CORS si `None`).
 fn json_response_for_origin(
     status_code: u16,
@@ -461,11 +474,10 @@ fn handle_request(
             include_str!("../ui_fallback.html").to_string()
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
-        let cookie = Header::from_bytes(
-            &b"Set-Cookie"[..],
-            crate::auth::set_cookie_value(&gateway_key).as_bytes(),
-        )
-        .unwrap();
+        let Some(cookie) = session_cookie_header(&gateway_key) else {
+            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+            return;
+        };
         let mut resp = Response::from_string(html);
         resp.add_header(ct);
         resp.add_header(cookie);
@@ -483,11 +495,10 @@ fn handle_request(
             }
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/x-icon"[..]).unwrap();
-        let cookie = Header::from_bytes(
-            &b"Set-Cookie"[..],
-            crate::auth::set_cookie_value(&gateway_key).as_bytes(),
-        )
-        .unwrap();
+        let Some(cookie) = session_cookie_header(&gateway_key) else {
+            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+            return;
+        };
         let mut resp = Response::from_data(bytes);
         resp.add_header(ct);
         resp.add_header(cookie);
@@ -505,11 +516,10 @@ fn handle_request(
             }
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap();
-        let cookie = Header::from_bytes(
-            &b"Set-Cookie"[..],
-            crate::auth::set_cookie_value(&gateway_key).as_bytes(),
-        )
-        .unwrap();
+        let Some(cookie) = session_cookie_header(&gateway_key) else {
+            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+            return;
+        };
         let mut resp = Response::from_data(bytes);
         resp.add_header(ct);
         resp.add_header(cookie);
@@ -2506,6 +2516,46 @@ mod proxy {
             let err2 = apply(&store, r#"{"engine":{"speculation":{"enabled":"si"}}}"#).unwrap_err();
             assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn header_parse_de_literal_no_pania() {
+            // Los `Header::from_bytes(...).unwrap()` que quedan en el archivo
+            // parsean LITERALES de byte: no pueden fallar, y por eso el `unwrap`
+            // es aceptable ahí. Este test fija ese supuesto para cada literal
+            // realmente usado: si una edición futura vuelve dinámico uno de
+            // ellos, esto falla y obliga a la forma `Option` de
+            // `cors_origin_header` / `session_cookie_header`.
+            let literales: &[(&[u8], &[u8])] = &[
+                (b"Content-Type", b"application/json"),
+                (b"Content-Type", b"text/html; charset=utf-8"),
+                (b"Content-Type", b"text/plain; charset=utf-8"),
+                (b"Content-Type", b"text/event-stream"),
+                (b"Content-Type", b"image/x-icon"),
+                (b"Content-Type", b"image/png"),
+                (b"Content-Disposition", b"attachment; filename=\"localmind_profiles.json\""),
+                (b"Cache-Control", b"no-cache"),
+                (b"Connection", b"keep-alive"),
+                (b"Access-Control-Allow-Methods", b"GET, POST, OPTIONS, PUT, DELETE"),
+                (b"Access-Control-Allow-Headers", b"Content-Type, Authorization, x-api-key"),
+            ];
+            for &(name, value) in literales {
+                assert!(
+                    Header::from_bytes(name, value).is_ok(),
+                    "literal no parseable: {}: {}",
+                    String::from_utf8_lossy(name),
+                    String::from_utf8_lossy(value)
+                );
+            }
+            // Y el valor DINÁMICO de la cookie ya no entra en panic: una clave
+            // manipulada da `None` y el llamante responde 500.
+            // Y el valor DINÁMICO de la cookie ya no entra en panic: `Option`
+            // en vez de `unwrap`, así que una clave manipulada da `None` y el
+            // llamante responde 500. Comprobado empíricamente: el parser de
+            // `http` rechaza un byte NO-ASCII en el valor (un `gateway.key`
+            // alterado o guardado en otra codificación), no un byte de control.
+            assert!(super::super::session_cookie_header(&"a".repeat(64)).is_some());
+            assert!(super::super::session_cookie_header("clave\u{80}").is_none());
         }
 
         #[test]
