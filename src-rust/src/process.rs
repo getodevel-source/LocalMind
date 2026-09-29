@@ -1217,6 +1217,21 @@ impl ProcessManager {
     }
 
     pub fn start(&self, req: StartRequest) -> Result<u32, String> {
+        // Intento nuevo = pizarra de error limpia, y se limpia AL ABRIRLO, no
+        // solo al lograrse (el `= None` de más abajo, tras el `spawn()`): una
+        // validación rechazada devuelve ANTES de `stop()` y del `spawn()`, así
+        // que sin esto el `last_error` del arranque ANTERIOR sobrevivía y el
+        // poller de la UI lo volvía a pintar en el banner, pisando el mensaje
+        // "Error al iniciar: ..." recién escrito con uno de un evento que el
+        // usuario no acababa de provocar. `stop()` tampoco limpia `last_error`.
+        // Los tres campos van juntos porque los lee la misma rama del banner:
+        // un veredicto viejo de la puerta pisaría el banner igual de solo.
+        {
+            let mut st = self.status.write();
+            st.last_error = None;
+            st.acceptance_error = None;
+            st.acceptance_ok = None;
+        }
         // Validación del request explícito (nunca sustituir en silencio lo que
         // el usuario pidió: D-1/contexto fantasma). Solo valida CAMPOS
         // NOMBRADOS; omitidos resuelven por la precedencia habitual. Va ANTES
@@ -2196,6 +2211,63 @@ mod tests {
         // dejar el argumento vacío).
         let i = argv.iter().position(|a| a == "-m").expect("-m en el argv");
         assert!(!argv[i + 1].is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El defecto que faltaba tras el prefijo del banner: un `last_error` (o
+    /// un veredicto de la puerta) del arranque ANTERIOR sobrevivía a un arranque
+    /// RECHAZADO, porque la validación devuelve antes de `stop()` y del
+    /// `spawn()` y `stop()` no limpia el error. El poller de la UI leía ese
+    /// error viejo y pisaba el "Error al iniciar: ..." recién escrito.
+    ///
+    /// Se alcanza por el path REAL de `start()` sin lanzar ningún proceso: un
+    /// modelo desconocido se rechaza en la validación, muy antes del chequeo
+    /// de `llama_bin.exists()` y del `spawn()`. `base_dir` es temporal y no
+    /// tiene `models/`, así que cualquier modelo es desconocido.
+    #[test]
+    fn intento_rechazado_limpia_el_error_anterior() {
+        let dir = std::env::temp_dir()
+            .join(format!("lm-slate-{}-{}", "intento-rechazado", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = ProcessManager::new(dir.clone(), cfg);
+        // Estado previo: el motor murió y el poller dejó su error, más un
+        // veredicto viejo de la puerta (mismo arranque, mismo banner).
+        {
+            let mut st = mgr.status.write();
+            st.status = "error".to_string();
+            st.last_error = Some("El motor dejó de responder el endpoint /health.".to_string());
+            st.acceptance_ok = Some(false);
+            st.acceptance_error = Some("veredicto viejo de la puerta".to_string());
+        }
+        let res = mgr.start(StartRequest {
+            model: Some("noexiste.gguf".to_string()),
+            profile: None,
+            context: None,
+            threads: None,
+            priority: None,
+        });
+        assert!(res.is_err(), "un modelo desconocido debe rechazarse");
+        // Lo que el poller lee después: sin error, la rama del banner no entra.
+        let st = mgr.get_status();
+        assert!(
+            st.last_error.is_none(),
+            "el intento nuevo debe partir de `last_error` limpio, no arrastrar el anterior: {:?}",
+            st.last_error
+        );
+        assert!(
+            st.acceptance_error.is_none(),
+            "mismo motivo para `acceptance_error` (rama hermana del banner): {:?}",
+            st.acceptance_error
+        );
+        assert!(
+            st.acceptance_ok.is_none(),
+            "el veredicto de la puerta pertenece al arranque anterior, no a este"
+        );
+        drop(mgr);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
