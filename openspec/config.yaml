@@ -1,0 +1,130 @@
+schema: spec-driven
+
+project: localmind
+
+context: |
+  Tech stack: Rust 2021 (tao 0.30 + wry 0.45 WebView2 host, tiny_http 0.12 API server);
+    frontend is a single framework-free `ui.html` with one inline <script>, served by Rust.
+  Engine: vendored prebuilt llama.cpp fork binaries in `bin/` (PrismML-Eng/llama.cpp,
+    build prism-b10743-adfffbe, Windows x64 Vulkan). NOT built from this repo's source.
+  Domain: runs local GGUF LLMs and launches agent CLIs (pi, omp, opencode, web, deepseek)
+    against them; exposes an OpenAI-compatible HTTP API on a dynamic port.
+  Testing: 4 offline gates (cargo test, ui-render, bench --self-test, node --check);
+    live-only gates (smoke, e2e, ui-tabs) need the app live on 127.0.0.1:17860.
+  Style: identifiers and UI copy in English; tests and docs use Spanish domain terms.
+
+strict_tdd: false
+
+projects:
+  - path: src-rust
+    stack: rust-2021
+    test_command: cargo test --manifest-path src-rust/Cargo.toml
+    framework: cargo test (built-in #[cfg(test)] harness, no external test crate)
+    coverage_command: ""
+  - path: .
+    stack: node-esm-harnesses
+    test_command: ""
+    framework: none (dependency-free Node ESM scripts in tests/)
+    notes: >-
+      Not an independent project root (no package.json); `ui.html` and `tests/*.mjs`
+      are workspace assets gated by separate commands, listed under testing below.
+      No single command covers both `src-rust` and this surface.
+
+testing:
+  strict_tdd: false
+  strict_tdd_rationale: >-
+    No single explicit workspace-level test command covers the complete in-scope
+    surface. The offline gate set is four independent commands; `cargo test` alone
+    runs 142 tests in ~0.05s and exercises none of the engine lifecycle, WebView2
+    host, or streaming paths that carry the product risk. Forcing RED-GREEN-REFACTOR
+    here would produce green signal over untested behaviour. See
+    `sdd/localmind/testing-capabilities` for the full argument.
+  offline_gates:
+    - name: Rust unit/integration
+      command: cargo test --manifest-path src-rust/Cargo.toml
+      verified: "2026-09-30 — 142 passed, 0 failed, exit 0"
+    - name: UI render harness (stub DOM)
+      command: node tests/ui-render.mjs
+      verified: "2026-09-30 — ~100 assertions PASS, exit 0"
+    - name: Bench harness self-test
+      command: node tests/bench.mjs --self-test
+      verified: "2026-09-30 — 23 assertions PASS, exit 0"
+    - name: Syntax gate for Node harnesses
+      command: Get-ChildItem tests/*.mjs | ForEach-Object { node --check $_.FullName }
+      verified: "2026-09-30 — 7 files, all exit 0"
+  live_gates:
+    - name: HTTP API smoke
+      command: node tests/smoke.mjs
+      requires: app live on http://127.0.0.1:17860
+    - name: E2E
+      command: node tests/e2e.mjs
+      requires: app live on http://127.0.0.1:17860
+    - name: Live tab paint (real DOM via CDP)
+      command: node tests/ui-tabs.mjs
+      requires: app live + Chromium/Edge browser
+      notes: >-
+        Closes gap D-40. The stub-DOM suite CANNOT catch structural HTML breakage
+        (an unclosed <div> shipped a P0 with all 55 stub checks green). Required
+        after structural HTML edits, before calling a UI change done.
+  quality_tools:
+    linter:
+      available: true
+      command: cargo clippy --manifest-path src-rust/Cargo.toml
+      gated: false
+    type_checker:
+      available: true
+      command: cargo check --manifest-path src-rust/Cargo.toml
+      gated: false
+    formatter:
+      available: true
+      command: cargo fmt --manifest-path src-rust/Cargo.toml
+      gated: false
+  notes: >-
+    clippy/rustfmt ship with the toolchain but are NOT wired into .github/workflows/ci.yml
+    and have no config file (no clippy.toml / rustfmt.toml). CI enforces only the four
+    offline gates above.
+
+rules:
+  proposal:
+    - "Classify the change surface: Rust backend (`src-rust/src/`), UI (`ui.html`), or engine config."
+    - For UI changes, state explicitly whether the change is logic-only (ui-render.mjs covers it)
+      or structural (ui-tabs.mjs is required, since the stub DOM cannot detect HTML breakage).
+    - Include rollback plan for changes touching engine start/stop, context size, or model selection.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+    - "The HTTP API is a published contract consumed by external CLIs: any endpoint,
+      status code, or response-shape change MUST be called out as a breaking-contract risk."
+  design:
+    - Include sequence diagrams for complex flows.
+    - Document architecture decisions with rationale.
+    - Do not propose building `bin/` from source — the engine is a vendored prebuilt binary.
+  tasks:
+    - Group by phase, use hierarchical numbering.
+    - Keep tasks completable in one session.
+    - Name the gate(s) each task must keep green.
+  apply:
+    guidelines:
+      - Follow existing code patterns.
+      - Do not modify or regenerate `bin/` binaries.
+      - Do not start or stop the engine process during apply unless the task says so.
+      - Never drive the live app in tests; use the offline harnesses by default.
+    tdd: false
+    test_command: cargo test --manifest-path src-rust/Cargo.toml
+  verify:
+    test_command: cargo test --manifest-path src-rust/Cargo.toml
+    build_command: cargo build --manifest-path src-rust/Cargo.toml --release
+    coverage_threshold: 0
+    required_gates:
+      - cargo test --manifest-path src-rust/Cargo.toml
+      - node tests/ui-render.mjs
+      - node tests/bench.mjs --self-test
+      - Get-ChildItem tests/*.mjs | ForEach-Object { node --check $_.FullName }
+    conditional_gates:
+      - condition: structural HTML edit
+        command: node tests/ui-tabs.mjs
+      - condition: HTTP API contract change
+        command: node tests/smoke.mjs
+  archive:
+    - Warn before merging destructive deltas.
+    - An archive must record which gates were run, not only that the change was completed.
