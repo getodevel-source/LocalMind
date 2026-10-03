@@ -1,6 +1,7 @@
 # Fase B — Diseño de red: Servidor / Cliente / Todo-aquí (LAN + túnel)
 
-Estado: **diseño para aprobación**. No se escribió código de red.
+Estado: **aprobado por el dueño 2026-10-03** (túnel: Tailscale · pairing: QR + regenerar ·
+alcance LAN: todo con clave en v1). No se escribió código de red todavía.
 Rama: `simplificacion/raices-fase-a`. Base medida: gateway `Server::http(("127.0.0.1", p))`
 (`server.rs:387`), motor con host loopback fijo (`process.rs` `build_engine_cmd`),
 auth `gateway.key` 64-hex (`auth.rs`), CORS solo-loopback (`meta.rs:177`).
