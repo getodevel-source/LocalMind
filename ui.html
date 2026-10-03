@@ -1564,16 +1564,7 @@
                 <label class="field-label" for="profile-select" style="margin: 0;">
                   <span data-i18n="engine.profile">Perfil de uso · ¿qué vas a hacer?</span>
                 </label>
-                <div style="display: flex; gap: 6px;">
-                  <button class="tool-btn" type="button" onclick="exportProfiles()" data-i18n-title="engine.exportTitle" title="Exportar perfiles a archivo JSON">
-                    <span data-i18n="engine.export">Exportar</span>
-                  </button>
-                  <button class="tool-btn" type="button" onclick="triggerImportProfiles()" data-i18n-title="engine.importTitle" title="Importar perfiles desde JSON">
-                    <span data-i18n="engine.import">Importar</span>
-                  </button>
-                </div>
               </div>
-              <input type="file" id="file-profile-input" accept=".json" style="display: none;" onchange="handleProfileFileSelected(event)">
               <div class="select-wrapper">
                 <select id="profile-select" onchange="onProfileChange()"></select>
               </div>
@@ -1695,7 +1686,6 @@
 
           <div class="card-body">
             <div class="telemetry-meta">
-              <span id="endpoint-port">:8080/v1</span>
               <span id="endpoint-meta">127.0.0.1:—</span>
             </div>
 
@@ -1706,20 +1696,12 @@
                 <span id="tel-gen-tps" class="metric-value">—</span>
               </div>
               <div class="metric-box">
-                <span class="metric-label">Prompt t/s</span>
-                <span id="tel-prompt-tps" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.tokens">Tokens</span>
                 <span id="tel-tokens" class="metric-value">—</span>
               </div>
               <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.cache">Caché</span>
                 <span id="tel-cache-pct" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label">MTP</span>
-                <span id="tel-mtp-pct" class="metric-value">—</span>
               </div>
               <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.requests">Solicitudes</span>
@@ -1763,9 +1745,7 @@
 
         <div class="info-card">
           <h3 data-i18n="specs.hwTitle">Hardware Detectado &amp; Motor de Inferencia</h3>
-          <p data-i18n="specs.hwBody">
-            LocalMind detecta dinámicamente tus aceleradores gráficos y procesador para ejecutar modelos de lenguaje localmente con máxima eficiencia mediante offload Vulkan y memoria unificada.
-          </p>
+          <p data-i18n="specs.hwBody">Equipo y motor en uso.</p>
           <table class="spec-table">
             <thead>
               <tr>
@@ -1786,44 +1766,19 @@
                 <td id="spec-cpu-threads">--</td>
               </tr>
               <tr>
-                <td data-i18n="specs.rowAccel">Aceleración Gráfica</td>
-                <td>Vulkan Hardware Offload</td>
-                <td>Capas en VRAM (-ngl 99)</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowKv">KV Cache</td>
-                <td>Cuantización 4-bit (q4_0)</td>
-                <td>Flash Attention activado</td>
-              </tr>
-              <tr>
                 <td data-i18n="specs.rowEngine">Motor de Inferencia</td>
                 <td id="spec-engine-build" data-i18n="specs.detecting">Detectando...</td>
                 <td id="spec-engine-path">--</td>
               </tr>
-              <tr>
-                <td data-i18n="specs.rowPower">Protección Eléctrica</td>
-                <td data-i18n="specs.rowPowerVal">Modo Silencioso &amp; Anti-Apagón</td>
-                <td data-i18n="specs.rowPowerState">Prioridad equilibrada + Auto-stop</td>
-              </tr>
             </tbody>
           </table>
-        <div class="feature-list" id="spec-features">
-          <div class="feature-item">
-            <span class="feature-dot"></span>
-            <span>Vulkan 100% offload · Flash Attention activado (-fa on)</span>
-          </div>
-          <div class="feature-item">
-            <span class="feature-dot"></span>
-            <span>KV Cache cuantizado en 4-bit (q4_0) · Batch size 2048 / 512</span>
-          </div>
-        </div>
         </div>
 
         <div class="info-card">
           <h3 data-i18n="specs.epTitle">Endpoints OpenAI Compatibles</h3>
           <p>
             <span data-i18n="specs.epBody">Cualquier herramienta compatible con la API de OpenAI puede conectarse directamente con la URL base</span>
-            <code>http://127.0.0.1:8080/v1</code>
+            <code id="spec-gateway-url">…</code>
             <span data-i18n="specs.epBody2">con la clave de <code>%APPDATA%\LocalMind\gateway.key</code> en <code>Authorization: Bearer</code> y el ID de modelo</span>
             <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code id="spec-model-id">localmind</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
           </p>
@@ -2027,6 +1982,13 @@
               <textarea id="cfg-profile-flags" class="chat-textarea cfg-textarea" rows="2" autocomplete="off" spellcheck="false" placeholder="-kvu" data-i18n-aria="settings.profileFlags" aria-label="Flags extra (uno por línea)"></textarea>
               <div id="cfg-profile-error" class="error-banner" role="alert"></div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="tool-btn" type="button" onclick="exportProfiles()">
+                  <span data-i18n="engine.export">Exportar</span>
+                </button>
+                <button class="tool-btn" type="button" onclick="triggerImportProfiles()">
+                  <span data-i18n="engine.import">Importar</span>
+                </button>
+                <input type="file" id="file-profile-input" accept=".json" style="display: none;" onchange="handleProfileFileSelected(event)">
                 <button class="tool-btn" type="button" id="cfg-profile-save" onclick="saveProfileEdit()"><span data-i18n="settings.save">Guardar</span> <span id="cfg-profile-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
                 <button class="tool-btn" type="button" id="cfg-profile-new" onclick="newProfileEdit()"><span data-i18n="settings.profileNew">Nuevo</span></button>
                 <button class="tool-btn" type="button" id="cfg-profile-dup" onclick="duplicateProfileEdit()"><span data-i18n="settings.profileDup">Duplicar</span></button>
@@ -2356,7 +2318,7 @@
         'specs.title': 'Especificaciones',
         'specs.sub': 'Hardware detectado y cómo conectarse al motor.',
         'specs.hwTitle': 'Hardware Detectado & Motor de Inferencia',
-        'specs.hwBody': 'LocalMind detecta dinámicamente tus aceleradores gráficos y procesador para ejecutar modelos de lenguaje localmente con máxima eficiencia mediante offload Vulkan y memoria unificada.',
+        'specs.hwBody': 'Equipo y motor en uso.',
         'specs.colComponent': 'Componente', 'specs.colDevice': 'Dispositivo Detectado',
         'specs.colState': 'Estado / Capacidad',
         'specs.rowAccel': 'Aceleración Gráfica',
@@ -2593,7 +2555,7 @@
         'specs.title': 'Specifications',
         'specs.sub': 'Detected hardware and how to reach the engine.',
         'specs.hwTitle': 'Detected Hardware & Inference Engine',
-        'specs.hwBody': 'LocalMind dynamically detects your graphics accelerators and processor to run language models locally at full efficiency with Vulkan offload and unified memory.',
+        'specs.hwBody': 'Machine and engine in use.',
         'specs.colComponent': 'Component', 'specs.colDevice': 'Detected Device',
         'specs.colState': 'State / Capacity',
         'specs.rowAccel': 'Graphics Acceleration',
@@ -4751,8 +4713,7 @@
       }
 
       // Telemetry meta
-      set('endpoint-meta', healthy ? ('127.0.0.1:' + port) : '127.0.0.1:—');
-      set('endpoint-port', ':' + port + '/v1');
+      set('endpoint-meta', healthy ? ('127.0.0.1:' + port + '/v1') : '127.0.0.1:—');
       set('pid-display', 'PID: ' + (healthy ? (st.pid || 'Activo') : (status === 'starting' ? '...' : '--')));
 
       // Telemetry card dimmed when engine down
@@ -4775,6 +4736,11 @@
       // honesto cuando el motor no está en marcha.
       const specModel = document.getElementById('spec-model-id');
       if (specModel) specModel.textContent = servedModelName(st) || 'localmind';
+      const specGw = document.getElementById('spec-gateway-url');
+      if (specGw) {
+        try { specGw.textContent = 'http://' + window.location.host + '/v1'; }
+        catch (e) {}
+      }
       updateLauncherHint(st);
       set('chat-status-hint', chatHintText);
       // Engine-verification telemetry (additive; blank when keys absent/null).
