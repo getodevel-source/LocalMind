@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LocalMind Studio</title>
-  <link rel="icon" type="image/x-icon" href="localmind.ico">
+  <title>OMNI</title>
+  <link rel="icon" type="image/x-icon" href="omni.ico">
   <style>
     :root {
       /* LocalMind design tokens: dark-first, single mint accent. */
@@ -1404,13 +1404,13 @@
   <header>
     <div class="brand-section">
       <div class="brand-logo" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/>
-          <path d="M8 15.5v-7l3.2 4.4 3.2-4.4v7"/>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="7.5"/>
+          <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>
         </svg>
       </div>
       <div class="brand-titles">
-        <span class="brand-name">LocalMind Studio</span>
+        <span class="brand-name">OMNI</span>
         <span class="brand-badge" id="app-version">v…</span>
       </div>
     </div>
@@ -1432,7 +1432,7 @@
       </div>
     </div>
 
-    <nav class="tabs-nav" aria-label="LocalMind" id="main-nav">
+    <nav class="tabs-nav" aria-label="OMNI" id="main-nav">
       <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard">
         <span data-i18n="nav.panel">Panel</span>
       </button>
@@ -1864,7 +1864,7 @@
             <button class="tool-btn" onclick="clearTerminalLogs()"><span data-i18n="logs.clear">Limpiar</span></button>
           </div>
         </div>
-        <div id="terminal-stream" tabindex="0" data-i18n="logs.boot" data-i18n-aria="logs.stream" aria-label="Registro del motor">LocalMind Studio inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.
+        <div id="terminal-stream" tabindex="0" data-i18n="logs.boot" data-i18n-aria="logs.stream" aria-label="Registro del motor">OMNI inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.
 </div>
       </div>
     </div>
@@ -2151,7 +2151,7 @@
   </main>
   <script>
     /* ============================================================
-       LocalMind Studio — UI logic
+       OMNI — UI logic
        Behaviour contract (frozen; see docs/ui/notes.md):
        - /api/status poll 800 ms · /api/metrics poll 2 s
        - download poll 1500 ms · usage lazy poll 30 s (visible tab only)
@@ -2211,7 +2211,7 @@
         'specs.rowCpu': 'Procesador (CPU)',
         'specs.rowKv': 'KV Cache',
         'specs.rowEngine': 'Motor de Inferencia',
-        'logs.boot': 'LocalMind Studio inicializado. Presiona \'Iniciar Motor\' para arrancar el servidor.',
+        'logs.boot': 'OMNI inicializado. Presiona \'Iniciar Motor\' para arrancar el servidor.',
         'telemetry.title': 'Telemetría', 'telemetry.live': 'Telemetría en vivo',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Caché',
         'telemetry.requests': 'Solicitudes',
@@ -2439,7 +2439,7 @@
         'specs.rowCpu': 'Processor (CPU)',
         'specs.rowKv': 'KV Cache',
         'specs.rowEngine': 'Inference Engine',
-        'logs.boot': 'LocalMind Studio initialized. Press \'Start Engine\' to boot the server.',
+        'logs.boot': 'OMNI initialized. Press \'Start Engine\' to boot the server.',
         'telemetry.title': 'Telemetry', 'telemetry.live': 'Live telemetry',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Cache',
         'telemetry.requests': 'Requests',

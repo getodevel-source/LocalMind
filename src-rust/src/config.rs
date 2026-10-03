@@ -521,7 +521,9 @@ pub fn built_in_profiles() -> Vec<HardwareProfile> {
     vec![
         HardwareProfile {
             id: "velocidad".to_string(),
-            name: "Velocidad máxima · 32K contextos cortos".to_string(),
+            // Fase C: el id NO cambia (compat TOML/migración/tests); el nombre
+            // visible sí: este es el perfil por defecto ("Recomendado").
+            name: "Recomendado · 32K (el más rápido)".to_string(),
             description: "Todo el modelo y su memoria de conversación (KV cache) viven íntegramente en la VRAM de la GPU. Es el modo más rápido con mínima latencia. Ideal para chat, preguntas y código corto (<30k palabras).".to_string(),
             context: 32768,
             cache_ram: 0,

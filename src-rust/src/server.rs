@@ -455,6 +455,7 @@ impl HttpServer {
 }
 
 /// Rutas públicas (sin clave): UI + iconos. Todo lo demás exige clave.
+/// Fase C (OMNI): se sirven los iconos nuevos y los históricos en transición.
 fn is_public_path(method: &str, url: &str) -> bool {
     if method == "OPTIONS" {
         return true;
@@ -463,7 +464,22 @@ fn is_public_path(method: &str, url: &str) -> bool {
         return false;
     }
     let path = url.split('?').next().unwrap_or(url);
-    matches!(path, "/" | "/index.html" | "/localmind.ico" | "/localmind.png")
+    matches!(
+        path,
+        "/" | "/index.html" | "/localmind.ico" | "/localmind.png" | "/omni.ico" | "/omni.png"
+    )
+}
+
+/// Icono a servir para una ruta pública (Fase C): nombre de fichero en
+/// `base_dir` + Content-Type. Los históricos conviven en transición.
+fn icon_asset_for(path: &str) -> Option<(&'static str, &'static [u8])> {
+    match path {
+        "/localmind.ico" => Some(("localmind.ico", b"image/x-icon")),
+        "/omni.ico" => Some(("omni.ico", b"image/x-icon")),
+        "/localmind.png" => Some(("localmind.png", b"image/png")),
+        "/omni.png" => Some(("omni.png", b"image/png")),
+        _ => None,
+    }
 }
 
 fn handle_request(
@@ -530,50 +546,31 @@ fn handle_request(
         return;
     }
 
-    if method == "GET" && url == "/localmind.ico" {
-        let bytes = match load_asset(&base_dir, "localmind.ico") {
-            Some(b) => b,
-            None => {
-                let _ = req.respond(json_response_for_origin(404, "{\"error\":\"not_found\"}".into(), origin_ref));
-                return;
-            }
-        };
-        let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/x-icon"[..]).unwrap();
-        let mut resp = Response::from_data(bytes);
-        resp.add_header(ct);
-        if peer_loopback {
-            let Some(cookie) = session_cookie_header(&gateway_key) else {
-                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
-                return;
+    // Iconos (Fase C): un solo bloque para los cuatro (ver `icon_asset_for`).
+    if method == "GET" {
+        let path = url.split('?').next().unwrap_or(&url);
+        if let Some((file, mime)) = icon_asset_for(path) {
+            let bytes = match load_asset(&base_dir, file) {
+                Some(b) => b,
+                None => {
+                    let _ = req.respond(json_response_for_origin(404, "{\"error\":\"not_found\"}".into(), origin_ref));
+                    return;
+                }
             };
-            resp.add_header(cookie);
-        }
-        add_cors_for(&mut resp, origin_ref);
-        let _ = req.respond(resp);
-        return;
-    }
-
-    if method == "GET" && url == "/localmind.png" {
-        let bytes = match load_asset(&base_dir, "localmind.png") {
-            Some(b) => b,
-            None => {
-                let _ = req.respond(json_response_for_origin(404, "{\"error\":\"not_found\"}".into(), origin_ref));
-                return;
+            let ct = Header::from_bytes(&b"Content-Type"[..], mime).unwrap();
+            let mut resp = Response::from_data(bytes);
+            resp.add_header(ct);
+            if peer_loopback {
+                let Some(cookie) = session_cookie_header(&gateway_key) else {
+                    let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                    return;
+                };
+                resp.add_header(cookie);
             }
-        };
-        let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap();
-        let mut resp = Response::from_data(bytes);
-        resp.add_header(ct);
-        if peer_loopback {
-            let Some(cookie) = session_cookie_header(&gateway_key) else {
-                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
-                return;
-            };
-            resp.add_header(cookie);
+            add_cors_for(&mut resp, origin_ref);
+            let _ = req.respond(resp);
+            return;
         }
-        add_cors_for(&mut resp, origin_ref);
-        let _ = req.respond(resp);
-        return;
     }
     // Clave local (D-7): `/v1/*` y `/api/*` exigen Bearer, x-api-key o cookie.
     if !is_public_path(&method, &url) && !crate::auth::is_authorized(req.headers(), &gateway_key) {
@@ -2627,6 +2624,25 @@ mod proxy {
             // Y un archivo real sí carga (el propio server.rs como testigo).
             let here = std::path::PathBuf::from("src");
             assert!(super::super::load_asset(&here, "server.rs").is_some());
+        }
+        #[test]
+        fn iconos_omni_publicos_con_tipo_correcto() {
+            // Fase C: las cuatro rutas son publicas y cada una mapea a su
+            // fichero y MIME (con y sin query); cualquier otra cosa no es icono.
+            assert!(super::super::is_public_path("GET", "/omni.ico"));
+            assert!(super::super::is_public_path("GET", "/omni.png"));
+            assert!(super::super::is_public_path("GET", "/localmind.ico"));
+            assert!(super::super::is_public_path("GET", "/omni.ico?x=1"));
+            assert!(!super::super::is_public_path("POST", "/omni.ico"));
+            assert_eq!(
+                super::super::icon_asset_for("/omni.ico"),
+                Some(("omni.ico", b"image/x-icon".as_slice()))
+            );
+            assert_eq!(
+                super::super::icon_asset_for("/omni.png"),
+                Some(("omni.png", b"image/png".as_slice()))
+            );
+            assert!(super::super::icon_asset_for("/otro.png").is_none());
         }
         #[test]
         fn reasoning_effort_max_a_xhigh_y_desconocido_se_elimina() {

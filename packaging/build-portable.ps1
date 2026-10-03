@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build the LocalMind portable ZIP (no models inside).
+  Build the OMNI portable ZIP (no models inside).
 
 .DESCRIPTION
   Runs `cargo build --release`, then assembles
-  dist/LocalMind-portable-<version>-<YYYYMMDD>.zip with the runtime files the
+  dist/OMNI-portable-<version>-<YYYYMMDD>.zip with the runtime files the
   app needs next to the exe (see packaging/README.md for the layout and the
   base_dir rules in src-rust/src/main.rs). NEVER includes models/**,
   tests/**, .git/**, target/** or *.bak* files.
@@ -61,9 +61,9 @@ if (-not (Test-Path $BuiltExe)) { throw "Release binary not found: $BuiltExe" }
 $Stage = Join-Path ([System.IO.Path]::GetTempPath()) ("lm-portable-stage-" + [System.Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $Stage -Force
 try {
-  # Renamed release binary: cargo emits localmind.exe, the product is LocalMind.exe.
-  Copy-Item $BuiltExe (Join-Path $Stage 'LocalMind.exe')
-  foreach ($f in @('ui.html', 'localmind.ico', 'localmind.png')) {
+  # Renamed release binary: cargo emits localmind.exe, the product is OMNI.exe.
+  Copy-Item $BuiltExe (Join-Path $Stage 'OMNI.exe')
+  foreach ($f in @('ui.html', 'omni.ico', 'omni.png')) {
     $src = Join-Path $RepoRoot $f
     if (-not (Test-Path $src)) { throw "Missing runtime file: $src" }
     Copy-Item $src $Stage
@@ -79,26 +79,26 @@ try {
   # where weights go.
   $ModelsDir = New-Item -ItemType Directory -Path (Join-Path $Stage 'models') -Force
   Set-Content -Path (Join-Path $ModelsDir 'PON_TUS_MODELOS_AQUI.txt') -Encoding UTF8 -Value @(
-    'Copia tus archivos .gguf en esta carpeta (models/ junto a LocalMind.exe).',
+    'Copia tus archivos .gguf en esta carpeta (models/ junto a OMNI.exe).',
     'Esta carpeta NUNCA viaja dentro del ZIP (los pesos pesan ~14 GB).'
   )
 
   Set-Content -Path (Join-Path $Stage 'version.txt') -Encoding UTF8 -Value @(
-    "LocalMind $Version"
+    "OMNI $Version"
     "llama.cpp: $EngineVersion"
     "Built: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
   )
 
   $Leeme = @(
-    'LocalMind portable — inicio rápido',
+    'OMNI portable — inicio rápido',
     '===================================',
     '',
     '1. Extrae este ZIP donde quieras (p. ej. C:\LocalMind).',
-    '2. Ejecuta LocalMind.exe (se abre la ventana; sin terminal).',
+    '2. Ejecuta OMNI.exe (se abre la ventana; sin terminal).',
     '3. En la primera ejecución NO se descarga nada.',
     '',
     'Modelos (.gguf):',
-    '- Van en la carpeta models/ junto a LocalMind.exe.',
+    '- Van en la carpeta models/ junto a OMNI.exe.',
     '- Si ya tienes pesos, cópialos ahí antes de iniciar el motor.',
     '- La carpeta models/ NUNCA se incluye en este ZIP (pesa ~14 GB).',
     '',
@@ -118,7 +118,7 @@ try {
 
   $Dist = Join-Path $RepoRoot 'dist'
   $null = New-Item -ItemType Directory -Path $Dist -Force
-  $ZipName = "LocalMind-portable-$Version-$DateStamp.zip"
+  $ZipName = "OMNI-portable-$Version-$DateStamp.zip"
   $ZipPath = Join-Path $Dist $ZipName
   if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
   Compress-Archive -Path (Join-Path $Stage '*') -DestinationPath $ZipPath -CompressionLevel Optimal

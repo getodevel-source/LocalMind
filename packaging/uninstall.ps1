@@ -1,24 +1,24 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Uninstall LocalMind (keeps models/ unless -RemoveModels).
+  Uninstall OMNI (keeps models/ unless -RemoveModels).
 
 .DESCRIPTION
   Removes the installed runtime files and Start Menu shortcuts. A running
-  LocalMind.exe from the target dir blocks the uninstall unless -Force is
+  OMNI.exe from the target dir blocks the uninstall unless -Force is
   passed (which stops it via Stop-Process). models/ is PRESERVED unless
-  -RemoveModels is passed. Other LocalMind processes (e.g. the owner's live
+  -RemoveModels is passed. Other OMNI processes (e.g. the owner's live
   app elsewhere) are never touched.
 
 .PARAMETER TargetDir
-  Install dir (default: %LOCALAPPDATA%\Programs\LocalMind).
+  Install dir (default: %LOCALAPPDATA%\Programs\OMNI).
 
 .PARAMETER ShortcutDir
   Start Menu folder created by install.ps1 (default:
-  StartMenu\Programs\LocalMind). Exposed for testability.
+  StartMenu\Programs\OMNI). Exposed for testability.
 
 .PARAMETER Force
-  Stop a running LocalMind.exe from the target dir instead of refusing.
+  Stop a running OMNI.exe from the target dir instead of refusing.
 
 .PARAMETER RemoveModels
   Also delete models/ (weights, ~14 GB). Off by default.
@@ -28,24 +28,24 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$TargetDir = (Join-Path $env:LOCALAPPDATA 'Programs\LocalMind'),
-  [string]$ShortcutDir = (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\LocalMind'),
+  [string]$TargetDir = (Join-Path $env:LOCALAPPDATA 'Programs\OMNI'),
+  [string]$ShortcutDir = (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\OMNI'),
   [switch]$Force,
   [switch]$RemoveModels
 )
 
 $ErrorActionPreference = 'Stop'
 
-$TargetExe = Join-Path $TargetDir 'LocalMind.exe'
-$runningHere = Get-Process -Name 'LocalMind' -ErrorAction SilentlyContinue | Where-Object {
+$TargetExe = Join-Path $TargetDir 'OMNI.exe'
+$runningHere = Get-Process -Name 'OMNI' -ErrorAction SilentlyContinue | Where-Object {
   try { $_.Path -and ($_.Path -eq $TargetExe) } catch { $false }
 }
 if ($runningHere -and -not $Force) {
-  throw 'LocalMind.exe is running from the install dir. Close it first, or re-run with -Force to stop it.'
+  throw 'OMNI.exe is running from the install dir. Close it first, or re-run with -Force to stop it.'
 }
 if ($runningHere -and $Force) {
   $runningHere | Stop-Process -Force
-  Write-Host 'Stopped running LocalMind.exe.'
+  Write-Host 'Stopped running OMNI.exe.'
 }
 
 if (Test-Path $ShortcutDir) {

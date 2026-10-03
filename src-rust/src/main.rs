@@ -48,11 +48,19 @@ fn get_base_dir() -> PathBuf {
 }
 
 fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
-    let ico_path = base_dir.join("localmind.ico");
-    let bytes = std::fs::read(ico_path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    Icon::from_rgba(img.into_raw(), width, height).ok()
+    // Fase C (OMNI): icono nuevo con fallback al histórico durante la transición.
+    for name in ["omni.ico", "localmind.ico"] {
+        if let Ok(bytes) = std::fs::read(base_dir.join(name)) {
+            if let Ok(img) = image::load_from_memory(&bytes) {
+                let img = img.to_rgba8();
+                let (width, height) = img.dimensions();
+                if let Ok(icon) = Icon::from_rgba(img.into_raw(), width, height) {
+                    return Some(icon);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Formatear la línea que el hook de pánico escribe en el log (D-46).
@@ -129,11 +137,13 @@ fn acquire_single_instance() -> Option<std::fs::File> {
         Ok(f) => Some(f),
         Err(_) => {
             // Ya vive otra instancia: enfocar ventana existente y salir.
+            // Fase C (OMNI): el exe instalado se llama OMNI.exe; se acepta el
+            // nombre histórico para no romper el foco durante la transición.
             let _ = std::process::Command::new("powershell")
                 .args([
                     "-NoProfile",
                     "-Command",
-                    "$h = Get-Process LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
+                    "$h = Get-Process OMNI,LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
                      Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);' -Name U32 -Namespace W; \
                      [W.U32]::SetForegroundWindow($h.MainWindowHandle)",
                 ])
@@ -188,7 +198,7 @@ fn main() {
     let event_loop = EventLoop::new();
 
     let mut window_builder = WindowBuilder::new()
-        .with_title("LocalMind Studio")
+        .with_title("OMNI")
         .with_inner_size(LogicalSize::new(1180.0, 820.0))
         .with_min_inner_size(LogicalSize::new(960.0, 680.0));
 
