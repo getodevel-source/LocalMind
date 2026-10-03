@@ -882,6 +882,169 @@ pub fn resolve_profile(profiles: &[HardwareProfile], id: &str) -> HardwareProfil
         .unwrap_or_else(|| profiles.first().cloned().unwrap_or_default())
 }
 
+// ---------------------------------------------------------------------------
+// Parche de configuración (Fase A4, vuelta a raíces): la validación del
+// `POST /api/config` vivía inline en el handler de `server.rs` (~190 líneas).
+// Ahora es pura y testeable sin socket: aplica un parche parcial sobre una
+// foto de `AppConfig` y devuelve la config resultante o el mensaje de error
+// con el mismo texto que el gateway expone en `{"error": ...}`.
+// Solo las tres secciones editables; `ubatch`/`device`/`llama_port`/
+// `http_port` son de solo lectura y se rechazan.
+// ---------------------------------------------------------------------------
+
+/// Aplica un cuerpo de `POST /api/config` sobre `current`.
+///
+/// `patch` debe ser un objeto con un subconjunto de las claves `engine`,
+/// `generation`, `notifications`. Todo lo demás es `Err` con el mensaje que
+/// el gateway expone en `{"error": ...}` (mismo texto que servía el handler).
+pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Result<AppConfig, String> {
+    if !patch.is_object() {
+        return Err("cuerpo inválido: se esperaba un objeto".to_string());
+    }
+    let obj = patch.as_object().cloned().unwrap_or_default();
+    for k in obj.keys() {
+        if k != "engine" && k != "generation" && k != "notifications" {
+            return Err(format!("clave desconocida: {}", k));
+        }
+    }
+    let bad = |campo: &str| format!("campo inválido: {}", campo);
+    let mut next = current.clone();
+    // --- engine (parcial; el resto es de solo lectura) ---
+    if let Some(eng) = obj.get("engine") {
+        let em = match eng.as_object() {
+            Some(m) => m,
+            None => return Err(bad("engine")),
+        };
+        for k in em.keys() {
+            if k != "idle_timeout_secs" && k != "threads" && k != "priority" && k != "speculation" {
+                return Err(format!("campo inválido: engine.{} (solo lectura o desconocido)", k));
+            }
+        }
+        if let Some(j) = em.get("idle_timeout_secs") {
+            match j.as_u64() {
+                Some(n) if engine_idle_timeout_ok(n) => next.engine.idle_timeout_secs = n,
+                _ => return Err(bad("engine.idle_timeout_secs")),
+            }
+        }
+        if let Some(j) = em.get("threads") {
+            if j.is_null() {
+                next.engine.threads = None;
+            } else if let Some(n) = j.as_u64().and_then(|n| usize::try_from(n).ok()) {
+                if !engine_threads_ok(n) {
+                    return Err(bad("engine.threads"));
+                }
+                next.engine.threads = Some(n);
+            } else {
+                return Err(bad("engine.threads"));
+            }
+        }
+        if let Some(j) = em.get("priority") {
+            match j.as_str() {
+                Some(s) if engine_priority_ok(s) => next.engine.priority = s.to_string(),
+                _ => return Err(bad("engine.priority")),
+            }
+        }
+        if let Some(j) = em.get("speculation") {
+            match j.as_object() {
+                Some(sm) => {
+                    for k in sm.keys() {
+                        if k != "enabled" {
+                            return Err(format!(
+                                "campo inválido: engine.speculation.{} (solo se acepta enabled)",
+                                k
+                            ));
+                        }
+                    }
+                    match sm.get("enabled") {
+                        Some(b) if b.is_boolean() => {
+                            let en = b.as_bool().unwrap_or(true);
+                            if next.engine.speculation.is_none() {
+                                next.engine.speculation = Some(SpeculationConfig::default());
+                            }
+                            if let Some(s) = next.engine.speculation.as_mut() {
+                                s.enabled = en;
+                            }
+                        }
+                        _ => return Err(bad("engine.speculation.enabled")),
+                    }
+                }
+                _ => return Err(bad("engine.speculation")),
+            }
+        }
+    }
+    // --- generation (parcial; rangos de este módulo) ---
+    if let Some(gen) = obj.get("generation") {
+        let gm = match gen.as_object() {
+            Some(m) => m,
+            None => return Err(bad("generation")),
+        };
+        for k in gm.keys() {
+            if k != "temperature" && k != "top_p" && k != "max_tokens" && k != "seed" {
+                return Err(format!("clave desconocida: generation.{}", k));
+            }
+        }
+        if let Some(j) = gm.get("temperature") {
+            match j.as_f64() {
+                Some(t) if gen_temperature_ok(t) => next.generation.temperature = t,
+                _ => return Err(bad("generation.temperature")),
+            }
+        }
+        if let Some(j) = gm.get("top_p") {
+            match j.as_f64() {
+                Some(p) if gen_top_p_ok(p) => next.generation.top_p = p,
+                _ => return Err(bad("generation.top_p")),
+            }
+        }
+        if let Some(j) = gm.get("max_tokens") {
+            match j.as_u64().and_then(|n| usize::try_from(n).ok()) {
+                Some(m) if gen_max_tokens_ok(m) => next.generation.max_tokens = m,
+                _ => return Err(bad("generation.max_tokens")),
+            }
+        }
+        if let Some(j) = gm.get("seed") {
+            match j.as_i64() {
+                Some(s) if gen_seed_ok(s) => next.generation.seed = s,
+                _ => return Err(bad("generation.seed")),
+            }
+        }
+    }
+    // --- notifications (parcial; todo booleanos) ---
+    if let Some(not) = obj.get("notifications") {
+        let nm = match not.as_object() {
+            Some(m) => m,
+            None => return Err(bad("notifications")),
+        };
+        for k in nm.keys() {
+            if k != "enabled" && k != "on_ready" && k != "on_failure" && k != "on_autostop" {
+                return Err(format!("clave desconocida: notifications.{}", k));
+            }
+        }
+        let flag = |key: &str, slot: &mut bool| -> bool {
+            match nm.get(key) {
+                None => true,
+                Some(j) if j.is_boolean() => {
+                    *slot = j.as_bool().unwrap_or(*slot);
+                    true
+                }
+                _ => false,
+            }
+        };
+        if !flag("enabled", &mut next.notifications.enabled) {
+            return Err(bad("notifications.enabled"));
+        }
+        if !flag("on_ready", &mut next.notifications.on_ready) {
+            return Err(bad("notifications.on_ready"));
+        }
+        if !flag("on_failure", &mut next.notifications.on_failure) {
+            return Err(bad("notifications.on_failure"));
+        }
+        if !flag("on_autostop", &mut next.notifications.on_autostop) {
+            return Err(bad("notifications.on_autostop"));
+        }
+    }
+    Ok(next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -997,6 +1160,70 @@ mod tests {
         assert!(psu_unsafe_flag(&f(&["--load-mode", "none"])).is_none());
         assert!(psu_unsafe_flag(&f(&["-kvu"])).is_none());
         assert!(psu_unsafe_flag(&[]).is_none());
+    }
+
+    // ---- Fase A4: `apply_config_patch` (misma forma que el handler servía) ----
+
+    fn cfg_base() -> AppConfig {
+        AppConfig::default()
+    }
+
+    fn patch(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn config_patch_rechaza_cuerpo_y_claves_desconocidas() {
+        let base = cfg_base();
+        // No-objeto.
+        let err = apply_config_patch(&base, &patch(r#"[1,2]"#)).unwrap_err();
+        assert!(err.contains("cuerpo inválido"), "{}", err);
+        // Clave superior desconocida.
+        let err = apply_config_patch(&base, &patch(r#"{"motor":{}}"#)).unwrap_err();
+        assert!(err.contains("clave desconocida: motor"), "{}", err);
+        // Campo de solo lectura en engine.
+        let err = apply_config_patch(&base, &patch(r#"{"engine":{"device":"x"}}"#)).unwrap_err();
+        assert!(err.contains("engine.device") && err.contains("solo lectura"), "{}", err);
+        // Clave desconocida en generation y notifications.
+        let err = apply_config_patch(&base, &patch(r#"{"generation":{"top_k":5}}"#)).unwrap_err();
+        assert!(err.contains("generation.top_k"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"notifications":{"sms":true}}"#)).unwrap_err();
+        assert!(err.contains("notifications.sms"), "{}", err);
+    }
+
+    #[test]
+    fn config_patch_aplica_parcial_y_respeta_rangos() {
+        let base = cfg_base();
+        // Parche parcial válido: toca lo pedido, deja el resto.
+        let next = apply_config_patch(
+            &base,
+            &patch(r#"{"engine":{"threads":4},"generation":{"temperature":0.5}}"#),
+        )
+        .unwrap();
+        assert_eq!(next.engine.threads, Some(4));
+        assert_eq!(next.generation.temperature, 0.5);
+        assert_eq!(next.generation.top_p, base.generation.top_p);
+        // Fuera de rango se rechaza con el campo culpable.
+        let err = apply_config_patch(&base, &patch(r#"{"engine":{"threads":0}}"#)).unwrap_err();
+        assert!(err.contains("engine.threads"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"generation":{"temperature":9.0}}"#)).unwrap_err();
+        assert!(err.contains("generation.temperature"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"notifications":{"enabled":"si"}}"#)).unwrap_err();
+        assert!(err.contains("notifications.enabled"), "{}", err);
+        // `threads: null` limpia el override (igual que el handler).
+        let next = apply_config_patch(&base, &patch(r#"{"engine":{"threads":null}}"#)).unwrap();
+        assert_eq!(next.engine.threads, None);
+    }
+
+    #[test]
+    fn config_patch_speculation_solo_enabled_booleano() {
+        let base = cfg_base();
+        let next = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":false}}}"#)).unwrap();
+        assert_eq!(next.engine.speculation.as_ref().map(|s| s.enabled), Some(false));
+        let err = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#)).unwrap_err();
+        assert!(err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":"si"}}}"#)).unwrap_err();
+        assert!(err.contains("engine.speculation.enabled"), "{}", err);
     }
 
     fn mig_profile(id: &str, ctx: usize, ram: usize, flags: &[&str]) -> HardwareProfile {

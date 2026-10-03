@@ -863,197 +863,15 @@ fn handle_request(
                 return;
             }
         };
-        if !v.is_object() {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"cuerpo inválido: se esperaba un objeto"}"#.into(), origin.as_deref()));
-            return;
-        }
-        let obj = v.as_object().map(|o| o.clone()).unwrap_or_default();
-        // Claves de primer nivel: solo las tres secciones editables.
-        for k in obj.keys() {
-            if k != "engine" && k != "generation" && k != "notifications" {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("clave desconocida: {}", k) }).to_string(), origin.as_deref()));
+        // Validación semántica en `config::apply_config_patch` (Fase A4): el
+        // handler solo traduce `Err` a 400 con forma `{"error": ...}`.
+        let next = match crate::config::apply_config_patch(&cfg.get(), &v) {
+            Ok(n) => n,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
                 return;
             }
-        }
-        let bad = |campo: &str| {
-            serde_json::json!({ "error": format!("campo inválido: {}", campo) }).to_string()
         };
-        let mut next = cfg.get();
-        // --- engine (parcial; `ubatch`/`device`/`llama_port`/`http_port` son
-        // --- de solo lectura y se rechazan si vienen en el cuerpo).
-        if let Some(eng) = obj.get("engine") {
-            let em = match eng.as_object() {
-                Some(m) => m,
-                None => {
-                    let _ = req.respond(json_response_for_origin(400, bad("engine"), origin.as_deref()));
-                    return;
-                }
-            };
-            for k in em.keys() {
-                if k != "idle_timeout_secs" && k != "threads" && k != "priority" && k != "speculation" {
-                    let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("campo inválido: engine.{} (solo lectura o desconocido)", k) }).to_string(), origin.as_deref()));
-                    return;
-                }
-            }
-            if let Some(j) = em.get("idle_timeout_secs") {
-                let n = j.as_u64();
-                match n {
-                    Some(n) if crate::config::engine_idle_timeout_ok(n) => next.engine.idle_timeout_secs = n,
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("engine.idle_timeout_secs"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-            if let Some(j) = em.get("threads") {
-                if j.is_null() {
-                    next.engine.threads = None;
-                } else if let Some(n) = j.as_u64().and_then(|n| usize::try_from(n).ok()) {
-                    if !crate::config::engine_threads_ok(n) {
-                        let _ = req.respond(json_response_for_origin(400, bad("engine.threads"), origin.as_deref()));
-                        return;
-                    }
-                    next.engine.threads = Some(n);
-                } else {
-                    let _ = req.respond(json_response_for_origin(400, bad("engine.threads"), origin.as_deref()));
-                    return;
-                }
-            }
-            if let Some(j) = em.get("priority") {
-                match j.as_str() {
-                    Some(s) if crate::config::engine_priority_ok(s) => next.engine.priority = s.to_string(),
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("engine.priority"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-            if let Some(j) = em.get("speculation") {
-                match j.as_object() {
-                    Some(sm) => {
-                        for k in sm.keys() {
-                            if k != "enabled" {
-                                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("campo inválido: engine.speculation.{} (solo se acepta enabled)", k) }).to_string(), origin.as_deref()));
-                                return;
-                            }
-                        }
-                        match sm.get("enabled") {
-                            Some(b) if b.is_boolean() => {
-                                let en = b.as_bool().unwrap_or(true);
-                                if next.engine.speculation.is_none() {
-                                    next.engine.speculation = Some(crate::config::SpeculationConfig::default());
-                                }
-                                if let Some(s) = next.engine.speculation.as_mut() {
-                                    s.enabled = en;
-                                }
-                            }
-                            _ => {
-                                let _ = req.respond(json_response_for_origin(400, bad("engine.speculation.enabled"), origin.as_deref()));
-                                return;
-                            }
-                        }
-                    }
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("engine.speculation"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-        }
-        // --- generation (parcial; rangos de `config.rs`).
-        if let Some(gen) = obj.get("generation") {
-            let gm = match gen.as_object() {
-                Some(m) => m,
-                None => {
-                    let _ = req.respond(json_response_for_origin(400, bad("generation"), origin.as_deref()));
-                    return;
-                }
-            };
-            for k in gm.keys() {
-                if k != "temperature" && k != "top_p" && k != "max_tokens" && k != "seed" {
-                    let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("clave desconocida: generation.{}", k) }).to_string(), origin.as_deref()));
-                    return;
-                }
-            }
-            if let Some(j) = gm.get("temperature") {
-                match j.as_f64() {
-                    Some(t) if crate::config::gen_temperature_ok(t) => next.generation.temperature = t,
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("generation.temperature"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-            if let Some(j) = gm.get("top_p") {
-                match j.as_f64() {
-                    Some(p) if crate::config::gen_top_p_ok(p) => next.generation.top_p = p,
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("generation.top_p"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-            if let Some(j) = gm.get("max_tokens") {
-                match j.as_u64().and_then(|n| usize::try_from(n).ok()) {
-                    Some(m) if crate::config::gen_max_tokens_ok(m) => next.generation.max_tokens = m,
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("generation.max_tokens"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-            if let Some(j) = gm.get("seed") {
-                match j.as_i64() {
-                    Some(s) if crate::config::gen_seed_ok(s) => next.generation.seed = s,
-                    _ => {
-                        let _ = req.respond(json_response_for_origin(400, bad("generation.seed"), origin.as_deref()));
-                        return;
-                    }
-                }
-            }
-        }
-        // --- notifications (parcial; todo booleanos).
-        if let Some(not) = obj.get("notifications") {
-            let nm = match not.as_object() {
-                Some(m) => m,
-                None => {
-                    let _ = req.respond(json_response_for_origin(400, bad("notifications"), origin.as_deref()));
-                    return;
-                }
-            };
-            for k in nm.keys() {
-                if k != "enabled" && k != "on_ready" && k != "on_failure" && k != "on_autostop" {
-                    let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("clave desconocida: notifications.{}", k) }).to_string(), origin.as_deref()));
-                    return;
-                }
-            }
-            let flag = |key: &str, slot: &mut bool| -> bool {
-                match nm.get(key) {
-                    None => true,
-                    Some(j) if j.is_boolean() => {
-                        *slot = j.as_bool().unwrap_or(*slot);
-                        true
-                    }
-                    _ => false,
-                }
-            };
-            if !flag("enabled", &mut next.notifications.enabled) {
-                let _ = req.respond(json_response_for_origin(400, bad("notifications.enabled"), origin.as_deref()));
-                return;
-            }
-            if !flag("on_ready", &mut next.notifications.on_ready) {
-                let _ = req.respond(json_response_for_origin(400, bad("notifications.on_ready"), origin.as_deref()));
-                return;
-            }
-            if !flag("on_failure", &mut next.notifications.on_failure) {
-                let _ = req.respond(json_response_for_origin(400, bad("notifications.on_failure"), origin.as_deref()));
-                return;
-            }
-            if !flag("on_autostop", &mut next.notifications.on_autostop) {
-                let _ = req.respond(json_response_for_origin(400, bad("notifications.on_autostop"), origin.as_deref()));
-                return;
-            }
-        }
         // Todo válido: persistencia atómica (memoria + TOML). Si el disco
         // falla, se revierte la memoria para no mentir a la UI.
         let prev = cfg.get();
@@ -2544,32 +2362,16 @@ mod proxy {
             // Estado inicial: `speculation` ausente => GET expone `false`.
             let v0: serde_json::Value = serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
             assert_eq!(v0["engine"]["speculation_enabled"], serde_json::json!(false));
-            // Aplicar `{"enabled":false}` con la misma regla del handler:
-            // solo se acepta la sub-clave `enabled` y debe ser booleano.
+            // Aplicar `{"enabled":false}` con la regla real del gateway
+            // (`config::apply_config_patch`, Fase A4): solo se acepta la
+            // sub-clave `enabled` y debe ser booleano.
             let apply = |store: &crate::config::ConfigStore, body: &str| -> Result<bool, String> {
                 let val: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
-                let sm = val.get("engine").and_then(|e| e.get("speculation")).and_then(|s| s.as_object()).ok_or("engine.speculation")?;
-                for k in sm.keys() {
-                    if k != "enabled" {
-                        return Err(format!("campo inválido: engine.speculation.{} (solo se acepta enabled)", k));
-                    }
-                }
-                match sm.get("enabled") {
-                    Some(b) if b.is_boolean() => {
-                        let en = b.as_bool().unwrap_or(true);
-                        store.update(|c| {
-                            if c.engine.speculation.is_none() {
-                                c.engine.speculation = Some(crate::config::SpeculationConfig::default());
-                            }
-                            if let Some(s) = c.engine.speculation.as_mut() {
-                                s.enabled = en;
-                            }
-                        });
-                        store.save()?;
-                        Ok(en)
-                    }
-                    _ => Err("campo inválido: engine.speculation.enabled".to_string()),
-                }
+                let next = crate::config::apply_config_patch(&store.get(), &val)?;
+                let en = next.engine.speculation.as_ref().is_some_and(|s| s.enabled);
+                store.update(|c| *c = next);
+                store.save()?;
+                Ok(en)
             };
             assert_eq!(apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap(), false);
             assert_eq!(store.get().engine.speculation.as_ref().map(|s| s.enabled), Some(false));
