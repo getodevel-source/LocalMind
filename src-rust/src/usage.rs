@@ -37,28 +37,6 @@ pub fn now_ts() -> i64 {
 const ROTATE_BYTES: u64 = 1024 * 1024;
 const KEEP_LINES: usize = 5000;
 
-/// Inyectar `stream_options: {"include_usage": true}` en un payload
-/// chat/completions si el cliente no lo fijó (llama.cpp devuelve un chunk
-/// final con usage). Devuelve los bytes a enviar al motor.
-pub fn ensure_stream_usage(body_bytes: &[u8]) -> Vec<u8> {
-    let mut v: serde_json::Value = match serde_json::from_slice(body_bytes) {
-        Ok(v) => v,
-        Err(_) => return body_bytes.to_vec(),
-    };
-    let stream = v.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
-    if stream {
-        if v.get("stream_options").is_none() {
-            if let Some(obj) = v.as_object_mut() {
-                obj.insert(
-                    "stream_options".to_string(),
-                    serde_json::json!({"include_usage": true}),
-                );
-            }
-            return serde_json::to_vec(&v).unwrap_or_else(|_| body_bytes.to_vec());
-        }
-    }
-    body_bytes.to_vec()
-}
 
 /// Cola acotada (máx 64 KiB) para extraer usage al final sin guardar el body entero.
 pub const TAIL_MAX_BYTES: usize = 64 * 1024;
@@ -324,20 +302,6 @@ pub fn usage_raw_at(log: &std::path::Path, limit: usize) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn stream_options_se_inyecta_solo_si_falta() {
-        let with = ensure_stream_usage(br#"{"model":"m","stream":true}"#);
-        let v: serde_json::Value = serde_json::from_slice(&with).unwrap();
-        assert_eq!(v["stream_options"]["include_usage"], serde_json::json!(true));
-
-        let kept = ensure_stream_usage(br#"{"model":"m","stream":true,"stream_options":{}}"#);
-        let v2: serde_json::Value = serde_json::from_slice(&kept).unwrap();
-        assert!(v2["stream_options"].is_object());
-
-        let plain = ensure_stream_usage(br#"{"model":"m"}"#);
-        let v3: serde_json::Value = serde_json::from_slice(&plain).unwrap();
-        assert!(v3.get("stream_options").is_none());
-    }
 
     #[test]
     fn usage_del_chunk_final_y_nada_si_no_hay() {

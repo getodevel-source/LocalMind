@@ -42,12 +42,12 @@ Verificado contra `llama-server --help` (build 10743) + docs master:
 - `--jinja` presente (requisito para tool-calling y Responses nativo). ✓
 - `--cache-ram`, `--spec-*`, `-ctk/-ctv` disponibles; KV en `q4_0`.
 
-## Hallazgo grande (propuesta, NO ejecutado)
+## Hallazgo grande: translate.rs BORRADO (ejecutado y verificado en vivo)
 
 El motor 10743 es un fork (`PrismML-Eng/llama.cpp`, rama `prism`,
 commit `adfffbe41` del 2026-09-25: kernels x86 SIMD para pesos ternarios
 PTQ1_0/PQ2_0 — coincide con nuestras evals de Ternary Bonsai) y trae
-**nativos** `/v1/messages` y `/v1/responses`
+**nativos** `/v1/messages` y `/v1/responses`.
 (verificado por strings en `llama-server-impl.dll` Y en vivo contra motor
 real con Qwen3.8). Nuestro `translate.rs`
 (932 líneas) emula esos dos dialectos por encima de chat/completions.
@@ -71,6 +71,16 @@ Un cliente real (Claude Code / Codex) recibe RESPUESTAS VACÍAS cuando el
 modelo aún está pensando. La traducción pierde los bloques de thinking en
 ambos dialectos: bug de fidelidad, no solo deuda. La contabilidad no se
 pierde con el reenvío (el nativo trae `usage` completo).
+
+Ejecutado: `/v1/messages` y `/v1/responses` reenvían bytes al motor nativo
+(con contabilidad propia `NativeUsageTee` + `extract_native_usage`);
+borrados `translate.rs` (932 líneas), `TranslateLogReader`/`TranslateState`,
+`sanitize_payload`, `rewrite_model_to_served`, `ensure_stream_usage` (reglas
+migradas a `prepare_chat_payload` + tests) y ~10 tests del traductor.
+Verificado en vivo contra motor real: thinking/reasoning intactos en sync y
+streaming, usage real en `usage.jsonl`, formas 502 intactas, harnesses
+locales intactos (usan `openai-completions`, nunca tocaron el traductor).
+Clippy bin: 36 → 28 warnings.
 
 ## Costos conocidos, sin tocar (con motivo)
 

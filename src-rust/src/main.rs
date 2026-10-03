@@ -10,7 +10,6 @@ mod models;
 mod notify;
 mod process;
 mod server;
-mod translate;
 mod usage;
 use std::env;
 use std::path::PathBuf;

@@ -9,7 +9,8 @@
 //!   jamás tocan `%USERPROFILE%\.pi` ni `%USERPROFILE%\.omp`.
 //! - D-2: alias `localmind`/`qwen3.8-27b` + `GET /v1/models`; cualquier `model`
 //!   pedido se reescribe al id servido.
-//! - Claude Code: `POST /v1/messages` (Anthropic). Codex: `POST /v1/responses`.
+//! - Claude Code / Codex: `POST /v1/messages` y `/v1/responses` se reenvían
+//!   al motor nativo (auditoría: la traducción perdía thinking).
 //! - Telemetría base: `usage.jsonl` por request proxyeado completado.
 
 use std::io::{Cursor, Read};
@@ -271,42 +272,6 @@ fn load_asset(base_dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
     std::fs::read(base_dir.join(name)).ok()
 }
 
-/// Normaliza `reasoning_effort` antes de reenviar al motor (última línea de
-/// defensa del gateway: los tres proxys pasan por aquí).
-/// La plantilla Qwen solo acepta `low`/`medium`/`xhigh` y responde 500 ante
-/// cualquier otro valor (medido: `"max"` → error de chat-template).
-/// - `minimal` → `low`; `high`/`max` → `xhigh` (insensible a mayúsculas).
-/// - `low`/`medium`/`xhigh` se conservan (en minúsculas).
-/// - Cualquier otro string (incluido `off`: la plantilla también lo rechaza)
-///   o un valor no-string se ELIMINA: el motor usa su default en vez de dar 500.
-/// Los lanzadores aceptan `--thinking off|low|medium|high|max` (omitido =>
-/// `low`, porque el razonamiento domina el primer token) y sus
-/// `thinkingLevelMap` marcan `max` como `null` (nivel no soportado lado
-/// cliente), pero si un `max` crudo llega al gateway, aquí se convierte a
-/// `xhigh` en vez de tumbar el motor.
-fn sanitize_payload(body_bytes: Vec<u8>) -> Vec<u8> {
-    if let Ok(mut json_val) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
-        if let Some(obj) = json_val.as_object_mut() {
-            if obj.contains_key("reasoning_effort") {
-                match obj
-                    .get("reasoning_effort")
-                    .and_then(|v| v.as_str())
-                    .and_then(normalize_reasoning_effort)
-                {
-                    Some(mapped) => {
-                        obj.insert("reasoning_effort".to_string(), serde_json::Value::String(mapped));
-                    }
-                    None => {
-                        obj.remove("reasoning_effort");
-                    }
-                }
-            }
-        }
-        serde_json::to_vec(&json_val).unwrap_or(body_bytes)
-    } else {
-        body_bytes
-    }
-}
 
 /// Mapea un `reasoning_effort` al vocabulario de la plantilla Qwen
 /// (`low`/`medium`/`xhigh`); `None` = desconocido → el llamador elimina el campo.
@@ -325,22 +290,6 @@ fn normalize_reasoning_effort(v: &str) -> Option<String> {
     }
 }
 
-/// Reescribir el `model` pedido al id servido por el motor (LM-PXY-4/5, D-2).
-/// Nunca se rechaza: los agentes pueden pedir cualquier alias.
-fn rewrite_model_to_served(body_bytes: &[u8], served: &str) -> Vec<u8> {
-    if served.is_empty() {
-        return body_bytes.to_vec();
-    }
-    if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(body_bytes) {
-        if let Some(obj) = v.as_object_mut() {
-            if obj.get("model").and_then(|m| m.as_str()).is_some() {
-                obj.insert("model".to_string(), serde_json::Value::String(served.to_string()));
-                return serde_json::to_vec(&v).unwrap_or_else(|_| body_bytes.to_vec());
-            }
-        }
-    }
-    body_bytes.to_vec()
-}
 
 /// Preparar el payload de `POST /v1/chat/completions` en UN solo parseo
 /// (auditoría de rendimiento): equivale byte por byte al chain
@@ -2011,9 +1960,9 @@ fn remote_target(cfg: &crate::config::AppConfig) -> Option<(String, String)> {
 /// (ya vienen con su forma); esto es solo para "no se pudo contactar".
 fn remote_transport_error(path: &str) -> (u16, String) {
     if path == "/v1/messages" {
-        crate::translate::anthropic_error(502, "api_error", "Remoto no alcanzado (remote_unreachable)")
+        anthropic_error(502, "api_error", "Remoto no alcanzado (remote_unreachable)")
     } else if path == "/v1/responses" {
-        crate::translate::responses_error(502, "remoto no alcanzado")
+        responses_error(502, "remoto no alcanzado")
     } else {
         (
             502,
@@ -2194,99 +2143,184 @@ fn handle_chat_completions(
     }
 }
 
-/// `POST /v1/messages` (Anthropic, lo que necesita Claude Code).
+/// Error forma Anthropic (era `translate::anthropic_error`; el traductor murió,
+/// el formato de error se queda: lo exigen los clientes).
+fn anthropic_error(status: u16, err_type: &str, message: &str) -> (u16, String) {
+    (
+        status,
+        serde_json::json!({"type": "error", "error": {"type": err_type, "message": message}}).to_string(),
+    )
+}
+
+/// Error forma Responses/Codex (era `translate::responses_error`).
+fn responses_error(status: u16, message: &str) -> (u16, String) {
+    (
+        status,
+        serde_json::json!({"error": {"message": message, "type": "api_error"}}).to_string(),
+    )
+}
+
+/// Uso nativo (Anthropic y Responses) desde texto SSE o JSON, puro y testeable:
+/// recorre líneas/eventos y toma el ÚLTIMO `usage` con input/output_tokens,
+/// esté en la raíz o en `message.usage` / `response.usage`. Sin red, sin estado.
+fn extract_native_usage(text: &str) -> (Option<u64>, Option<u64>) {
+    fn usage_of(v: &serde_json::Value) -> Option<(Option<u64>, Option<u64>)> {
+        let u = v.get("usage")?;
+        let p = u.get("input_tokens").and_then(|x| x.as_u64());
+        let c = u.get("output_tokens").and_then(|x| x.as_u64());
+        if p.is_none() && c.is_none() {
+            return None;
+        }
+        Some((p, c))
+    }
+    let mut p = None;
+    let mut c = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let payload = trimmed
+            .strip_prefix("data:")
+            .map(|s| s.trim())
+            .unwrap_or(trimmed);
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else {
+            continue;
+        };
+        for cand in [&v, &v["message"], &v["response"]] {
+            if let Some((pp, cc)) = usage_of(cand) {
+                if pp.is_some() {
+                    p = pp;
+                }
+                if cc.is_some() {
+                    c = cc;
+                }
+            }
+        }
+    }
+    (p, c)
+}
+
+/// Lector pasante con contabilidad nativa (auditoría: el motor ya habla los
+/// dialectos, no se traduce nada): reenvía bytes intactos, acumula cola de
+/// 64 KiB y al EOF registra el `usage` nativo. Misma cota que el Tee.
+struct NativeUsageTee<R: Read + Send> {
+    inner: R,
+    buf: [u8; 8192],
+    out: Vec<u8>,
+    tail: Vec<u8>,
+    done: bool,
+    logged: bool,
+    endpoint: String,
+    model: String,
+    t0: Instant,
+}
+
+impl<R: Read + Send> NativeUsageTee<R> {
+    fn new(inner: R, endpoint: String, model: String, t0: Instant) -> Self {
+        Self {
+            inner,
+            buf: [0u8; 8192],
+            out: Vec::new(),
+            tail: Vec::new(),
+            done: false,
+            logged: false,
+            endpoint,
+            model,
+            t0,
+        }
+    }
+
+    fn log_once(&mut self) {
+        if self.logged {
+            return;
+        }
+        self.logged = true;
+        let text = String::from_utf8_lossy(&self.tail).to_string();
+        let (p, c) = extract_native_usage(&text);
+        crate::usage::log_usage(
+            &self.endpoint,
+            &self.model,
+            p,
+            c,
+            self.t0.elapsed().as_millis() as u64,
+            true,
+        );
+    }
+}
+
+impl<R: Read + Send> Read for NativeUsageTee<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if !self.out.is_empty() {
+                let n = self.out.len().min(buf.len());
+                buf[..n].copy_from_slice(&self.out[..n]);
+                self.out.drain(..n);
+                return Ok(n);
+            }
+            if self.done {
+                self.log_once();
+                return Ok(0);
+            }
+            match self.inner.read(&mut self.buf) {
+                Ok(0) => {
+                    self.done = true;
+                }
+                Ok(n) => {
+                    crate::usage::push_tail(&mut self.tail, &self.buf[..n]);
+                    self.out.extend_from_slice(&self.buf[..n]);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
+/// `POST /v1/messages` (Anthropic): reenvío directo al motor nativo
+/// (auditoría: la traducción perdía los bloques de thinking y dejaba
+/// `content` vacío). Auth/clave ya validadas arriba.
 fn handle_anthropic_messages(
     mut req: tiny_http::Request,
     mgr: &Arc<ProcessManager>,
     cfg: &Arc<ConfigStore>,
     origin: Option<String>,
 ) {
-    // La clave local ya se validó arriba (Bearer, x-api-key o cookie); la
-    // versión Anthropic (`anthropic-version`) se acepta en cualquier valor.
-
     let mut body_bytes = Vec::new();
     let _ = req.as_reader().read_to_end(&mut body_bytes);
     mgr.touch_activity();
-    let body: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            let (code, text) = crate::translate::anthropic_error(
-                400,
-                "invalid_request_error",
-                &format!("JSON inválido: {}", e),
-            );
-            let _ = req.respond(json_response_for_origin(code, text, origin.as_deref()));
-            return;
-        }
-    };
-    let req_model = body.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
-    let stream = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let st = mgr.get_status();
     // Fase A6: ver chat (el 8080 placeholder no es motor).
     if !crate::agents::engine_reachable(&st) {
-        let (code, text) = crate::translate::anthropic_error(
-            502,
-            "api_error",
-            "Motor apagado (engine_down)",
-        );
+        let (code, text) = anthropic_error(502, "api_error", "Motor apagado (engine_down)");
         let _ = req.respond(json_response_for_origin(code, text, origin.as_deref()));
         return;
     }
-    let served = served_model_id(&st, cfg);
-    let open = match crate::translate::anthropic_to_openai(&body, &served) {
-        Ok(o) => o,
-        Err(e) => {
-            let (code, text) =
-                crate::translate::anthropic_error(400, "invalid_request_error", &e);
-            let _ = req.respond(json_response_for_origin(code, text, origin.as_deref()));
-            return;
-        }
-    };
-    let mut payload = sanitize_payload(serde_json::to_vec(&open).unwrap_or_default());
-    payload = crate::usage::ensure_stream_usage(&payload);
-
+    let model_for_log = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+        .ok()
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| served_model_id(&st, cfg));
     let t0 = Instant::now();
-    let model_for_log = if req_model.is_empty() { served.clone() } else { req_model.clone() };
-    match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
+    match ureq::post(&format!("http://127.0.0.1:{}/v1/messages", st.port))
         .set("Content-Type", "application/json")
-        // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
-        // proxy devolvería el error del motor al cliente en vez de traducirlo.
+        // El motor exige `--api-key` (D-45): sin la cabecera responde 401.
         .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
-        .send_bytes(&payload)
+        .send_bytes(&body_bytes)
     {
         Ok(resp) => {
-            if stream {
-                // Traducción incremental evento por evento: el primer delta sale
-                // al cliente sin esperar al `[DONE]`; el cierre con usage sale al EOF.
-                let msg_id = format!("msg_{}", unique_suffix());
-                let mut state = proxy::TranslateState::Anthropic(
-                    crate::translate::AnthropicSse::new(&model_for_log, msg_id),
-                );
-                let preamble = {
-                    match &mut state {
-                        proxy::TranslateState::Anthropic(s) => s.preamble(),
-                        proxy::TranslateState::Responses(_) => String::new(),
-                    }
-                };
-                let reader = proxy::TranslateLogReader::new(
-                    resp.into_reader(),
-                    state,
-                    |st, ev| match st {
-                        proxy::TranslateState::Anthropic(s) => s.feed_event(ev),
-                        proxy::TranslateState::Responses(_) => String::new(),
-                    },
-                    |st| match st {
-                        proxy::TranslateState::Anthropic(s) => s.finish(),
-                        proxy::TranslateState::Responses(_) => String::new(),
-                    },
-                    "messages".to_string(),
-                    model_for_log,
-                    t0,
-                    preamble,
-                );
-                let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
-                let mut hdrs = vec![ct];
+            let status = resp.status();
+            let ct = resp
+                .header("content-type")
+                .unwrap_or("application/json")
+                .to_string();
+            if status == 200 && ct.contains("text/event-stream") {
+                // Streaming directo: cada chunk al cliente en cuanto llega.
+                let reader =
+                    NativeUsageTee::new(resp.into_reader(), "messages".to_string(), model_for_log, t0);
+                let sse_ct =
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
+                let mut hdrs = vec![sse_ct];
                 if let Some(o) = cors_origin_header(origin.as_deref()) {
                     hdrs.push(o);
                 }
@@ -2295,41 +2329,47 @@ fn handle_anthropic_messages(
                 let _ = req.respond(r);
             } else {
                 let mut raw = String::new();
-                let mut reader = resp.into_reader();
-                let _ = reader.read_to_string(&mut raw);
-                let (pt, ct_) = crate::usage::extract_usage_from_sse(&raw);
-                crate::usage::log_usage("messages", &model_for_log, pt, ct_, t0.elapsed().as_millis() as u64, false);
-                // El motor en no-streaming devuelve JSON chat/completions.
-                let chat: serde_json::Value = raw
-                    .lines()
-                    .filter_map(|l| {
-                        let t = l.trim();
-                        let p = t.strip_prefix("data:").map(|s| s.trim()).unwrap_or(t);
-                        if p.is_empty() || p == "[DONE]" || !p.starts_with('{') {
-                            return None;
-                        }
-                        serde_json::from_str(p).ok()
-                    })
-                    .last()
-                    .or_else(|| serde_json::from_str(&raw).ok())
-                    .unwrap_or(serde_json::Value::Null);
-                let env = crate::translate::openai_to_anthropic(&chat, &model_for_log);
-                let _ = req.respond(json_response_for_origin(200, env.to_string(), origin.as_deref()));
+                let _ = resp.into_reader().read_to_string(&mut raw);
+                let (p, c) = extract_native_usage(&raw);
+                crate::usage::log_usage(
+                    "messages",
+                    &model_for_log,
+                    p,
+                    c,
+                    t0.elapsed().as_millis() as u64,
+                    false,
+                );
+                let body_out = if raw.is_empty() {
+                    serde_json::json!({ "error": format!("el motor respondió {}", status) }).to_string()
+                } else {
+                    raw
+                };
+                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
             }
         }
         Err(ureq::Error::Status(code, resp)) => {
+            // El motor ya habla Anthropic: el error viene con forma, tal cual.
             let mut body = String::new();
             let _ = resp.into_reader().read_to_string(&mut body);
-            let (c, text) = crate::translate::responses_error(code, &snippet(&body));
-            let _ = req.respond(json_response_for_origin(c, text, origin.as_deref()));
+            let body_out = if body.is_empty() {
+                serde_json::json!({ "error": format!("el motor respondió {}", code) }).to_string()
+            } else {
+                body
+            };
+            let _ = req.respond(json_response_for_origin(code, body_out, origin.as_deref()));
         }
         Err(_) => {
-            let _ = req.respond(json_response_for_origin(502, r#"{"error":"Error al contactar motor"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                502,
+                r#"{"error":"Error al contactar motor"}"#.into(),
+                origin.as_deref(),
+            ));
         }
     }
 }
 
-/// `POST /v1/responses` (Responses, lo que necesita Codex).
+/// `POST /v1/responses` (Responses/Codex): reenvío directo al motor nativo
+/// (auditoría: la traducción dejaba `output` vacío cuando el modelo pensaba).
 fn handle_responses(
     mut req: tiny_http::Request,
     mgr: &Arc<ProcessManager>,
@@ -2339,69 +2379,42 @@ fn handle_responses(
     let mut body_bytes = Vec::new();
     let _ = req.as_reader().read_to_end(&mut body_bytes);
     mgr.touch_activity();
-    let body: serde_json::Value = match serde_json::from_slice(&body_bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
-            return;
-        }
-    };
-    let req_model = body.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
 
     let st = mgr.get_status();
     // Fase A6: ver chat (el 8080 placeholder no es motor).
     if !crate::agents::engine_reachable(&st) {
-        let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            502,
+            r#"{"error":"engine_down"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
-    let served = served_model_id(&st, cfg);
-    let (open, stream) = match crate::translate::responses_to_openai(&body, &served) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
-            return;
-        }
-    };
-    let mut payload = sanitize_payload(serde_json::to_vec(&open).unwrap_or_default());
-    payload = crate::usage::ensure_stream_usage(&payload);
-
+    let model_for_log = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+        .ok()
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| served_model_id(&st, cfg));
     let t0 = Instant::now();
-    let model_for_log = if req_model.is_empty() { served.clone() } else { req_model.clone() };
-    match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
+    match ureq::post(&format!("http://127.0.0.1:{}/v1/responses", st.port))
         .set("Content-Type", "application/json")
-        // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
-        // proxy devolvería el error del motor al cliente en vez de traducirlo.
+        // El motor exige `--api-key` (D-45): sin la cabecera responde 401.
         .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
-        .send_bytes(&payload)
+        .send_bytes(&body_bytes)
     {
         Ok(resp) => {
-            if stream {
-                let resp_id = format!("resp_{}", unique_suffix());
-                let mut state = proxy::TranslateState::Responses(
-                    crate::translate::ResponsesSse::new(&model_for_log, resp_id),
-                );
-                let preamble = match &mut state {
-                    proxy::TranslateState::Responses(s) => s.preamble(),
-                    proxy::TranslateState::Anthropic(_) => String::new(),
-                };
-                let reader = proxy::TranslateLogReader::new(
-                    resp.into_reader(),
-                    state,
-                    |st, ev| match st {
-                        proxy::TranslateState::Responses(s) => s.feed_event(ev),
-                        proxy::TranslateState::Anthropic(_) => String::new(),
-                    },
-                    |st| match st {
-                        proxy::TranslateState::Responses(s) => s.finish(),
-                        proxy::TranslateState::Anthropic(_) => String::new(),
-                    },
-                    "responses".to_string(),
-                    model_for_log,
-                    t0,
-                    preamble,
-                );
-                let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
-                let mut hdrs = vec![ct];
+            let status = resp.status();
+            let ct = resp
+                .header("content-type")
+                .unwrap_or("application/json")
+                .to_string();
+            if status == 200 && ct.contains("text/event-stream") {
+                // Streaming directo: cada chunk al cliente en cuanto llega.
+                let reader =
+                    NativeUsageTee::new(resp.into_reader(), "responses".to_string(), model_for_log, t0);
+                let sse_ct =
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
+                let mut hdrs = vec![sse_ct];
                 if let Some(o) = cors_origin_header(origin.as_deref()) {
                     hdrs.push(o);
                 }
@@ -2410,60 +2423,44 @@ fn handle_responses(
                 let _ = req.respond(r);
             } else {
                 let mut raw = String::new();
-                let mut reader = resp.into_reader();
-                let _ = reader.read_to_string(&mut raw);
-                let (p, c) = crate::usage::extract_usage_from_sse(&raw);
-                crate::usage::log_usage("responses", &model_for_log, p, c, t0.elapsed().as_millis() as u64, false);
-                let chat: serde_json::Value = raw
-                    .lines()
-                    .filter_map(|l| {
-                        let t = l.trim();
-                        let p = t.strip_prefix("data:").map(|s| s.trim()).unwrap_or(t);
-                        if p.is_empty() || p == "[DONE]" || !p.starts_with('{') {
-                            return None;
-                        }
-                        serde_json::from_str(p).ok()
-                    })
-                    .last()
-                    .or_else(|| serde_json::from_str(&raw).ok())
-                    .unwrap_or(serde_json::Value::Null);
-                let env = crate::translate::openai_to_responses(&chat, &model_for_log);
-                let _ = req.respond(json_response_for_origin(200, env.to_string(), origin.as_deref()));
+                let _ = resp.into_reader().read_to_string(&mut raw);
+                let (p, c) = extract_native_usage(&raw);
+                crate::usage::log_usage(
+                    "responses",
+                    &model_for_log,
+                    p,
+                    c,
+                    t0.elapsed().as_millis() as u64,
+                    false,
+                );
+                let body_out = if raw.is_empty() {
+                    serde_json::json!({ "error": format!("el motor respondió {}", status) }).to_string()
+                } else {
+                    raw
+                };
+                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
             }
         }
         Err(ureq::Error::Status(code, resp)) => {
+            // El motor ya habla Responses: el error viene con forma, tal cual.
             let mut body = String::new();
             let _ = resp.into_reader().read_to_string(&mut body);
-            let (c, text) = crate::translate::responses_error(code, &snippet(&body));
-            let _ = req.respond(json_response_for_origin(c, text, origin.as_deref()));
+            let body_out = if body.is_empty() {
+                serde_json::json!({ "error": format!("el motor respondió {}", code) }).to_string()
+            } else {
+                body
+            };
+            let _ = req.respond(json_response_for_origin(code, body_out, origin.as_deref()));
         }
         Err(_) => {
-            let _ = req.respond(json_response_for_origin(502, r#"{"error":"Error al contactar motor"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                502,
+                r#"{"error":"Error al contactar motor"}"#.into(),
+                origin.as_deref(),
+            ));
         }
     }
 }
-
-fn unique_suffix() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    let rs = RandomState::new();
-    let mut h = rs.build_hasher();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    h.write_u64(nanos ^ (std::process::id() as u64));
-    format!("{:016x}", h.finish())
-}
-
-fn snippet(s: &str) -> String {
-    const MAX: usize = 500;
-    if s.len() <= MAX {
-        return s.to_string();
-    }
-    format!("{}…", &s[..MAX])
-}
-
 fn sse_headers() -> Vec<Header> {
     let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
     let cc = Header::from_bytes(&b"Cache-Control"[..], &b"no-cache"[..]).unwrap();
@@ -2546,136 +2543,6 @@ mod proxy {
                     Ok(n) => {
                         crate::usage::push_tail(&mut self.tail, &self.buf[..n]);
                         self.out.extend_from_slice(&self.buf[..n]);
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-    }
-
-    /// Traductor incremental SSE: parte el upstream por eventos (`\n\n`),
-    /// traduce cada evento a cero o más eventos de salida y los cede ya;
-    /// al EOF emite el cierre con el usage de la cola y registra el uso.
-    /// `translate`: evento upstream → eventos listos. `finish`: cierre final.
-    pub struct TranslateLogReader<R: Read + Send, F: Fn(&mut TranslateState, &str) -> String + Send, G: Fn(&mut TranslateState) -> String + Send> {
-        inner: R,
-        buf: [u8; 8192],
-        pending: String,
-        out: Vec<u8>,
-        tail: Vec<u8>,
-        done: bool,
-        finished: bool,
-        logged: bool,
-        state: TranslateState,
-        translate: F,
-        finish: G,
-        endpoint: String,
-        model: String,
-        t0: Instant,
-    }
-
-    /// Estado compartido del traductor: variante Anthropic o Responses.
-    pub enum TranslateState {
-        Anthropic(crate::translate::AnthropicSse),
-        Responses(crate::translate::ResponsesSse),
-    }
-
-    impl<R: Read + Send, F: Fn(&mut TranslateState, &str) -> String + Send, G: Fn(&mut TranslateState) -> String + Send>
-        TranslateLogReader<R, F, G>
-    {
-        pub fn new(
-            inner: R,
-            state: TranslateState,
-            translate: F,
-            finish: G,
-            endpoint: String,
-            model: String,
-            t0: Instant,
-            preamble: String,
-        ) -> Self {
-            Self {
-                inner,
-                buf: [0u8; 8192],
-                pending: String::new(),
-                out: preamble.into_bytes(),
-                tail: Vec::new(),
-                done: false,
-                finished: false,
-                logged: false,
-                state,
-                translate,
-                finish,
-                endpoint,
-                model,
-                t0,
-            }
-        }
-
-        fn log_once(&mut self) {
-            if self.logged {
-                return;
-            }
-            self.logged = true;
-            let text = String::from_utf8_lossy(&self.tail).to_string();
-            let (p, c) = crate::usage::extract_usage_from_sse(&text);
-            crate::usage::log_usage(
-                &self.endpoint,
-                &self.model,
-                p,
-                c,
-                self.t0.elapsed().as_millis() as u64,
-                true,
-            );
-        }
-
-        /// Extraer eventos completos (`\n\n`) del pendiente y traducirlos ya.
-        fn pump_events(&mut self) {
-            while let Some(pos) = self.pending.find("\n\n") {
-                let ev: String = self.pending[..pos].to_string();
-                self.pending = self.pending[pos + 2..].to_string();
-                let translated = (self.translate)(&mut self.state, &ev);
-                self.out.extend_from_slice(translated.as_bytes());
-            }
-        }
-    }
-
-    impl<R: Read + Send, F: Fn(&mut TranslateState, &str) -> String + Send, G: Fn(&mut TranslateState) -> String + Send> Read
-        for TranslateLogReader<R, F, G>
-    {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            loop {
-                if !self.out.is_empty() {
-                    let n = self.out.len().min(buf.len());
-                    buf[..n].copy_from_slice(&self.out[..n]);
-                    self.out.drain(..n);
-                    return Ok(n);
-                }
-                if self.done {
-                    if !self.finished {
-                        self.finished = true;
-                        // Traducir el resto parcial (si trae un evento sin `\n\n`
-                        // final) antes del cierre.
-                        let rest = std::mem::take(&mut self.pending);
-                        if !rest.trim().is_empty() {
-                            let translated = (self.translate)(&mut self.state, &rest);
-                            self.out.extend_from_slice(translated.as_bytes());
-                        }
-                        let closing = (self.finish)(&mut self.state);
-                        self.out.extend_from_slice(closing.as_bytes());
-                        continue;
-                    }
-                    self.log_once();
-                    return Ok(0);
-                }
-                match self.inner.read(&mut self.buf) {
-                    Ok(0) => {
-                        self.done = true;
-                    }
-                    Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&self.buf[..n]).to_string();
-                        crate::usage::push_tail(&mut self.tail, &self.buf[..n]);
-                        self.pending.push_str(&chunk);
-                        self.pump_events();
                     }
                     Err(e) => return Err(e),
                 }
@@ -2802,62 +2669,74 @@ mod proxy {
             assert!(super::super::icon_asset_for("/otro.png").is_none());
         }
         #[test]
-        fn prepare_chat_payload_igual_al_chain_de_5_pasadas() {
-            // Equivalencia byte por byte contra la cadena anterior
-            // (sanitize → rewrite → ensure + 2 lecturas). Batería de formas.
-            let chain = |body: Vec<u8>| {
-                let b1 = super::super::sanitize_payload(body);
-                let b2 = super::super::rewrite_model_to_served(&b1, "SERVIDO");
-                crate::usage::ensure_stream_usage(&b2)
-            };
-            let bodies: Vec<Vec<u8>> = vec![
-                br#"{"model":"m","messages":[{"role":"user","content":"hola"}],"stream":false}"#.to_vec(),
-                br#"{"model":"m","stream":true,"reasoning_effort":"max","messages":[]}"#.to_vec(),
-                br#"{"stream":true,"reasoning_effort":"off","messages":[]}"#.to_vec(),
-                br#"{"model":42,"stream":"si","messages":[]}"#.to_vec(),
-                br#"{"messages":[]}"#.to_vec(),
-                b"[1,2]".to_vec(),
-                b"no-json".to_vec(),
-                b"".to_vec(),
-            ];
-            for body in &bodies {
-                let (out, model, stream) = super::super::prepare_chat_payload(body, "SERVIDO");
-                assert_eq!(out, chain(body.clone()), "{}", String::from_utf8_lossy(body));
-                // Extracción coherente con el chain (defaults del handler).
-                let v: Option<serde_json::Value> = serde_json::from_slice(body).ok();
-                let want_model = v
-                    .as_ref()
-                    .and_then(|v| v.get("model"))
-                    .and_then(|m| m.as_str())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "SERVIDO".to_string());
-                let want_stream = v
-                    .as_ref()
-                    .and_then(|v| v.get("stream"))
-                    .and_then(|s| s.as_bool())
-                    .unwrap_or(false);
-                assert_eq!((model, stream), (want_model, want_stream));
-            }
-            // Prompt grande con todo: el rewrite y el usage entran juntos.
+        fn native_usage_lee_ambos_dialectos_y_toma_el_ultimo() {
+            // Anthropic no-streaming y message_start/message_delta.
+            let j = r#"{"id":"m","usage":{"input_tokens":13,"output_tokens":30}}"#;
+            assert_eq!(
+                super::super::extract_native_usage(j),
+                (Some(13), Some(30))
+            );
+            let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":14,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":20}}\n\ndata: [DONE]\n";
+            assert_eq!(super::super::extract_native_usage(sse), (Some(14), Some(20)));
+            // Responses con usage anidado en response.*.
+            let r = "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":55,\"output_tokens\":30,\"total_tokens\":85}}}\n";
+            assert_eq!(super::super::extract_native_usage(r), (Some(55), Some(30)));
+            // Basura y vacíos no inventan tokens.
+            assert_eq!(super::super::extract_native_usage("no-json\n[DONE]\n"), (None, None));
+            assert_eq!(super::super::extract_native_usage(""), (None, None));
+        }
+        #[test]
+        fn native_errores_con_forma_de_dialecto() {
+            let (c, t) = super::super::anthropic_error(502, "api_error", "Motor apagado (engine_down)");
+            assert_eq!(c, 502);
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            assert_eq!(v["error"]["type"], serde_json::json!("api_error"));
+            let (c, t) = super::super::responses_error(502, "remoto no alcanzado");
+            assert_eq!(c, 502);
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            assert_eq!(v["error"]["type"], serde_json::json!("api_error"));
+        }
+        #[test]
+        fn prepare_chat_payload_normaliza_modelo_stream_y_effort() {
+            // Único parseo del proxy chat: modelo reescrito, stream_options
+            // inyectado solo si falta, effort mapeado o eliminado.
+            let prep = |body: &[u8], served: &str| super::super::prepare_chat_payload(body, served);
+            // Stream sin options -> se inyecta.
+            let (out, model, stream) = prep(br#"{"model":"m","stream":true,"messages":[]}"#, "S");
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(v["stream_options"], serde_json::json!({"include_usage": true}));
+            assert_eq!((model, stream), ("m".to_string(), true));
+            // Stream con options objeto -> se respeta.
+            let (out, _, _) = prep(br#"{"model":"m","stream":true,"stream_options":{}}"#, "S");
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(v["stream_options"].is_object());
+            // Sin stream -> sin options.
+            let (out, _, _) = prep(br#"{"model":"m"}"#, "S");
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(v.get("stream_options").is_none());
+            // Prompt grande con todo: rewrite + usage + effort juntos.
             let big = format!(
                 r#"{{"model":"viejo","stream":true,"reasoning_effort":"HIGH","messages":[{{"role":"user","content":"{}"}}]}}"#,
                 "x".repeat(200_000)
             );
-            let (out, model, stream) = super::super::prepare_chat_payload(big.as_bytes(), "SERVIDO");
-            assert_eq!(out, chain(big.as_bytes().to_vec()));
+            let (out, model, stream) = prep(big.as_bytes(), "SERVIDO");
             assert_eq!((model.as_str(), stream), ("viejo", true));
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
             assert_eq!(v["model"], serde_json::json!("SERVIDO"));
             assert_eq!(v["reasoning_effort"], serde_json::json!("xhigh"));
             assert_eq!(v["stream_options"], serde_json::json!({"include_usage": true}));
+            // No-objeto y no-JSON pasan intactos.
+            assert_eq!(prep(b"[1,2]", "S").0, b"[1,2]".to_vec());
+            assert_eq!(prep(b"no-json", "S").0, b"no-json".to_vec());
+            assert_eq!(prep(b"", "S").0, b"".to_vec());
         }
         #[test]
         fn reasoning_effort_max_a_xhigh_y_desconocido_se_elimina() {
-            // Misma función que usan los tres proxys: `/v1/chat/completions`,
-            // `/v1/messages` y `/v1/responses` (todos llaman `sanitize_payload`
-            // antes de reenviar al motor).
+            // Misma normalización que aplica el proxy `/v1/chat/completions`
+            // (`prepare_chat_payload`): `/v1/messages` y `/v1/responses` van
+            // nativos al motor sin tocar.
             let get = |body: &str| {
-                let out = super::super::sanitize_payload(body.as_bytes().to_vec());
+                let (out, _, _) = super::super::prepare_chat_payload(body.as_bytes(), "m");
                 let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
                 v.get("reasoning_effort").cloned()
             };
@@ -2875,7 +2754,7 @@ mod proxy {
             // Desconocidos (incluido `off`, que la plantilla también rechaza)
             // y no-strings: campo eliminado, el motor usa su default.
             let dropped = |body: &str| {
-                let out = super::super::sanitize_payload(body.as_bytes().to_vec());
+                let (out, _, _) = super::super::prepare_chat_payload(body.as_bytes(), "m");
                 let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
                 assert!(v.get("reasoning_effort").is_none(), "debió eliminarse: {:?}", String::from_utf8_lossy(&out));
             };
@@ -2885,12 +2764,13 @@ mod proxy {
             dropped(r#"{"model":"m","reasoning_effort":42}"#);
             dropped(r#"{"model":"m","reasoning_effort":null}"#);
             // Sin campo → sin campo; resto del body intacto.
-            let out = super::super::sanitize_payload(br#"{"model":"m","temperature":0.7}"#.to_vec());
+            let (out, _, _) =
+                super::super::prepare_chat_payload(br#"{"model":"m","temperature":0.7}"#, "m");
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
             assert!(v.get("reasoning_effort").is_none());
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             // No-JSON pasa intacto.
-            assert_eq!(super::super::sanitize_payload(b"no-json".to_vec()), b"no-json".to_vec());
+            assert_eq!(super::super::prepare_chat_payload(b"no-json", "m").0, b"no-json".to_vec());
         }
 
         #[test]
@@ -3043,7 +2923,8 @@ mod proxy {
             assert_eq!(served, "Ternary-Bonsai-2-27B-PTQ1_0");
 
             let get = |b: &[u8]| {
-                serde_json::from_slice::<serde_json::Value>(&rewrite_model_to_served(b, &served)).unwrap()
+                let (out, _, _) = super::super::prepare_chat_payload(b, &served);
+                serde_json::from_slice::<serde_json::Value>(&out).unwrap()
             };
             // Alias de compat.
             let v = get(br#"{"model":"localmind","messages":[]}"#);
@@ -3062,7 +2943,7 @@ mod proxy {
             assert_eq!(v["temperature"], serde_json::json!(0));
             assert_eq!(v["stream"], serde_json::json!(true));
             // Un body sin `model` se devuelve intacto (no se inventa un campo).
-            let out = rewrite_model_to_served(br#"{"messages":[]}"#, &served);
+            let (out, _, _) = super::super::prepare_chat_payload(br#"{"messages":[]}"#, &served);
             assert_eq!(out, br#"{"messages":[]}"#.to_vec());
             let _ = std::fs::remove_dir_all(&dir);
         }
