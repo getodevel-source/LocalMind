@@ -15,6 +15,8 @@ Metodología: números medidos, no estimados. Research upstream vía
 | Exe release / debug | 3,68 / 12,3 MB | `lto + strip` ya activos |
 | `ui.html` | 217 KB | parse único al cargar |
 | Carga UI en reposo | ~1,8 req/s | status 800 ms + metrics 2 s + usage 30 s + SSE |
+| Gateway `/api/status` | p50 **0,42 ms** | 500 req keep-alive, loopback (incl. ~0,3 ms cliente) |
+| Gateway `/v1/models` | p50 **0,37 ms** | idem; costo servidor real < 0,2 ms |
 
 Nota honesta: dos intentos de medir "cold start a API 200" dieron 30-60 s,
 pero estaban contaminados por mi propio setup (locks stale + puertos de
@@ -36,7 +38,10 @@ Verificado contra `llama-server --help` (build 10743) + docs master:
 
 ## Hallazgo grande (propuesta, NO ejecutado)
 
-El motor 10743 trae **nativos** `/v1/messages` y `/v1/responses`
+El motor 10743 es un fork (`PrismML-Eng/llama.cpp`, rama `prism`,
+commit `adfffbe41` del 2026-09-25: kernels x86 SIMD para pesos ternarios
+PTQ1_0/PQ2_0 — coincide con nuestras evals de Ternary Bonsai) y trae
+**nativos** `/v1/messages` y `/v1/responses`
 (verificado por strings en `llama-server-impl.dll`). Nuestro `translate.rs`
 (932 líneas) emula esos dos dialectos por encima de chat/completions.
 Oportunidad: reenvío directo al motor y **borrar translate.rs** + la
