@@ -1832,29 +1832,26 @@
         <!-- Mode: role of this PC (Fase C: Servidor / Cliente / Todo aquí) -->
         <div class="card" id="cfg-role-card">
           <div class="card-header">
-            <span class="card-title" data-i18n="settings.roleTitle">Modo: qué es esta PC</span>
+            <span class="card-title" data-i18n="settings.roleTitle">Rol: qué es esta PC</span>
             <span class="card-meta" id="cfg-role-meta">–</span>
           </div>
           <div class="card-body">
-            <div class="fields-row cfg-2col" role="radiogroup" aria-label="Modo">
+            <div class="fields-row cfg-2col" role="radiogroup" aria-label="Rol">
               <div class="field-group">
-                <label class="cfg-check"><input type="radio" name="cfg-role" value="local" id="cfg-role-local" onchange="setRole('local')"> <span data-i18n="settings.roleLocal">Todo aquí</span></label>
-                <div class="profile-hint" data-i18n="settings.roleLocalDesc">Computa y usa en esta PC (como siempre).</div>
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="oraculo" id="cfg-role-oraculo" onchange="setRole('oraculo')"> <span data-i18n="settings.roleOraculo">Oráculo</span></label>
+                <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
               </div>
               <div class="field-group">
-                <label class="cfg-check"><input type="radio" name="cfg-role" value="server" id="cfg-role-server" onchange="setRole('server')"> <span data-i18n="settings.roleServer">Servidor</span></label>
-                <div class="profile-hint" data-i18n="settings.roleServerDesc">Solo computa: otras PCs se conectan por LAN.</div>
-              </div>
-              <div class="field-group">
-                <label class="cfg-check"><input type="radio" name="cfg-role" value="client" id="cfg-role-client" onchange="setRole('client')"> <span data-i18n="settings.roleClient">Cliente</span></label>
-                <div class="profile-hint" data-i18n="settings.roleClientDesc">Sin motor: usa el Servidor remoto.</div>
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="guest" id="cfg-role-guest" onchange="setRole('guest')"> <span data-i18n="settings.roleGuest">Guest</span></label>
+                <div class="profile-hint" data-i18n="settings.roleGuestDesc">Sin modelo: chatea y lanza CLIs contra el Oráculo.</div>
               </div>
             </div>
-            <div class="profile-hint" data-i18n="settings.roleRestart">El modo Servidor rige al reiniciar la app.</div>
+            <div class="profile-hint" data-i18n="settings.roleRestart">Exponer en LAN rige al reiniciar la app.</div>
             <div id="cfg-role-error" class="error-banner" role="alert"></div>
             <div id="cfg-role-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
-            <!-- Server panel -->
+            <!-- Oracle panel = servidor: LAN + pairing -->
             <div id="cfg-server-panel" style="display: none; margin-top: 8px;">
+              <label class="cfg-check"><input type="checkbox" id="cfg-lan-enabled" onchange="setLanExposed(this.checked)"> <span data-i18n="settings.lanExposed">Exponer en la LAN</span></label>
               <div class="field-label"><span data-i18n="settings.serverIps">Esta PC en la LAN</span></div>
               <div class="telemetry-meta" role="status"><span id="cfg-server-ips">–</span></div>
               <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.serverPairing">Emparejar (QR o copiar)</span></div>
@@ -2369,14 +2366,13 @@
         'settings.notifAutostop': 'Avisar antes del auto-stop',
         'settings.save': 'Guardar',
         'settings.saved': 'Guardado',
-        'settings.roleTitle': 'Modo: qué es esta PC',
-        'settings.roleLocal': 'Todo aquí',
-        'settings.roleLocalDesc': 'Computa y usa en esta PC (como siempre).',
-        'settings.roleServer': 'Servidor',
-        'settings.roleServerDesc': 'Solo computa: otras PCs se conectan por LAN.',
-        'settings.roleClient': 'Cliente',
-        'settings.roleClientDesc': 'Sin motor: usa el Servidor remoto.',
-        'settings.roleRestart': 'El modo Servidor rige al reiniciar la app.',
+        'settings.roleTitle': 'Rol: qué es esta PC',
+        'settings.roleOraculo': 'Oráculo',
+        'settings.roleOraculoDesc': 'Tiene el modelo: computa, sirve y usa en esta PC.',
+        'settings.roleGuest': 'Guest',
+        'settings.roleGuestDesc': 'Sin modelo: chatea y lanza CLIs contra el Oráculo.',
+        'settings.roleRestart': 'Exponer en LAN rige al reiniciar la app.',
+        'settings.lanExposed': 'Exponer en la LAN',
         'settings.serverIps': 'Esta PC en la LAN',
         'settings.serverPairing': 'Emparejar (QR o copiar)',
         'settings.serverCopy': 'Copiar',
@@ -2602,14 +2598,13 @@
         'settings.notifAutostop': 'Notify before auto-stop',
         'settings.save': 'Save',
         'settings.saved': 'Saved',
-        'settings.roleTitle': 'Mode: what this PC is',
-        'settings.roleLocal': 'All here',
-        'settings.roleLocalDesc': 'Compute and use on this PC (as always).',
-        'settings.roleServer': 'Server',
-        'settings.roleServerDesc': 'Compute only: other PCs connect over LAN.',
-        'settings.roleClient': 'Client',
-        'settings.roleClientDesc': 'No engine: uses the remote Server.',
-        'settings.roleRestart': 'Server mode applies after restarting the app.',
+        'settings.roleTitle': 'Role: what this PC is',
+        'settings.roleOraculo': 'Oráculo',
+        'settings.roleOraculoDesc': 'Holds the model: computes, serves and uses on this PC.',
+        'settings.roleGuest': 'Guest',
+        'settings.roleGuestDesc': 'No model: chats and launches CLIs against the Oráculo.',
+        'settings.roleRestart': 'LAN exposure applies after restarting the app.',
+        'settings.lanExposed': 'Expose on LAN',
         'settings.serverIps': 'This PC on the LAN',
         'settings.serverPairing': 'Pair (QR or copy)',
         'settings.serverCopy': 'Copy',
@@ -3632,20 +3627,21 @@
       return null;
     }
 
-    /* ---------- Mode (Fase C): role of this PC (Servidor/Cliente/Todo aquí).
-       Defensive like the rest: every new route may 404/501 until Rust lands. */
-    let cfgRoleCache = 'local';
+    /* ---------- Roles (Oráculo/Guest): qué es esta PC.
+       Oráculo = tiene el modelo (computa, sirve, usa en local).
+       Guest = sin modelo (chatea y lanza CLIs contra el Oráculo).
+       Backend intacto: client.enabled manda (guest); si no, oráculo.
+       El switch LAN del Oráculo es `lan.enabled` (resto del PATCH igual). */
+    let cfgRoleCache = 'oraculo';
 
     function roleFromCfg(cfg) {
-      if (cfg && cfg.client && cfg.client.enabled) return 'client';
-      if (cfg && cfg.lan && cfg.lan.enabled) return 'server';
-      return 'local';
+      if (cfg && cfg.client && cfg.client.enabled) return 'guest';
+      return 'oraculo';
     }
 
     function roleLabel(role) {
-      if (role === 'server') return T('settings.roleServer');
-      if (role === 'client') return T('settings.roleClient');
-      return T('settings.roleLocal');
+      if (role === 'guest') return T('settings.roleGuest');
+      return T('settings.roleOraculo');
     }
 
     function refreshRoleCard(cfg) {
@@ -3653,27 +3649,47 @@
       cfgRoleCache = role;
       const meta = document.getElementById('cfg-role-meta');
       if (meta) meta.textContent = roleLabel(role);
-      for (const r of ['local', 'server', 'client']) {
+      for (const r of ['oraculo', 'guest']) {
         const el = document.getElementById('cfg-role-' + r);
         if (el) el.checked = (r === role);
       }
-      cfgShow(document.getElementById('cfg-server-panel'), role === 'server');
-      cfgShow(document.getElementById('cfg-client-panel'), role === 'client');
+      const lanCk = document.getElementById('cfg-lan-enabled');
+      if (lanCk && cfg && cfg.lan) lanCk.checked = !!cfg.lan.enabled;
+      cfgShow(document.getElementById('cfg-server-panel'), role === 'oraculo');
+      cfgShow(document.getElementById('cfg-client-panel'), role === 'guest');
       const url = document.getElementById('cfg-remote-url');
       if (url && cfg && cfg.remote && typeof cfg.remote.url === 'string' && !url.value) url.value = cfg.remote.url;
-      if (role === 'server') refreshLanPanel();
+      if (role === 'oraculo') refreshLanPanel();
     }
 
     async function setRole(role) {
       cfgInlineError('cfg-role-error', null);
-      const body = role === 'server' ? { lan: { enabled: true }, client: { enabled: false } }
-        : role === 'client' ? { lan: { enabled: false }, client: { enabled: true } }
-        : { lan: { enabled: false }, client: { enabled: false } };
+      // Oráculo: sale de cliente y enciende LAN (consentimiento explícito al
+      // elegir el rol; rige al reiniciar). Guest: entra en cliente.
+      const body = role === 'guest' ? { client: { enabled: true } }
+        : { lan: { enabled: true }, client: { enabled: false } };
       try {
         const res = await api.postAppConfig(body);
         if (res && res.ok) {
           cfgFlashOk('cfg-role-ok');
-          if (role === 'server') toast(T('settings.roleRestart'));
+          if (role === 'oraculo') toast(T('settings.roleRestart'));
+          const cfg = (res.data && !res.data.missing) ? res.data : await api.getAppConfig();
+          if (cfg && !cfg.missing) refreshRoleCard(cfg);
+          return;
+        }
+        cfgInlineError('cfg-role-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : T('models.dlError'));
+      }
+    }
+
+    async function setLanExposed(on) {
+      cfgInlineError('cfg-role-error', null);
+      try {
+        const res = await api.postAppConfig({ lan: { enabled: !!on } });
+        if (res && res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          toast(T('settings.roleRestart'));
           const cfg = (res.data && !res.data.missing) ? res.data : await api.getAppConfig();
           if (cfg && !cfg.missing) refreshRoleCard(cfg);
           return;
