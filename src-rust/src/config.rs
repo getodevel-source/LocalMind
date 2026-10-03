@@ -946,7 +946,7 @@ pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Res
     }
     let obj = patch.as_object().cloned().unwrap_or_default();
     for k in obj.keys() {
-        if k != "engine" && k != "generation" && k != "notifications" {
+        if k != "engine" && k != "generation" && k != "notifications" && k != "lan" && k != "client" {
             return Err(format!("clave desconocida: {}", k));
         }
     }
@@ -1083,6 +1083,45 @@ pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Res
         }
         if !flag("on_autostop", &mut next.notifications.on_autostop) {
             return Err(bad("notifications.on_autostop"));
+        }
+    }
+    // --- lan (Fase C): solo `enabled`. Rige el bind del próximo arranque;
+    // el gateway en curso no se re-liga (diseño B11).
+    if let Some(lan) = obj.get("lan") {
+        let lm = match lan.as_object() {
+            Some(m) => m,
+            None => return Err(bad("lan")),
+        };
+        for k in lm.keys() {
+            if k != "enabled" {
+                return Err(format!("clave desconocida: lan.{}", k));
+            }
+        }
+        match lm.get("enabled") {
+            Some(b) if b.is_boolean() => {
+                next.lan.enabled = b.as_bool().unwrap_or(false);
+            }
+            _ => return Err(bad("lan.enabled")),
+        }
+    }
+    // --- client (Fase C): solo `enabled`. Toma efecto al instante: el
+    // dispatch de `/api/start` y `/v1/*` lee la config viva por request.
+    // El `[remote]` NO entra por acá (tiene su ruta con manejo de clave).
+    if let Some(cli) = obj.get("client") {
+        let cm = match cli.as_object() {
+            Some(m) => m,
+            None => return Err(bad("client")),
+        };
+        for k in cm.keys() {
+            if k != "enabled" {
+                return Err(format!("clave desconocida: client.{}", k));
+            }
+        }
+        match cm.get("enabled") {
+            Some(b) if b.is_boolean() => {
+                next.client.enabled = b.as_bool().unwrap_or(false);
+            }
+            _ => return Err(bad("client.enabled")),
         }
     }
     Ok(next)
@@ -1390,6 +1429,28 @@ mod tests {
         ] {
             assert!(!remote_url_ok(u), "{}", u);
         }
+    }
+
+    // ---- Fase C: secciones lan/client del PATCH ----
+
+    #[test]
+    fn config_patch_lan_y_client_solo_enabled() {
+        let base = cfg_base();
+        assert!(!base.lan.enabled);
+        assert!(!base.client.enabled);
+        let next = apply_config_patch(&base, &patch(r#"{"lan":{"enabled":true}}"#)).unwrap();
+        assert!(next.lan.enabled);
+        assert!(!next.client.enabled);
+        let next = apply_config_patch(&base, &patch(r#"{"client":{"enabled":true}}"#)).unwrap();
+        assert!(next.client.enabled);
+        assert!(!next.lan.enabled);
+        // Sub-clave desconocida y tipo erróneo se rechazan con nombre.
+        let err = apply_config_patch(&base, &patch(r#"{"lan":{"enabled":true,"port":1}}"#)).unwrap_err();
+        assert!(err.contains("lan.port"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"client":{"enabled":"si"}}"#)).unwrap_err();
+        assert!(err.contains("client.enabled"), "{}", err);
+        let err = apply_config_patch(&base, &patch(r#"{"remote":{"url":"x"}}"#)).unwrap_err();
+        assert!(err.contains("clave desconocida: remote"), "{}", err);
     }
 
     fn mig_profile(id: &str, ctx: usize, ram: usize, flags: &[&str]) -> HardwareProfile {

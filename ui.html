@@ -1957,6 +1957,62 @@
           <div class="section-sub" data-i18n="settings.sub">Perfiles, generación, motor y avisos. Los cambios que afectan al motor se aplican al próximo arranque.</div>
         </div>
 
+        <!-- Mode: role of this PC (Fase C: Servidor / Cliente / Todo aquí) -->
+        <div class="card" id="cfg-role-card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="settings.roleTitle">Modo: qué es esta PC</span>
+            <span class="card-meta" id="cfg-role-meta">–</span>
+          </div>
+          <div class="card-body">
+            <div class="fields-row cfg-2col" role="radiogroup" aria-label="Modo">
+              <div class="field-group">
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="local" id="cfg-role-local" onchange="setRole('local')"> <span data-i18n="settings.roleLocal">Todo aquí</span></label>
+                <div class="profile-hint" data-i18n="settings.roleLocalDesc">Computa y usa en esta PC (como siempre).</div>
+              </div>
+              <div class="field-group">
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="server" id="cfg-role-server" onchange="setRole('server')"> <span data-i18n="settings.roleServer">Servidor</span></label>
+                <div class="profile-hint" data-i18n="settings.roleServerDesc">Solo computa: otras PCs se conectan por LAN.</div>
+              </div>
+              <div class="field-group">
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="client" id="cfg-role-client" onchange="setRole('client')"> <span data-i18n="settings.roleClient">Cliente</span></label>
+                <div class="profile-hint" data-i18n="settings.roleClientDesc">Sin motor: usa el Servidor remoto.</div>
+              </div>
+            </div>
+            <div class="profile-hint" data-i18n="settings.roleRestart">El modo Servidor rige al reiniciar la app.</div>
+            <div id="cfg-role-error" class="error-banner" role="alert"></div>
+            <div id="cfg-role-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+            <!-- Server panel -->
+            <div id="cfg-server-panel" style="display: none; margin-top: 8px;">
+              <div class="field-label"><span data-i18n="settings.serverIps">Esta PC en la LAN</span></div>
+              <div class="telemetry-meta" role="status"><span id="cfg-server-ips">–</span></div>
+              <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.serverPairing">Emparejar (QR o copiar)</span></div>
+              <div class="fields-row">
+                <div class="field-group" style="flex: 1;">
+                  <input type="text" id="cfg-server-pairing" readonly autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Pairing">
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                <button class="tool-btn" type="button" id="cfg-server-refresh" onclick="refreshLanPanel()"><span data-i18n="settings.serverRefresh">Actualizar</span></button>
+                <button class="tool-btn" type="button" id="cfg-server-copy" onclick="copyPairing()"><span data-i18n="settings.serverCopy">Copiar</span></button>
+                <button class="tool-btn" type="button" id="cfg-server-rotate" onclick="rotateKey()"><span data-i18n="settings.serverRotate">Regenerar clave</span></button>
+              </div>
+            </div>
+            <!-- Client panel -->
+            <div id="cfg-client-panel" style="display: none; margin-top: 8px;">
+              <label class="field-label" for="cfg-remote-url"><span data-i18n="settings.clientUrl">URL del Servidor</span></label>
+              <input type="text" id="cfg-remote-url" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="http://192.168.1.10:17860" aria-label="URL del Servidor">
+              <label class="field-label" for="cfg-remote-key" style="margin-top: 4px;"><span data-i18n="settings.clientKey">Clave</span></label>
+              <input type="password" id="cfg-remote-key" autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Clave">
+              <div id="cfg-client-result" class="telemetry-meta" role="status" style="margin-top: 4px;"></div>
+              <div id="cfg-client-error" class="error-banner" role="alert"></div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                <button class="tool-btn" type="button" id="cfg-client-test" onclick="testRemote()"><span data-i18n="settings.clientTest">Probar</span> <span id="cfg-client-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+                <button class="tool-btn" type="button" id="cfg-client-save" onclick="saveRemote()"><span data-i18n="settings.clientSave">Guardar remoto</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Profiles -->
         <div class="card" id="cfg-profiles-card">
           <div class="card-header">
@@ -2316,6 +2372,25 @@
         'settings.notifAutostop': 'Avisar antes del auto-stop',
         'settings.save': 'Guardar',
         'settings.saved': 'Guardado',
+        'settings.roleTitle': 'Modo: qué es esta PC',
+        'settings.roleLocal': 'Todo aquí',
+        'settings.roleLocalDesc': 'Computa y usa en esta PC (como siempre).',
+        'settings.roleServer': 'Servidor',
+        'settings.roleServerDesc': 'Solo computa: otras PCs se conectan por LAN.',
+        'settings.roleClient': 'Cliente',
+        'settings.roleClientDesc': 'Sin motor: usa el Servidor remoto.',
+        'settings.roleRestart': 'El modo Servidor rige al reiniciar la app.',
+        'settings.serverIps': 'Esta PC en la LAN',
+        'settings.serverPairing': 'Emparejar (QR o copiar)',
+        'settings.serverCopy': 'Copiar',
+        'settings.serverRotate': 'Regenerar clave',
+        'settings.serverRotateWarn': 'Clave rotada: reinicia para que tome efecto.',
+        'settings.serverRefresh': 'Actualizar',
+        'settings.clientUrl': 'URL del Servidor',
+        'settings.clientKey': 'Clave',
+        'settings.clientTest': 'Probar',
+        'settings.clientSave': 'Guardar remoto',
+        'settings.clientOk': 'Remoto OK',
         'settings.saving': 'Guardando…',
       },
       en: {
@@ -2523,6 +2598,25 @@
         'settings.notifAutostop': 'Notify before auto-stop',
         'settings.save': 'Save',
         'settings.saved': 'Saved',
+        'settings.roleTitle': 'Mode: what this PC is',
+        'settings.roleLocal': 'All here',
+        'settings.roleLocalDesc': 'Compute and use on this PC (as always).',
+        'settings.roleServer': 'Server',
+        'settings.roleServerDesc': 'Compute only: other PCs connect over LAN.',
+        'settings.roleClient': 'Client',
+        'settings.roleClientDesc': 'No engine: uses the remote Server.',
+        'settings.roleRestart': 'Server mode applies after restarting the app.',
+        'settings.serverIps': 'This PC on the LAN',
+        'settings.serverPairing': 'Pair (QR or copy)',
+        'settings.serverCopy': 'Copy',
+        'settings.serverRotate': 'Rotate key',
+        'settings.serverRotateWarn': 'Key rotated: restart to take effect.',
+        'settings.serverRefresh': 'Refresh',
+        'settings.clientUrl': 'Server URL',
+        'settings.clientKey': 'Key',
+        'settings.clientTest': 'Test',
+        'settings.clientSave': 'Save remote',
+        'settings.clientOk': 'Remote OK',
         'settings.saving': 'Saving…',
         'settings.current': 'current',
         'common.copied': 'Copied',
@@ -2686,6 +2780,7 @@
       }
     }
 
+    let eventsSource = null;
     function connectEvents() {
       if (eventsSource) {
         try { eventsSource.close(); } catch (e) {}
@@ -3481,8 +3576,10 @@
       if (which === 'config' || which === 'all') {
         const g = document.getElementById('cfg-generation-card');
         const e = document.getElementById('cfg-engine-card');
+        const r = document.getElementById('cfg-role-card');
         if (g) g.style.display = 'none';
         if (e) e.style.display = 'none';
+        if (r) r.style.display = 'none';
       }
       const un = document.getElementById('cfg-unavailable-card');
       if (un) {
@@ -3508,8 +3605,161 @@
       return null;
     }
 
+    /* ---------- Mode (Fase C): role of this PC (Servidor/Cliente/Todo aquí).
+       Defensive like the rest: every new route may 404/501 until Rust lands. */
+    let cfgRoleCache = 'local';
+
+    function roleFromCfg(cfg) {
+      if (cfg && cfg.client && cfg.client.enabled) return 'client';
+      if (cfg && cfg.lan && cfg.lan.enabled) return 'server';
+      return 'local';
+    }
+
+    function roleLabel(role) {
+      if (role === 'server') return T('settings.roleServer');
+      if (role === 'client') return T('settings.roleClient');
+      return T('settings.roleLocal');
+    }
+
+    function refreshRoleCard(cfg) {
+      const role = roleFromCfg(cfg);
+      cfgRoleCache = role;
+      const meta = document.getElementById('cfg-role-meta');
+      if (meta) meta.textContent = roleLabel(role);
+      for (const r of ['local', 'server', 'client']) {
+        const el = document.getElementById('cfg-role-' + r);
+        if (el) el.checked = (r === role);
+      }
+      cfgShow(document.getElementById('cfg-server-panel'), role === 'server');
+      cfgShow(document.getElementById('cfg-client-panel'), role === 'client');
+      const url = document.getElementById('cfg-remote-url');
+      if (url && cfg && cfg.remote && typeof cfg.remote.url === 'string' && !url.value) url.value = cfg.remote.url;
+      if (role === 'server') refreshLanPanel();
+    }
+
+    async function setRole(role) {
+      cfgInlineError('cfg-role-error', null);
+      const body = role === 'server' ? { lan: { enabled: true }, client: { enabled: false } }
+        : role === 'client' ? { lan: { enabled: false }, client: { enabled: true } }
+        : { lan: { enabled: false }, client: { enabled: false } };
+      try {
+        const res = await api.postAppConfig(body);
+        if (res && res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          if (role === 'server') toast(T('settings.roleRestart'));
+          const cfg = (res.data && !res.data.missing) ? res.data : await api.getAppConfig();
+          if (cfg && !cfg.missing) refreshRoleCard(cfg);
+          return;
+        }
+        cfgInlineError('cfg-role-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : T('models.dlError'));
+      }
+    }
+
+    async function refreshLanPanel() {
+      const ips = document.getElementById('cfg-server-ips');
+      const pairing = document.getElementById('cfg-server-pairing');
+      try {
+        const res = await fetch('/api/lan');
+        if (!res.ok) {
+          if (ips) ips.textContent = 'HTTP ' + res.status;
+          if (pairing) pairing.value = '';
+          return;
+        }
+        const data = await res.json();
+        if (ips) ips.textContent = ((data.ips && data.ips.length) ? data.ips.join(', ') : '—') + ' :' + data.port;
+        if (pairing) pairing.value = (data.pairings && data.pairings.length) ? data.pairings[0] : '';
+      } catch (e) {
+        if (ips) ips.textContent = (e && e.message) ? e.message : '?';
+      }
+    }
+
+    function copyPairing() {
+      const pairing = document.getElementById('cfg-server-pairing');
+      const v = pairing ? pairing.value : '';
+      if (!v) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(() => toast(T('common.copied')), () => toast(v));
+        } else {
+          toast(v);
+        }
+      } catch (e) {
+        toast(v);
+      }
+    }
+
+    async function rotateKey() {
+      cfgInlineError('cfg-role-error', null);
+      try {
+        const res = await fetch('/api/key/rotate', { method: 'POST' });
+        if (res.ok) {
+          toast(T('settings.serverRotateWarn'));
+          refreshLanPanel();
+          return;
+        }
+        cfgInlineError('cfg-role-error', 'HTTP ' + res.status);
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    function remoteForm() {
+      const url = document.getElementById('cfg-remote-url');
+      const key = document.getElementById('cfg-remote-key');
+      return { url: url ? url.value : '', key: key ? key.value : '' };
+    }
+
+    async function testRemote() {
+      const out = document.getElementById('cfg-client-result');
+      cfgInlineError('cfg-client-error', null);
+      cfgSetSaving('cfg-client-test', 'cfg-client-spinner', true);
+      try {
+        const f = remoteForm();
+        const res = await fetch('/api/remote/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(f)
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (data && data.ok) {
+          if (out) out.textContent = T('settings.clientOk') + ': ' + (data.models || []).join(', ');
+        } else {
+          cfgInlineError('cfg-client-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+        }
+      } catch (e) {
+        cfgInlineError('cfg-client-error', (e && e.message) ? e.message : '?');
+      } finally {
+        cfgSetSaving('cfg-client-test', 'cfg-client-spinner', false);
+      }
+    }
+
+    async function saveRemote() {
+      const out = document.getElementById('cfg-client-result');
+      cfgInlineError('cfg-client-error', null);
+      try {
+        const res = await fetch('/api/remote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(remoteForm())
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          if (out) out.textContent = T('settings.clientOk');
+        } else {
+          cfgInlineError('cfg-client-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+        }
+      } catch (e) {
+        cfgInlineError('cfg-client-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
     async function refreshSettings() {
-      const cards = ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'];
+      const cards = ['cfg-role-card', 'cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'];
       const anyCard = cards.some(id => document.getElementById(id));
       if (!anyCard) return;
       showSettingsCards();
@@ -3540,6 +3790,7 @@
           hideSettingsMissing('config');
         } else {
           renderAppConfig(cfg);
+          refreshRoleCard(cfg);
         }
       } catch (e) {
         hideSettingsMissing('config');

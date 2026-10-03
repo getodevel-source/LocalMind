@@ -188,6 +188,16 @@ fn app_config_json(c: &crate::config::AppConfig) -> String {
             "on_failure": c.notifications.on_failure,
             "on_autostop": c.notifications.on_autostop,
         },
+        // Fase C: rol de la app. `remote.key` jamás sale por acá (diseño B6).
+        "lan": {
+            "enabled": c.lan.enabled,
+        },
+        "client": {
+            "enabled": c.client.enabled,
+        },
+        "remote": {
+            "url": c.remote.url,
+        },
     })
     .to_string()
 }
