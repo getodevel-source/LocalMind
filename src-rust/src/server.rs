@@ -1322,6 +1322,11 @@ fn handle_request(
 
     // Superficie OpenAI: lista de modelos (id servido + alias estables).
     if method == "GET" && (url == "/v1/models" || url == "/v1/models/") {
+        // Fase B3b: en modo Cliente el catálogo vive en el Servidor.
+        if cfg.get().client.enabled {
+            handle_remote_forward(req, &cfg, "GET", "/v1/models", origin.clone());
+            return;
+        }
         let st = mgr.get_status();
         let json = models_list_json(&st, &cfg);
         let _ = req.respond(json_response_for_origin(200, json, origin.as_deref()));
@@ -1329,19 +1334,32 @@ fn handle_request(
     }
 
     // Proxy SSE LIVE: reader de ureq directo en el body de tiny_http.
+    // Fase B3b: en modo Cliente se reenvía al Servidor remoto.
     if method == "POST" && url == "/v1/chat/completions" {
+        if cfg.get().client.enabled {
+            handle_remote_forward(req, &cfg, "POST", "/v1/chat/completions", origin.clone());
+            return;
+        }
         handle_chat_completions(req, &mgr, &cfg, origin.clone());
         return;
     }
 
-    // Claude Code: Anthropic Messages.
+    // Claude Code: Anthropic Messages (en Cliente, reenvío al remoto).
     if method == "POST" && url == "/v1/messages" {
+        if cfg.get().client.enabled {
+            handle_remote_forward(req, &cfg, "POST", "/v1/messages", origin.clone());
+            return;
+        }
         handle_anthropic_messages(req, &mgr, &cfg, origin.clone());
         return;
     }
 
-    // Codex: OpenAI Responses.
+    // Codex: OpenAI Responses (en Cliente, reenvío al remoto).
     if method == "POST" && url == "/v1/responses" {
+        if cfg.get().client.enabled {
+            handle_remote_forward(req, &cfg, "POST", "/v1/responses", origin.clone());
+            return;
+        }
         handle_responses(req, &mgr, &cfg, origin.clone());
         return;
     }
@@ -1803,6 +1821,127 @@ fn launch_opencode(
         what, full, http_port, st.context
     ));
     let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","agent":"opencode","model":"{}","port":{},"context":{}}}"#, full, http_port, st.context), origin));
+}
+
+/// Raíz + clave del remoto configurado (Fase B3b): la URL guardada puede traer
+/// o no el sufijo `/v1`; se normaliza a raíz para componer rutas. `None` =
+/// sin remoto o con URL inválida (p. ej. TOML editado a mano: el POST la
+/// valida, pero el disco manda).
+fn remote_target(cfg: &crate::config::AppConfig) -> Option<(String, String)> {
+    let url = cfg.remote.url.trim().trim_end_matches('/').to_string();
+    if url.is_empty() || !crate::config::remote_url_ok(&url) {
+        return None;
+    }
+    let root = url.strip_suffix("/v1").unwrap_or(&url).to_string();
+    Some((root, cfg.remote.key.clone()))
+}
+
+/// Error de transporte hacia el remoto con la forma de cada dialecto (Fase
+/// B3b): el chat habla OpenAI, `/v1/messages` Anthropic y `/v1/responses`
+/// Responses. Los errores CON respuesta del remoto se reenvían tal cual
+/// (ya vienen con su forma); esto es solo para "no se pudo contactar".
+fn remote_transport_error(path: &str) -> (u16, String) {
+    if path == "/v1/messages" {
+        crate::translate::anthropic_error(502, "api_error", "Remoto no alcanzado (remote_unreachable)")
+    } else if path == "/v1/responses" {
+        crate::translate::responses_error(502, "remoto no alcanzado")
+    } else {
+        (
+            502,
+            r#"{"error":"Error al contactar remoto"}"#.to_string(),
+        )
+    }
+}
+
+/// Reenvío Cliente→Servidor (Fase B3b, diseño B6): el remoto es OTRO gateway
+/// OMNI con la misma superficie `/v1/*`, así que se reenvían ruta y bytes sin
+/// re-traducir (los lanzadores y sus dialectos siguen funcionando a través).
+/// Streaming directo sin Tee local: la contabilidad vive en el Servidor; acá
+/// solo se registra `*.remoto` sin tokens para no duplicar. La clave remota
+/// solo viaja en el header Bearer; ningún error la incluye.
+fn handle_remote_forward(
+    mut req: tiny_http::Request,
+    cfg: &Arc<ConfigStore>,
+    method: &str,
+    path: &str,
+    origin: Option<String>,
+) {
+    let snapshot = cfg.get();
+    let Some((root, key)) = remote_target(&snapshot) else {
+        let _ = req.respond(json_response_for_origin(409, r#"{"error":"remoto_no_configurado"}"#.into(), origin.as_deref()));
+        return;
+    };
+    let target = format!("{}{}", root, path);
+    let mut body_bytes = Vec::new();
+    let _ = req.as_reader().read_to_end(&mut body_bytes);
+    // Modelo pedido (para el registro local sin tokens); si no hay, "remoto".
+    let req_model = serde_json::from_slice::<serde_json::Value>(&body_bytes)
+        .ok()
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "remoto".to_string());
+    let endpoint_log = format!("{}.remoto", path.trim_start_matches("/v1/").replace('/', "."));
+    let t0 = Instant::now();
+    // El chat puede tardar minutos: sin timeout (igual que el proxy local).
+    // `/v1/models` es control: 15 s para no colgar la UI.
+    let call = if method == "GET" {
+        ureq::get(&target)
+            .set("Authorization", &crate::auth::bearer(&key))
+            .timeout(Duration::from_secs(15))
+            .call()
+    } else {
+        ureq::post(&target)
+            .set("Content-Type", "application/json")
+            .set("Authorization", &crate::auth::bearer(&key))
+            .send_bytes(&body_bytes)
+    };
+    match call {
+        Ok(resp) => {
+            let status = resp.status();
+            let ct = resp
+                .header("content-type")
+                .unwrap_or("application/json")
+                .to_string();
+            if status == 200 && ct.contains("text/event-stream") {
+                // Streaming directo: cada chunk al cliente en cuanto llega.
+                let reader = resp.into_reader();
+                let sse_ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
+                let mut hdrs = vec![sse_ct];
+                if let Some(o) = cors_origin_header(origin.as_deref()) {
+                    hdrs.push(o);
+                }
+                hdrs.extend(cors_fixed_headers());
+                let proxy_resp = Response::new(StatusCode(200), hdrs, reader, None, None);
+                let _ = req.respond(proxy_resp);
+                crate::usage::log_usage(&endpoint_log, &req_model, None, None, t0.elapsed().as_millis() as u64, true);
+            } else {
+                let mut raw = String::new();
+                let _ = resp.into_reader().read_to_string(&mut raw);
+                crate::usage::log_usage(&endpoint_log, &req_model, None, None, t0.elapsed().as_millis() as u64, false);
+                // Cuerpo tal cual (el remoto ya le dio forma); vacío → error
+                // genérico con el código para no responder 200/4xx sin cuerpo.
+                let body_out = if raw.is_empty() {
+                    serde_json::json!({ "error": format!("el remoto respondió {}", status) }).to_string()
+                } else {
+                    raw
+                };
+                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
+            }
+        }
+        Err(ureq::Error::Status(code, resp)) => {
+            let mut body = String::new();
+            let _ = resp.into_reader().read_to_string(&mut body);
+            let body_out = if body.is_empty() {
+                serde_json::json!({ "error": format!("el remoto respondió {}", code) }).to_string()
+            } else {
+                body
+            };
+            let _ = req.respond(json_response_for_origin(code, body_out, origin.as_deref()));
+        }
+        Err(_) => {
+            let (c, text) = remote_transport_error(path);
+            let _ = req.respond(json_response_for_origin(c, text, origin.as_deref()));
+        }
+    }
 }
 
 /// `POST /v1/chat/completions`: alias rewriting + usage + registro.
@@ -2558,6 +2697,47 @@ mod proxy {
             let err2 = apply(&store, r#"{"engine":{"speculation":{"enabled":"si"}}}"#).unwrap_err();
             assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // ---- Fase B3b: target remoto y errores con forma de dialecto ----
+
+        fn cfg_con_remoto(url: &str) -> crate::config::AppConfig {
+            let mut c = crate::config::AppConfig::default();
+            c.remote.url = url.to_string();
+            c.remote.key = "k".to_string();
+            c
+        }
+
+        #[test]
+        fn remoto_target_normaliza_v1_y_rechaza_malo() {
+            // Con y sin `/v1` → misma raíz; vacía o mala → None.
+            assert_eq!(
+                super::super::remote_target(&cfg_con_remoto("http://192.168.1.10:17860/v1")),
+                Some(("http://192.168.1.10:17860".to_string(), "k".to_string()))
+            );
+            assert_eq!(
+                super::super::remote_target(&cfg_con_remoto("http://192.168.1.10:17860/")),
+                Some(("http://192.168.1.10:17860".to_string(), "k".to_string()))
+            );
+            assert!(super::super::remote_target(&cfg_con_remoto("")).is_none());
+            assert!(super::super::remote_target(&cfg_con_remoto("http://8.8.8.8/")).is_none());
+        }
+
+        #[test]
+        fn remoto_error_transporte_con_forma_de_dialecto() {
+            // Chat/models: OpenAI plano; messages: Anthropic; responses: Responses.
+            let (c, t) = super::super::remote_transport_error("/v1/chat/completions");
+            assert_eq!(c, 502);
+            assert!(t.contains("Error al contactar remoto"), "{}", t);
+            let (c, t) = super::super::remote_transport_error("/v1/models");
+            assert_eq!(c, 502);
+            assert!(t.contains("remoto"), "{}", t);
+            let (c, t) = super::super::remote_transport_error("/v1/messages");
+            assert_eq!(c, 502);
+            assert!(t.contains("remote_unreachable"), "{}", t);
+            let (c, t) = super::super::remote_transport_error("/v1/responses");
+            assert_eq!(c, 502);
+            assert!(t.contains("remoto"), "{}", t);
         }
 
         // ---- LM-MOD-3: el id anunciado sigue al motor, D-2 intacto ----
