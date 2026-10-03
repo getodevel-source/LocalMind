@@ -17,6 +17,10 @@ Metodología: números medidos, no estimados. Research upstream vía
 | Carga UI en reposo | ~1,8 req/s | status 800 ms + metrics 2 s + usage 30 s + SSE |
 | Gateway `/api/status` | p50 **0,42 ms** | 500 req keep-alive, loopback (incl. ~0,3 ms cliente) |
 | Gateway `/v1/models` | p50 **0,37 ms** | idem; costo servidor real < 0,2 ms |
+| Markdown 16 KB en Chromium | **0,27 ms** por parse completo | CDP `renderMarkdown`, 30 iter |
+| Paint de streaming | ≤25 Hz → **≤6,7 Hz** | throttle 150 ms + render final (el parse era barato; el layout no) |
+| Log del motor en arranque | O(n²) → **O(1)** por línea | `textContent +=` re-serializaba 200 KB por línea; ahora nodos de texto con poda por conteo |
+| Historial de chat | tope **300 mensajes** | sin tope mataba la cuota localStorage de 5 MB en silencio |
 
 Nota honesta: dos intentos de medir "cold start a API 200" dieron 30-60 s,
 pero estaban contaminados por mi propio setup (locks stale + puertos de
