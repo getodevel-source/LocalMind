@@ -1045,6 +1045,82 @@ pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Res
     Ok(next)
 }
 
+// ---------------------------------------------------------------------------
+// URL remota del modo Cliente (Fase B1, diseño B6): pura y testeable.
+// Sin cablear todavía: ningún handler la llama en esta ronda.
+// ---------------------------------------------------------------------------
+
+/// ¿URL remota aceptable para el modo Cliente?
+///
+/// - Esquema `http`/`https` (insensible a mayúsculas), sin credenciales (`@`).
+/// - Host IP: loopback, RFC1918 o CGNAT (red del dueño, misma regla que el peer).
+/// - `localhost`: ambos esquemas.
+/// - Dominio no-IP: solo `https` con punto (dominio del túnel, cuyo operador
+///   termina TLS). Dominios en `http` plano se rechazan: el DNS puede apuntar
+///   a cualquier lado y el gateway no valida nada más en v1.
+pub fn remote_url_ok(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let (rest, secure) = if let Some(r) = lower.strip_prefix("http://") {
+        (r, false)
+    } else if let Some(r) = lower.strip_prefix("https://") {
+        (r, true)
+    } else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    // Autoridad hasta el primer `/`, `?` o `#`.
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let auth = &rest[..auth_end];
+    if auth.is_empty() || auth.contains('@') {
+        return false;
+    }
+    // Host sin puerto (IPv6 entre corchetes; sin corchetes se rechaza).
+    let host = if let Some(s) = auth.strip_prefix('[') {
+        let end = match s.find(']') {
+            Some(i) => i,
+            None => return false,
+        };
+        let after = &s[end + 1..];
+        if !after.is_empty() {
+            let p = match after.strip_prefix(':') {
+                Some(p) => p,
+                None => return false,
+            };
+            if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
+                return false;
+            }
+        }
+        &s[..end]
+    } else {
+        let mut parts = auth.split(':');
+        let h = parts.next().unwrap_or("");
+        match parts.next() {
+            None => h,
+            Some(p) => {
+                if parts.next().is_some() {
+                    return false;
+                }
+                if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
+                    return false;
+                }
+                h
+            }
+        }
+    };
+    if host.is_empty() {
+        return false;
+    }
+    if host == "localhost" {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback() || crate::meta::ip_red_privada(ip),
+        Err(_) => secure && host.contains('.') && !host.contains([' ', '/', '\\']),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1224,6 +1300,53 @@ mod tests {
         assert!(err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"), "{}", err);
         let err = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":"si"}}}"#)).unwrap_err();
         assert!(err.contains("engine.speculation.enabled"), "{}", err);
+    }
+
+    // ---- Fase B1: URL remota del modo Cliente ----
+
+    #[test]
+    fn remote_url_acepta_red_del_dueno() {
+        // IP privada / loopback / CGNAT, con o sin puerto y path.
+        for u in [
+            "http://192.168.1.10:17860",
+            "http://192.168.1.10:17860/v1",
+            "http://10.0.0.2/v1",
+            "http://172.16.5.4:8080",
+            "http://127.0.0.1:8080",
+            "http://localhost:17860",
+            "https://localhost:17860",
+            "http://100.64.0.5:17860",
+            "http://[::1]:17860",
+        ] {
+            assert!(remote_url_ok(u), "{}", u);
+        }
+        // Dominio del túnel: solo https.
+        assert!(remote_url_ok("https://algo.trycloudflare.com"));
+        assert!(remote_url_ok("https://mi-casa.tailnet.ts.net:8443/v1"));
+    }
+
+    #[test]
+    fn remote_url_rechaza_resto() {
+        for u in [
+            "",
+            "no-url",
+            "ftp://192.168.1.10/",
+            "http://",
+            "http:///v1",
+            "http://8.8.8.8/",
+            "http://1.1.1.1:17860",
+            "http://172.32.0.1/",
+            "http://100.128.0.1/",
+            "http://example.com/",
+            "http://user:clave@192.168.1.10/",
+            "http://user@192.168.1.10/",
+            "http://192.168.1.10:puert/",
+            "http://::1:17860",
+            "http://[::1:17860",
+            "localhost:17860",
+        ] {
+            assert!(!remote_url_ok(u), "{}", u);
+        }
     }
 
     fn mig_profile(id: &str, ctx: usize, ram: usize, flags: &[&str]) -> HardwareProfile {

@@ -11,6 +11,7 @@
 //! - `utc_stamp_now`: `YYYYMMDD-HHMMSS` UTC sin crates de fecha (para el
 //!   nombre del export de logs).
 
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use tiny_http::Header;
@@ -228,6 +229,105 @@ pub fn is_loopback_origin(origin: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Red privada del dueño (Fase B1, diseño B2/B3/B7): puras y testeables.
+// Sin cablear todavía: ningún handler las llama en esta ronda.
+// ---------------------------------------------------------------------------
+
+/// ¿IP de la red privada del dueño? RFC1918 (`10/8`, `172.16/12`, `192.168/16`
+/// vía `is_private`) + CGNAT de Tailscale (`100.64/10`, red privada del dueño
+/// según diseño B7). Loopback NO entra acá: tiene su propia regla que siempre
+/// pasa. IPv6 ULA queda fuera de v1 a propósito.
+pub fn ip_red_privada(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            if v4.is_private() {
+                return true;
+            }
+            // `100.64.0.0/10` = 100.64.0.0–100.127.255.255.
+            let o = v4.octets();
+            o[0] == 100 && (o[1] & 0xC0) == 0x40
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// Regla del peer (diseño B2): loopback siempre permitido (WebView, CLIs,
+/// túnel local que entra por localhost); red privada solo con `lan.enabled`;
+/// internet directa jamás, incluso con el socket en `0.0.0.0`.
+/// El llamador la aplica ANTES de auth, con `remote_addr()` del socket.
+pub fn peer_permitido(ip: IpAddr, lan_enabled: bool) -> bool {
+    ip.is_loopback() || (lan_enabled && ip_red_privada(ip))
+}
+
+/// Host de un `Origin` con la misma gramática estricta que `is_loopback_origin`
+/// (solo `http://`, sin userinfo/path/query/fragmento, puerto numérico).
+/// `None` = malformado o no-http (p. ej. `https:`, `null`, vacío).
+pub fn origin_host(origin: &str) -> Option<String> {
+    let rest = origin.trim().strip_prefix("http://")?;
+    if rest.is_empty() || rest.contains(['@', '/', '?', '#']) {
+        return None;
+    }
+    if let Some(stripped) = rest.strip_prefix('[') {
+        let end = stripped.find(']')?;
+        let host = &stripped[..end];
+        if host.is_empty() {
+            return None;
+        }
+        let after = &stripped[end + 1..];
+        if after.is_empty() {
+            return Some(host.to_string());
+        }
+        let p = after.strip_prefix(':')?;
+        if !p.is_empty() && p.len() <= 5 && p.chars().all(|c| c.is_ascii_digit()) {
+            return Some(host.to_string());
+        }
+        return None;
+    }
+    let mut parts = rest.split(':');
+    let host = parts.next().unwrap_or("");
+    if host.is_empty() {
+        return None;
+    }
+    match parts.next() {
+        None => Some(host.to_string()),
+        Some(p) => {
+            if parts.next().is_some() {
+                return None; // IPv6 sin corchetes.
+            }
+            if !p.is_empty() && p.len() <= 5 && p.chars().all(|c| c.is_ascii_digit()) {
+                Some(host.to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// CORS por allowlist (diseño B3, evolución de P29): loopback como hoy, más
+/// red privada con `lan.enabled`. Dominios no-IP jamás (el túnel se consume
+/// same-origin o vía app/CLI, que no necesitan ACAO). `https` en LAN tampoco:
+/// el gateway no termina TLS en v1.
+pub fn origen_permitido(origin: &str, lan_enabled: bool) -> bool {
+    if is_loopback_origin(origin) {
+        return true;
+    }
+    if !lan_enabled {
+        return false;
+    }
+    let host = match origin_host(origin) {
+        Some(h) => h,
+        None => return false,
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(ip) => ip_red_privada(ip),
+        Err(_) => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Sello UTC `YYYYMMDD-HHMMSS` sin crates de fecha
 // ---------------------------------------------------------------------------
 
@@ -331,5 +431,57 @@ mod tests {
         assert!(!is_loopback_origin("http://[::2]"));
         assert!(!is_loopback_origin("http://user@localhost"));
         assert!(!is_loopback_origin("http://::1"));
+    }
+
+    // ---- Fase B1: regla del peer y allowlist de orígenes ----
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn peer_loopback_siempre_pasa() {
+        assert!(peer_permitido(ip("127.0.0.1"), false));
+        assert!(peer_permitido(ip("127.0.0.1"), true));
+        assert!(peer_permitido(ip("::1"), false));
+        assert!(peer_permitido(ip("::1"), true));
+    }
+
+    #[test]
+    fn peer_privado_solo_con_lan() {
+        for h in ["192.168.1.10", "10.0.0.2", "172.16.0.1", "172.31.255.255"] {
+            assert!(!peer_permitido(ip(h), false), "{}", h);
+            assert!(peer_permitido(ip(h), true), "{}", h);
+        }
+        // Fronteras del /12 y del CGNAT: un bit afuera ya es internet.
+        assert!(!peer_permitido(ip("172.15.255.255"), true));
+        assert!(!peer_permitido(ip("172.32.0.1"), true));
+        assert!(peer_permitido(ip("100.64.0.1"), true));
+        assert!(peer_permitido(ip("100.127.255.255"), true));
+        assert!(!peer_permitido(ip("100.64.0.1"), false));
+        assert!(!peer_permitido(ip("100.63.255.255"), true));
+        assert!(!peer_permitido(ip("100.128.0.0"), true));
+        // Internet directa: jamás, en ningún modo.
+        for h in ["8.8.8.8", "1.1.1.1", "203.0.113.7"] {
+            assert!(!peer_permitido(ip(h), false), "{}", h);
+            assert!(!peer_permitido(ip(h), true), "{}", h);
+        }
+    }
+
+    #[test]
+    fn allowlist_origenes_respeta_modo() {
+        // Loopback: igual que hoy, en ambos modos.
+        assert!(origen_permitido("http://127.0.0.1:17860", false));
+        assert!(origen_permitido("http://localhost:3000", true));
+        // LAN: solo con lan.enabled, solo http, solo IP privada.
+        assert!(!origen_permitido("http://192.168.1.10:17860", false));
+        assert!(origen_permitido("http://192.168.1.10:17860", true));
+        assert!(origen_permitido("http://10.0.0.2:17860", true));
+        assert!(!origen_permitido("https://192.168.1.10:17860", true));
+        assert!(!origen_permitido("http://192.168.1.10:17860", false));
+        assert!(!origen_permitido("http://8.8.8.8:17860", true));
+        assert!(!origen_permitido("http://evil.com", true));
+        assert!(!origen_permitido("null", true));
+        assert!(!origen_permitido("", true));
     }
 }
