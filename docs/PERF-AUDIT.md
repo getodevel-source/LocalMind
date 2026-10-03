@@ -19,6 +19,8 @@ Metodología: números medidos, no estimados. Research upstream vía
 | Gateway `/v1/models` | p50 **0,37 ms** | idem; costo servidor real < 0,2 ms |
 | Markdown 16 KB en Chromium | **0,27 ms** por parse completo | CDP `renderMarkdown`, 30 iter |
 | Paint de streaming | ≤25 Hz → **≤6,7 Hz** | throttle 150 ms + render final (el parse era barato; el layout no) |
+| Carga de página UI | dom ~150 ms, load ~200 ms | CDP navigation timing |
+| Cambio de tab | p50 **33 ms** | click → paint, 10 iter CDP |
 | Log del motor en arranque | O(n²) → **O(1)** por línea | `textContent +=` re-serializaba 200 KB por línea; ahora nodos de texto con poda por conteo |
 | Historial de chat | tope **300 mensajes** | sin tope mataba la cuota localStorage de 5 MB en silencio |
 
@@ -46,13 +48,29 @@ El motor 10743 es un fork (`PrismML-Eng/llama.cpp`, rama `prism`,
 commit `adfffbe41` del 2026-09-25: kernels x86 SIMD para pesos ternarios
 PTQ1_0/PQ2_0 — coincide con nuestras evals de Ternary Bonsai) y trae
 **nativos** `/v1/messages` y `/v1/responses`
-(verificado por strings en `llama-server-impl.dll`). Nuestro `translate.rs`
+(verificado por strings en `llama-server-impl.dll` Y en vivo contra motor
+real con Qwen3.8). Nuestro `translate.rs`
 (932 líneas) emula esos dos dialectos por encima de chat/completions.
 Oportunidad: reenvío directo al motor y **borrar translate.rs** + la
 maquinaria Tee/Translate del proxy. Riesgo: los harnesses (pi/omp/opencode,
 dsh) se verificaron contra NUESTRA traducción; la nativa puede diferir en
 detalles (thinking blocks, tool_use). Requiere: matriz de compat por
 harness antes de borrar. Estimación: −1500 líneas netas.
+
+Evidencia en vivo (`max_tokens`/`max_output_tokens` 30, modelo pensando):
+
+- Nativo `/v1/messages`: content con bloque `thinking` + firma, `usage` con
+  `cache_read_input_tokens`, `model: "localmind"` (alias del motor).
+- Gateway (nuestra traducción): `"content": []` vacío, sin `cache_read`,
+  `model: "q"` sin reescribir.
+- Nativo `/v1/responses`: `output` con item `reasoning` + texto, `usage`
+  completo con `cached_tokens`.
+- Gateway (nuestra traducción): `"output": []` vacío.
+
+Un cliente real (Claude Code / Codex) recibe RESPUESTAS VACÍAS cuando el
+modelo aún está pensando. La traducción pierde los bloques de thinking en
+ambos dialectos: bug de fidelidad, no solo deuda. La contabilidad no se
+pierde con el reenvío (el nativo trae `usage` completo).
 
 ## Costos conocidos, sin tocar (con motivo)
 
