@@ -342,6 +342,61 @@ fn rewrite_model_to_served(body_bytes: &[u8], served: &str) -> Vec<u8> {
     body_bytes.to_vec()
 }
 
+/// Preparar el payload de `POST /v1/chat/completions` en UN solo parseo
+/// (auditoría de rendimiento): equivale byte por byte al chain
+/// `sanitize_payload → rewrite_model_to_served → ensure_stream_usage`, que
+/// parseaba/serializaba el cuerpo 5 veces por request. Devuelve
+/// `(bytes_a_enviar, modelo_pedido, stream_pedido)`.
+fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
+    let mut v: Option<serde_json::Value> = serde_json::from_slice(body).ok();
+    let req_model = v
+        .as_ref()
+        .and_then(|v| v.get("model"))
+        .and_then(|m| m.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| served.to_string());
+    let stream_req = v
+        .as_ref()
+        .and_then(|v| v.get("stream"))
+        .and_then(|s| s.as_bool())
+        .unwrap_or(false);
+    if let Some(obj) = v.as_mut().and_then(|v| v.as_object_mut()) {
+        if obj.contains_key("reasoning_effort") {
+            match obj
+                .get("reasoning_effort")
+                .and_then(|x| x.as_str())
+                .and_then(normalize_reasoning_effort)
+            {
+                Some(mapped) => {
+                    obj.insert("reasoning_effort".to_string(), serde_json::Value::String(mapped));
+                }
+                None => {
+                    obj.remove("reasoning_effort");
+                }
+            }
+        }
+        if !served.is_empty() && obj.get("model").and_then(|m| m.as_str()).is_some() {
+            obj.insert("model".to_string(), serde_json::Value::String(served.to_string()));
+        }
+        if stream_req {
+            if obj.get("stream_options").is_none() {
+                obj.insert(
+                    "stream_options".to_string(),
+                    serde_json::json!({"include_usage": true}),
+                );
+            }
+        }
+    }
+    match v {
+        Some(v) => (
+            serde_json::to_vec(&v).unwrap_or_else(|_| body.to_vec()),
+            req_model,
+            stream_req,
+        ),
+        None => (body.to_vec(), req_model, stream_req),
+    }
+}
+
 /// Id servido por el motor para las superficies HTTP (`/v1/models` y el
 /// rewrite del proxy). Delega en `agents::served_model_id`, la MISMA función
 /// que escriben los lanzadores en la config de cada agente: si divergieran,
@@ -2077,18 +2132,9 @@ fn handle_chat_completions(
         return;
     }
     let served = served_model_id(&st, cfg);
-    let req_model = serde_json::from_slice::<serde_json::Value>(&body_bytes)
-        .ok()
-        .and_then(|v| v.get("model").and_then(|m| m.as_str().map(str::to_string)))
-        .unwrap_or_else(|| served.clone());
-    let stream_req = serde_json::from_slice::<serde_json::Value>(&body_bytes)
-        .ok()
-        .and_then(|v| v.get("stream").and_then(|s| s.as_bool()))
-        .unwrap_or(false);
-
-    let mut payload_bytes = sanitize_payload(body_bytes);
-    payload_bytes = rewrite_model_to_served(&payload_bytes, &served);
-    payload_bytes = crate::usage::ensure_stream_usage(&payload_bytes);
+    // Un solo parseo/serializado (auditoría de rendimiento): equivale al chain
+    // de 5 pasadas que había acá (2× from_slice + sanitize + rewrite + ensure).
+    let (payload_bytes, req_model, stream_req) = prepare_chat_payload(&body_bytes, &served);
 
     let t0 = Instant::now();
     match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
@@ -2754,6 +2800,56 @@ mod proxy {
                 Some(("omni.png", b"image/png".as_slice()))
             );
             assert!(super::super::icon_asset_for("/otro.png").is_none());
+        }
+        #[test]
+        fn prepare_chat_payload_igual_al_chain_de_5_pasadas() {
+            // Equivalencia byte por byte contra la cadena anterior
+            // (sanitize → rewrite → ensure + 2 lecturas). Batería de formas.
+            let chain = |body: Vec<u8>| {
+                let b1 = super::super::sanitize_payload(body);
+                let b2 = super::super::rewrite_model_to_served(&b1, "SERVIDO");
+                crate::usage::ensure_stream_usage(&b2)
+            };
+            let bodies: Vec<Vec<u8>> = vec![
+                br#"{"model":"m","messages":[{"role":"user","content":"hola"}],"stream":false}"#.to_vec(),
+                br#"{"model":"m","stream":true,"reasoning_effort":"max","messages":[]}"#.to_vec(),
+                br#"{"stream":true,"reasoning_effort":"off","messages":[]}"#.to_vec(),
+                br#"{"model":42,"stream":"si","messages":[]}"#.to_vec(),
+                br#"{"messages":[]}"#.to_vec(),
+                b"[1,2]".to_vec(),
+                b"no-json".to_vec(),
+                b"".to_vec(),
+            ];
+            for body in &bodies {
+                let (out, model, stream) = super::super::prepare_chat_payload(body, "SERVIDO");
+                assert_eq!(out, chain(body.clone()), "{}", String::from_utf8_lossy(body));
+                // Extracción coherente con el chain (defaults del handler).
+                let v: Option<serde_json::Value> = serde_json::from_slice(body).ok();
+                let want_model = v
+                    .as_ref()
+                    .and_then(|v| v.get("model"))
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "SERVIDO".to_string());
+                let want_stream = v
+                    .as_ref()
+                    .and_then(|v| v.get("stream"))
+                    .and_then(|s| s.as_bool())
+                    .unwrap_or(false);
+                assert_eq!((model, stream), (want_model, want_stream));
+            }
+            // Prompt grande con todo: el rewrite y el usage entran juntos.
+            let big = format!(
+                r#"{{"model":"viejo","stream":true,"reasoning_effort":"HIGH","messages":[{{"role":"user","content":"{}"}}]}}"#,
+                "x".repeat(200_000)
+            );
+            let (out, model, stream) = super::super::prepare_chat_payload(big.as_bytes(), "SERVIDO");
+            assert_eq!(out, chain(big.as_bytes().to_vec()));
+            assert_eq!((model.as_str(), stream), ("viejo", true));
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(v["model"], serde_json::json!("SERVIDO"));
+            assert_eq!(v["reasoning_effort"], serde_json::json!("xhigh"));
+            assert_eq!(v["stream_options"], serde_json::json!({"include_usage": true}));
         }
         #[test]
         fn reasoning_effort_max_a_xhigh_y_desconocido_se_elimina() {
