@@ -1442,19 +1442,8 @@
       <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" id="nav-chat">
         <span data-i18n="nav.chat">Chat</span>
       </button>
-      <button class="tab-btn" data-tab="models" onclick="switchTab('models')" id="nav-models">
-        <span data-i18n="nav.models">Modelos</span>
-        <span class="tab-count" id="nav-models-count">–</span>
-      </button>
-      <button class="tab-btn" data-tab="usage" onclick="switchTab('usage')" id="nav-usage">
-        <span data-i18n="nav.usage">Uso</span>
-        <span class="tab-count" id="nav-usage-count">–</span>
-      </button>
-      <button class="tab-btn" data-tab="terminal" onclick="switchTab('terminal')" id="nav-terminal">
-        <span data-i18n="nav.logs">Logs</span>
-      </button>
-      <button class="tab-btn" data-tab="info" onclick="switchTab('info')" id="nav-info">
-        <span data-i18n="nav.specs">Specs</span>
+      <button class="tab-btn" data-tab="conexion" onclick="switchTab('conexion')" id="nav-conexion">
+        <span data-i18n="nav.conexion">Conexión</span>
       </button>
       <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" id="nav-settings">
         <span data-i18n="nav.settings">Ajustes</span>
@@ -1703,178 +1692,8 @@
         </div><!-- /.dash-col -->
 
       </div>
-    </div>
 
-    <!-- TAB 2: CHAT -->
-    <div id="tab-chat" class="tab-panel" role="tabpanel" aria-labelledby="nav-chat">
-      <div class="chat-container">
-        <div class="chat-header">
-          <div class="chat-header-title">
-            <span data-i18n="chat.title">LocalMind Chat</span>
-          </div>
-          <button class="tool-btn" onclick="clearChat()" data-i18n-aria="chat.clear" aria-label="Limpiar">
-            <span data-i18n="chat.clear">Limpiar</span>
-          </button>
-        </div>
-
-        <div id="chat-messages" class="chat-scroll-area">
-          <div class="msg-group assistant">
-            <div class="msg-bubble" data-i18n="chat.welcome">
-              Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con LocalMind.
-            </div>
-          </div>
-        </div>
-
-        <div class="chat-dock">
-          <div class="input-row">
-            <textarea id="chat-input" class="chat-textarea" data-i18n-placeholder="chat.placeholder" data-i18n-aria="chat.placeholder" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" aria-label="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
-            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" data-i18n-aria="chat.send" aria-label="Enviar mensaje">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-            </button>
-            <button id="btn-stop-gen" class="chat-stop-btn" onclick="stopGeneration()" style="display: none;" data-i18n-title="chat.stop" data-i18n-aria="chat.stop" title="Detener generación" aria-label="Detener generación">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
-            </button>
-          </div>
-          <div class="chat-dock-hints">
-            <span data-i18n="chat.hint">Presiona Shift + Enter para saltos de línea</span>
-            <span id="chat-status-hint" role="status">Motor en reposo</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 3: MODELS -->
-    <div id="tab-models" class="tab-panel" role="tabpanel" aria-labelledby="nav-models">
-      <div class="section-shell">
-        <div class="section-head">
-          <div class="section-title" data-i18n="models.title">Modelos</div>
-          <div class="section-sub" data-i18n="models.sub">Pesos GGUF locales, importación y descarga verificada.</div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title" data-i18n="models.localTitle">Modelos locales</span>
-            <span class="card-meta" id="models-meta">–</span>
-          </div>
-          <div class="card-body">
-            <div id="models-empty" class="empty-state" style="display: none;" data-i18n="models.empty">Todavía no hay modelos. Importa un .gguf o descarga uno verificado.</div>
-            <table class="models-table" id="models-table">
-              <thead>
-                <tr>
-                  <th data-i18n="models.colModel">Modelo</th>
-                  <th data-i18n="models.colSize">Tamaño</th>
-                  <th data-i18n="models.colState">Estado</th>
-                  <th><span class="sr-only">Acción</span></th>
-                </tr>
-              </thead>
-              <tbody id="models-tbody"></tbody>
-            </table>
-
-            <div class="field-group">
-              <label class="field-label" for="model-select">
-                <span data-i18n="models.active">Modelo activo para arrancar el motor</span>
-              </label>
-              <div class="select-wrapper">
-                <select id="model-select">
-                  <option value="">Cargando modelo...</option>
-                </select>
-              </div>
-              <div id="model-badges" class="model-dl-status" style="display: none;"></div>
-            </div>
-
-            <div class="field-group">
-              <div class="field-label">
-                <span data-i18n="models.importTitle">Importar desde tu disco</span>
-              </div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                <button class="tool-btn" type="button" id="btn-import-gguf" onclick="importGgufPick()" data-i18n-title="models.importBtnTitle" title="Importar archivo .gguf desde tu disco">
-                  <span id="import-gguf-label" data-i18n="models.importBtn">Importar .gguf…</span>
-                </button>
-                <button class="tool-btn" type="button" onclick="openModelsFolder()" data-i18n-title="models.folderTitle" title="Abrir carpeta models en explorador">
-                  <span data-i18n="models.folder">Carpeta</span>
-                </button>
-              </div>
-              <div id="import-pick-status" class="model-dl-status" style="display: none;"></div>
-            </div>
-
-            <div class="field-group">
-              <div class="field-label">
-                <span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span>
-              </div>
-              <div class="model-dl-row">
-                <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
-                <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
-                <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
-              </div>
-              <div id="model-dl-section" style="display: none;">
-                <div id="model-dl-status" class="model-dl-status" role="status"></div>
-                <div class="model-dl-bar"><div id="model-dl-fill" class="model-dl-fill"></div></div>
-                <div style="margin-top: 6px;">
-                  <button class="tool-btn" type="button" id="btn-dl-cancel" onclick="cancelModelDownload()" data-i18n-title="models.cancelTitle" title="Cancelar la descarga en curso"><span data-i18n="models.cancel">Cancelar</span></button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: USAGE -->
-    <div id="tab-usage" class="tab-panel" role="tabpanel" aria-labelledby="nav-usage">
-      <div class="section-shell">
-        <div class="section-head">
-          <div class="section-title" data-i18n="usage.title">Uso</div>
-          <div class="section-sub" data-i18n="usage.sub">Peticiones y tokens servidos por el motor local.</div>
-        </div>
-
-        <div class="card" id="usage-card" style="display: none;">
-          <div class="card-header">
-            <span class="card-title" data-i18n="usage.cardTitle">Uso</span>
-            <span id="usage-meta" class="card-meta"></span>
-          </div>
-          <div class="card-body">
-            <div class="usage-grid">
-              <div class="metric-box">
-                <span class="metric-label" data-i18n="usage.requests">Peticiones</span>
-                <span id="usage-requests" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label" data-i18n="usage.prompt">Tokens de entrada</span>
-                <span id="usage-prompt" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label" data-i18n="usage.completion">Tokens de salida</span>
-                <span id="usage-completion" class="metric-value">—</span>
-              </div>
-            </div>
-            <div class="usage-section-title" data-i18n="usage.last14">Últimos 14 días</div>
-            <div id="usage-chart" class="usage-chart"></div>
-            <div class="usage-section-title" data-i18n="usage.byModel">Por modelo</div>
-            <table class="usage-table">
-              <thead>
-                <tr>
-                  <th data-i18n="usage.colModel">Modelo</th>
-                  <th data-i18n="usage.colRequests">Peticiones</th>
-                  <th data-i18n="usage.colTokens">Tokens</th>
-                </tr>
-              </thead>
-              <tbody id="usage-by-model"></tbody>
-            </table>
-            <div class="usage-section-title" data-i18n="usage.recent">Últimas peticiones</div>
-            <div id="usage-raw-list" class="usage-raw-list"></div>
-          </div>
-        </div>
-
-        <div class="card" id="usage-empty-card" style="display: none;">
-          <div class="card-body">
-            <div class="empty-state" data-i18n="usage.empty">Sin datos de uso todavía. Las peticiones al motor aparecerán aquí.</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 5: LOGS (the only terminal-like surface; never the main surface) -->
-    <div id="tab-terminal" class="tab-panel" role="tabpanel" aria-labelledby="nav-terminal">
+      <!-- Registro del motor + detalles (plegados de Logs/Specs) -->
       <div class="terminal-container">
         <div class="terminal-header">
           <div class="card-title">
@@ -1889,15 +1708,6 @@
         <div id="terminal-stream" tabindex="0" data-i18n="logs.boot" data-i18n-aria="logs.stream" aria-label="Registro del motor">OMNI inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.
 </div>
       </div>
-    </div>
-
-    <!-- TAB 6: SPECS -->
-    <div id="tab-info" class="tab-panel" role="tabpanel" aria-labelledby="nav-info">
-      <div class="section-shell narrow">
-        <div class="section-head">
-          <div class="section-title" data-i18n="specs.title">Especificaciones</div>
-          <div class="section-sub" data-i18n="specs.sub">Hardware detectado y cómo conectarse al motor.</div>
-        </div>
 
         <div class="info-card">
           <h3 data-i18n="specs.hwTitle">Hardware Detectado &amp; Motor de Inferencia</h3>
@@ -1966,17 +1776,57 @@
             <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code id="spec-model-id">localmind</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
           </p>
         </div>
+    </div>
+
+    <!-- TAB 2: CHAT -->
+    <div id="tab-chat" class="tab-panel" role="tabpanel" aria-labelledby="nav-chat">
+      <div class="chat-container">
+        <div class="chat-header">
+          <div class="chat-header-title">
+            <span data-i18n="chat.title">LocalMind Chat</span>
+          </div>
+          <button class="tool-btn" onclick="clearChat()" data-i18n-aria="chat.clear" aria-label="Limpiar">
+            <span data-i18n="chat.clear">Limpiar</span>
+          </button>
+        </div>
+
+        <div id="chat-messages" class="chat-scroll-area">
+          <div class="msg-group assistant">
+            <div class="msg-bubble" data-i18n="chat.welcome">
+              Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con LocalMind.
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-dock">
+          <div class="input-row">
+            <textarea id="chat-input" class="chat-textarea" data-i18n-placeholder="chat.placeholder" data-i18n-aria="chat.placeholder" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" aria-label="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
+            <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" data-i18n-aria="chat.send" aria-label="Enviar mensaje">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+            <button id="btn-stop-gen" class="chat-stop-btn" onclick="stopGeneration()" style="display: none;" data-i18n-title="chat.stop" data-i18n-aria="chat.stop" title="Detener generación" aria-label="Detener generación">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+            </button>
+          </div>
+          <div class="chat-dock-hints">
+            <span data-i18n="chat.hint">Presiona Shift + Enter para saltos de línea</span>
+            <span id="chat-status-hint" role="status">Motor en reposo</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- TAB 7: SETTINGS (Ajustes) — profiles, generation, engine + notices.
-         Blocks hide themselves with the "new engine" note when the
-         matching route answers 404/501 or is unreachable. -->
-    <div id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="nav-settings">
+    <!-- TAB 3: MODELS -->
+
+
+
+
+    <!-- TAB 3: CONEXION (Fase UX: Modo + Uso, plegados de Settings/Usage) -->
+    <div id="tab-conexion" class="tab-panel" role="tabpanel" aria-labelledby="nav-conexion">
       <div class="section-shell narrow">
         <div class="section-head">
-          <div class="section-title" data-i18n="settings.title">Ajustes</div>
-          <div class="section-sub" data-i18n="settings.sub">Perfiles, generación, motor y avisos. Los cambios que afectan al motor se aplican al próximo arranque.</div>
+          <div class="section-title" data-i18n="conexion.title">Conexión</div>
+          <div class="section-sub" data-i18n="conexion.sub">Modo de esta PC, red local y uso del gateway.</div>
         </div>
 
         <!-- Mode: role of this PC (Fase C: Servidor / Cliente / Todo aquí) -->
@@ -2033,6 +1883,62 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="card" id="usage-card" style="display: none;">
+          <div class="card-header">
+            <span class="card-title" data-i18n="usage.cardTitle">Uso</span>
+            <span id="usage-meta" class="card-meta"></span>
+          </div>
+          <div class="card-body">
+            <div class="usage-grid">
+              <div class="metric-box">
+                <span class="metric-label" data-i18n="usage.requests">Peticiones</span>
+                <span id="usage-requests" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label" data-i18n="usage.prompt">Tokens de entrada</span>
+                <span id="usage-prompt" class="metric-value">—</span>
+              </div>
+              <div class="metric-box">
+                <span class="metric-label" data-i18n="usage.completion">Tokens de salida</span>
+                <span id="usage-completion" class="metric-value">—</span>
+              </div>
+            </div>
+            <div class="usage-section-title" data-i18n="usage.last14">Últimos 14 días</div>
+            <div id="usage-chart" class="usage-chart"></div>
+            <div class="usage-section-title" data-i18n="usage.byModel">Por modelo</div>
+            <table class="usage-table">
+              <thead>
+                <tr>
+                  <th data-i18n="usage.colModel">Modelo</th>
+                  <th data-i18n="usage.colRequests">Peticiones</th>
+                  <th data-i18n="usage.colTokens">Tokens</th>
+                </tr>
+              </thead>
+              <tbody id="usage-by-model"></tbody>
+            </table>
+            <div class="usage-section-title" data-i18n="usage.recent">Últimas peticiones</div>
+            <div id="usage-raw-list" class="usage-raw-list"></div>
+          </div>
+        </div>
+
+        <div class="card" id="usage-empty-card" style="display: none;">
+          <div class="card-body">
+            <div class="empty-state" data-i18n="usage.empty">Sin datos de uso todavía. Las peticiones al motor aparecerán aquí.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 7: SETTINGS (Ajustes) — profiles, generation, engine + notices.
+         Blocks hide themselves with the "new engine" note when the
+         matching route answers 404/501 or is unreachable. -->
+    <div id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="nav-settings">
+      <div class="section-shell narrow">
+        <div class="section-head">
+          <div class="section-title" data-i18n="settings.title">Ajustes</div>
+          <div class="section-sub" data-i18n="settings.sub">Perfiles, generación, motor y avisos. Los cambios que afectan al motor se aplican al próximo arranque.</div>
         </div>
 
         <!-- Profiles -->
@@ -2163,6 +2069,72 @@
             <div id="cfg-engine-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="models.localTitle">Modelos locales</span>
+            <span class="card-meta" id="models-meta">–</span>
+          </div>
+          <div class="card-body">
+            <div id="models-empty" class="empty-state" style="display: none;" data-i18n="models.empty">Todavía no hay modelos. Importa un .gguf o descarga uno verificado.</div>
+            <table class="models-table" id="models-table">
+              <thead>
+                <tr>
+                  <th data-i18n="models.colModel">Modelo</th>
+                  <th data-i18n="models.colSize">Tamaño</th>
+                  <th data-i18n="models.colState">Estado</th>
+                  <th><span class="sr-only">Acción</span></th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+
+            <div class="field-group">
+              <label class="field-label" for="model-select">
+                <span data-i18n="models.active">Modelo activo para arrancar el motor</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="model-select">
+                  <option value="">Cargando modelo...</option>
+                </select>
+              </div>
+              <div id="model-badges" class="model-dl-status" style="display: none;"></div>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">
+                <span data-i18n="models.importTitle">Importar desde tu disco</span>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="tool-btn" type="button" id="btn-import-gguf" onclick="importGgufPick()" data-i18n-title="models.importBtnTitle" title="Importar archivo .gguf desde tu disco">
+                  <span id="import-gguf-label" data-i18n="models.importBtn">Importar .gguf…</span>
+                </button>
+                <button class="tool-btn" type="button" onclick="openModelsFolder()" data-i18n-title="models.folderTitle" title="Abrir carpeta models en explorador">
+                  <span data-i18n="models.folder">Carpeta</span>
+                </button>
+              </div>
+              <div id="import-pick-status" class="model-dl-status" style="display: none;"></div>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">
+                <span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span>
+              </div>
+              <div class="model-dl-row">
+                <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
+                <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
+                <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
+              </div>
+              <div id="model-dl-section" style="display: none;">
+                <div id="model-dl-status" class="model-dl-status" role="status"></div>
+                <div class="model-dl-bar"><div id="model-dl-fill" class="model-dl-fill"></div></div>
+                <div style="margin-top: 6px;">
+                  <button class="tool-btn" type="button" id="btn-dl-cancel" onclick="cancelModelDownload()" data-i18n-title="models.cancelTitle" title="Cancelar la descarga en curso"><span data-i18n="models.cancel">Cancelar</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="card" id="cfg-unavailable-card" style="display: none;">
           <div class="card-body">
             <div class="empty-state" data-i18n="settings.needsNew">Requiere la versión nueva del motor</div>
@@ -2190,7 +2162,10 @@
       es: {
         'nav.panel': 'Panel', 'nav.chat': 'Chat', 'nav.models': 'Modelos',
         'nav.usage': 'Uso', 'nav.logs': 'Logs', 'nav.specs': 'Specs',
+        'nav.conexion': 'Conexión',
         'nav.settings': 'Ajustes',
+        'conexion.title': 'Conexión',
+        'conexion.sub': 'Modo de esta PC, red local y uso del gateway.',
         'lang.label': 'Idioma',
         'hdr.stopped': 'En reposo', 'hdr.starting': 'Cargando…',
         'hdr.online': 'Activo', 'hdr.error': 'Error al iniciar',
@@ -2422,7 +2397,10 @@
       en: {
         'nav.panel': 'Dashboard', 'nav.chat': 'Chat', 'nav.models': 'Models',
         'nav.usage': 'Usage', 'nav.logs': 'Logs', 'nav.specs': 'Specs',
+        'nav.conexion': 'Connect',
         'nav.settings': 'Settings',
+        'conexion.title': 'Connection',
+        'conexion.sub': 'This PC mode, local network and gateway usage.',
         'lang.label': 'Language',
         'hdr.stopped': 'Idle', 'hdr.starting': 'Loading…',
         'hdr.online': 'Running', 'hdr.error': 'Failed to start',
@@ -2672,7 +2650,9 @@
     // Deep link via location hash (e.g. #tab=chat&lang=en, or #chat).
     // The server only serves exact "/" (query strings 404), so state travels
     // in the fragment. Used by screenshots and manual deep-linking.
-    const KNOWN_TABS = ['dashboard', 'chat', 'models', 'usage', 'terminal', 'info', 'settings'];
+    const KNOWN_TABS = ['dashboard', 'chat', 'conexion', 'settings'];
+    // Atajos viejos (7 tabs) → su hogar nuevo. Nunca se pierde un deep link.
+    const TAB_ALIASES = { models: 'settings', usage: 'conexion', terminal: 'dashboard', info: 'dashboard' };
     function parseDeepLink() {
       try {
         const h = (typeof window !== 'undefined' && window.location && window.location.hash) || '';
@@ -2684,6 +2664,13 @@
           else if (kv[0] === 'lang' && (kv[1] === 'es' || kv[1] === 'en')) out.lang = kv[1];
           else if (kv.length === 1 && KNOWN_TABS.indexOf(part) >= 0) out.tab = part;
         });
+        if (out.tab === undefined) {
+          const bare = h.replace(/^#/, '').split('&');
+          for (const part of bare) {
+            const k = part.split('=')[0] === 'tab' ? part.split('=')[1] : part;
+            if (k && TAB_ALIASES[k]) { out.tab = TAB_ALIASES[k]; break; }
+          }
+        }
         return out;
       } catch (e) { return {}; }
     }
@@ -2855,7 +2842,7 @@
       set('tel-requests', m.requests_processing != null ? String(m.requests_processing) : '—');
     }
 
-    // Tab Navigation
+    // Tab Navigation (Fase UX: 4 tabs; Uso vive en Conexión, el rol también).
     function switchTab(name) {
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
@@ -2863,8 +2850,18 @@
       document.querySelectorAll('.tab-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === 'tab-' + name);
       });
-      if (name === 'dashboard' || name === 'usage') refreshUsage();
+      if (name === 'dashboard' || name === 'conexion') refreshUsage();
       if (name === 'settings') refreshSettings();
+      if (name === 'conexion') refreshConexion();
+    }
+
+    // Rol + red de la tab Conexión (la tarjeta vive ahí; refreshSettings la
+    // sigue actualizando cuando se abre Ajustes, con el mismo cfg).
+    async function refreshConexion() {
+      try {
+        const cfg = await api.getAppConfig();
+        if (cfg && !cfg.missing) refreshRoleCard(cfg);
+      } catch (e) {}
     }
 
     function isDashboardVisible() {
@@ -2872,7 +2869,7 @@
       return !!panel && panel.classList.contains('active');
     }
     function isUsageVisible() {
-      const panel = document.getElementById('tab-usage');
+      const panel = document.getElementById('tab-conexion');
       return !!panel && panel.classList.contains('active');
     }
 
