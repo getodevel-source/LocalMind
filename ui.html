@@ -1823,11 +1823,6 @@
       </div>
     </div>
 
-    <!-- TAB 3: MODELS -->
-
-
-
-
     <!-- TAB 3: CONEXION (Fase UX: Modo + Uso, plegados de Settings/Usage) -->
     <div id="tab-conexion" class="tab-panel" role="tabpanel" aria-labelledby="nav-conexion">
       <div class="section-shell narrow">
@@ -1922,8 +1917,10 @@
               </thead>
               <tbody id="usage-by-model"></tbody>
             </table>
-            <div class="usage-section-title" data-i18n="usage.recent">Últimas peticiones</div>
-            <div id="usage-raw-list" class="usage-raw-list"></div>
+            <details class="advanced">
+              <summary><span data-i18n="usage.recent">Últimas peticiones</span></summary>
+              <div id="usage-raw-list" class="usage-raw-list" style="margin-top: 8px;"></div>
+            </details>
           </div>
         </div>
 
@@ -1935,7 +1932,7 @@
       </div>
     </div>
 
-    <!-- TAB 7: SETTINGS (Ajustes) — profiles, generation, engine + notices.
+    <!-- TAB 4: SETTINGS (Ajustes) — profiles, generation, engine + notices, modelos.
          Blocks hide themselves with the "new engine" note when the
          matching route answers 404/501 or is unreachable. -->
     <div id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="nav-settings">
@@ -2126,11 +2123,9 @@
               <div id="import-pick-status" class="model-dl-status" style="display: none;"></div>
             </div>
 
-            <div class="field-group">
-              <div class="field-label">
-                <span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span>
-              </div>
-              <div class="model-dl-row">
+            <details class="advanced">
+              <summary><span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span></summary>
+              <div class="model-dl-row" style="margin-top: 8px;">
                 <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
                 <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
                 <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
@@ -2142,7 +2137,7 @@
                   <button class="tool-btn" type="button" id="btn-dl-cancel" onclick="cancelModelDownload()" data-i18n-title="models.cancelTitle" title="Cancelar la descarga en curso"><span data-i18n="models.cancel">Cancelar</span></button>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
         </div>
 
