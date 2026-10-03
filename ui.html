@@ -1474,6 +1474,25 @@
   <!-- Toast region: non-blocking notifications for every user-facing error -->
   <div id="toast-region" aria-live="polite"></div>
 
+  <!-- Unlock overlay (Fase B4): la UI en red llega sin cookie; con 401 pide
+       la clave del Servidor y la canjea por sesión vía POST /api/unlock. -->
+  <div id="unlock-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 100; align-items: center; justify-content: center;">
+    <div class="card" style="max-width: 360px; margin: 16px; width: 100%;">
+      <div class="card-header">
+        <span class="card-title" data-i18n="unlock.title">Desbloquear</span>
+      </div>
+      <div class="card-body">
+        <div class="profile-hint" data-i18n="unlock.sub">Esta UI está en red: ingresa la clave del Servidor.</div>
+        <label class="field-label" for="unlock-key"><span data-i18n="settings.clientKey">Clave</span></label>
+        <input type="password" id="unlock-key" autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Clave">
+        <div id="unlock-error" class="error-banner" role="alert"></div>
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+          <button class="btn btn-primary" type="button" id="unlock-go" onclick="doUnlock()"><span data-i18n="unlock.go">Entrar</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Main viewport -->
   <main>
     <!-- TAB 1: PANEL — engine config + live telemetry + agent launchers -->
@@ -2392,6 +2411,10 @@
         'settings.clientSave': 'Guardar remoto',
         'settings.clientOk': 'Remoto OK',
         'settings.saving': 'Guardando…',
+        'unlock.title': 'Desbloquear',
+        'unlock.sub': 'Esta UI está en red: ingresa la clave del Servidor.',
+        'unlock.go': 'Entrar',
+        'unlock.bad': 'Clave incorrecta.',
       },
       en: {
         'nav.panel': 'Dashboard', 'nav.chat': 'Chat', 'nav.models': 'Models',
@@ -2618,6 +2641,10 @@
         'settings.clientSave': 'Save remote',
         'settings.clientOk': 'Remote OK',
         'settings.saving': 'Saving…',
+        'unlock.title': 'Unlock',
+        'unlock.sub': 'This UI is on the network: enter the Server key.',
+        'unlock.go': 'Enter',
+        'unlock.bad': 'Wrong key.',
         'settings.current': 'current',
         'common.copied': 'Copied',
       }
@@ -3755,6 +3782,44 @@
         }
       } catch (e) {
         cfgInlineError('cfg-client-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    /* ---------- Unlock (Fase B4): la UI en red llega sin cookie de sesión.
+       Si /api/status da 401, se muestra el overlay una vez; el desbloqueo
+       canjea la clave por cookie vía POST /api/unlock y refresca. */
+    async function maybeUnlock() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.status === 401) {
+          const ov = document.getElementById('unlock-overlay');
+          if (ov) ov.style.display = 'flex';
+          const inp = document.getElementById('unlock-key');
+          if (inp) inp.focus();
+        }
+      } catch (e) {}
+    }
+
+    async function doUnlock() {
+      const inp = document.getElementById('unlock-key');
+      try {
+        const res = await fetch('/api/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: inp ? inp.value : '' })
+        });
+        if (res.ok) {
+          if (inp) inp.value = '';
+          cfgInlineError('unlock-error', null);
+          const ov = document.getElementById('unlock-overlay');
+          if (ov) ov.style.display = 'none';
+          updateStatus();
+          refreshSettings();
+          return;
+        }
+        cfgInlineError('unlock-error', T('unlock.bad'));
+      } catch (e) {
+        cfgInlineError('unlock-error', (e && e.message) ? e.message : '?');
       }
     }
 
@@ -5077,6 +5142,7 @@
           }
         });
         connectEvents();
+        maybeUnlock();
       }
       const modelSel = document.getElementById('model-select');
       if (modelSel) modelSel.addEventListener('change', () => updateModelBadges(lastModelsCache));

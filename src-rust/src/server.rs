@@ -572,6 +572,31 @@ fn handle_request(
             return;
         }
     }
+    // Desbloqueo LAN (Fase B4): emite la cookie de sesión a quien presente la
+    // clave. Es login, así que va ANTES de la puerta D-7 pero DESPUÉS del gate
+    // del peer (red privada o loopback; internet directa ya cayó con 403).
+    // La clave viaja en el cuerpo (nunca en URL/logs); el error no distingue
+    // motivos.
+    if method == "POST" && url == "/api/unlock" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let candidate = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("key").and_then(|k| k.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        if !crate::auth::key_matches(&candidate, &gateway_key) {
+            let _ = req.respond(unauthorized_json_for_origin(origin_ref));
+            return;
+        }
+        let Some(cookie) = session_cookie_header(&gateway_key) else {
+            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+            return;
+        };
+        let mut resp = json_response_for_origin(200, r#"{"status":"ok"}"#.to_string(), origin_ref);
+        resp.add_header(cookie);
+        let _ = req.respond(resp);
+        return;
+    }
     // Clave local (D-7): `/v1/*` y `/api/*` exigen Bearer, x-api-key o cookie.
     if !is_public_path(&method, &url) && !crate::auth::is_authorized(req.headers(), &gateway_key) {
         let _ = req.respond(unauthorized_json_for_origin(origin_ref));

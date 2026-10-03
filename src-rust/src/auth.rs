@@ -92,7 +92,14 @@ pub fn rotate_key_at(path: &std::path::Path) -> Result<String, String> {
     Ok(key)
 }
 
-/// Valor para `Set-Cookie` en `/`, `/index.html`, `/localmind.ico`, `/localmind.png`.
+/// Comparar clave candidata con la vigente (Fase B4, desbloqueo LAN): igual y
+/// no vacía. Función aparte para testear sin socket. Comparación directa: el
+/// modelo de amenaza es la LAN hogareña tras el gate del peer (diseño B2).
+pub fn key_matches(candidate: &str, key: &str) -> bool {
+    !key.is_empty() && candidate == key
+}
+
+/// Valor para `Set-Cookie` en `/`, `/index.html`, iconos y `/api/unlock`.
 pub fn set_cookie_value(key: &str) -> String {
     format!("{}={}; Path=/; HttpOnly; SameSite=Strict", KEY_COOKIE_NAME, key)
 }
@@ -209,5 +216,14 @@ mod tests {
         assert_ne!(k1, k2);
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), k2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn desbloqueo_compara_clave_y_rechaza_vacia() {
+        assert!(key_matches("abc123", "abc123"));
+        assert!(!key_matches("otra", "abc123"));
+        assert!(!key_matches("", "abc123"));
+        assert!(!key_matches("abc123", ""));
+        assert!(!key_matches("", ""));
     }
 }
