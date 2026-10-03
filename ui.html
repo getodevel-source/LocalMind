@@ -2759,6 +2759,9 @@
 
     function saveChatHistory() {
       try {
+        // Tope anti-cuota (auditoría): sin tope, sesiones eternas matan el
+        // localStorage de 5 MB y mueren en silencio. 300 mensajes sobran.
+        if (chatHistory.length > 300) chatHistory.splice(0, chatHistory.length - 300);
         localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatHistory));
       } catch (e) {}
     }
@@ -2798,9 +2801,13 @@
     function appendLogLine(line) {
       const box = document.getElementById('terminal-stream');
       if (!box || !line) return;
-      box.textContent += line + '\n';
-      if (box.textContent.length > 200 * 1024) {
-        box.textContent = box.textContent.slice(box.textContent.length - 200 * 1024);
+      // Nodos de texto (auditoría de rendimiento): `textContent +=` re-serializa
+      // los ~200 KB en CADA línea (O(n²) con el motor escupiendo logs al cargar).
+      box.appendChild(document.createTextNode(line + '\n'));
+      // Poda por conteo de nodos (O(1); medir longitud sería O(n) otra vez).
+      // ~1500 líneas ≈ 300 KB peor caso; el tope histórico era 200 KB.
+      while (box.childNodes.length > 1500) {
+        box.removeChild(box.firstChild);
       }
       if (autoScrollTerminal) {
         box.scrollTop = box.scrollHeight;
@@ -5064,6 +5071,10 @@
         let sseBuffer = '';
         let usage = null;
         let aborted = false;
+        let lastMdRender = 0;
+        // Throttle de render (auditoría): renderMarkdown() re-parsea TODA la
+        // respuesta en cada token (O(n²) por respuesta larga). Se pinta como
+        // mucho cada 150 ms + render final al cerrar el stream.
 
         while (true) {
           let readResult;
@@ -5096,12 +5107,22 @@
                 }
                 if (delta?.content) {
                   fullReply += delta.content;
-                  botBubble.innerHTML = renderMarkdown(fullReply);
+                  const nowMs = performance.now();
+                  if (nowMs - lastMdRender > 150) {
+                    lastMdRender = nowMs;
+                    botBubble.innerHTML = renderMarkdown(fullReply);
+                    messagesArea.scrollTop = messagesArea.scrollHeight;
+                  }
                 }
-                messagesArea.scrollTop = messagesArea.scrollHeight;
               } catch (err) {}
             }
           }
+        }
+
+        // Render final (el throttle deja hasta 150 ms sin pintar).
+        if (fullReply) {
+          botBubble.innerHTML = renderMarkdown(fullReply);
+          messagesArea.scrollTop = messagesArea.scrollHeight;
         }
 
         const elapsed = (performance.now() - startedAt) / 1000;
