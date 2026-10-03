@@ -648,14 +648,14 @@ fn handle_request(
     }
 
     if method == "GET" && url == "/api/profiles" {
-        let profiles = crate::profiles::get_hardware_profiles(&cfg.get());
+        let profiles = crate::config::get_hardware_profiles(&cfg.get());
         let json = serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".to_string());
         let _ = req.respond(json_response_for_origin(200, json, origin_ref));
         return;
     }
 
     if method == "GET" && url == "/api/profiles/export" {
-        let profiles = crate::profiles::get_hardware_profiles(&cfg.get());
+        let profiles = crate::config::get_hardware_profiles(&cfg.get());
         let json = serde_json::to_string_pretty(&profiles).unwrap_or_else(|_| "[]".to_string());
         let mut resp = json_response_for_origin(200, json, origin_ref);
         let cd = Header::from_bytes(&b"Content-Disposition"[..], &b"attachment; filename=\"localmind_profiles.json\""[..]).unwrap();
@@ -793,7 +793,7 @@ fn handle_request(
             return;
         }
         mgr.log(&format!("[LocalMind] Perfil '{}' guardado.", id));
-        let list = crate::profiles::get_hardware_profiles(&next);
+        let list = crate::config::get_hardware_profiles(&next);
         let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string());
         let _ = req.respond(json_response_for_origin(200, json, origin_ref));
         return;
@@ -837,7 +837,7 @@ fn handle_request(
             return;
         }
         mgr.log(&format!("[LocalMind] Perfil '{}' eliminado.", id));
-        let list = crate::profiles::get_hardware_profiles(&next);
+        let list = crate::config::get_hardware_profiles(&next);
         let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string());
         let _ = req.respond(json_response_for_origin(200, json, origin_ref));
         return;
@@ -1963,7 +1963,9 @@ fn handle_chat_completions(
     mgr.touch_activity();
 
     let st = mgr.get_status();
-    if st.port == 0 {
+    // Fase A6: `stopped`/`error` con puerto placeholder no es motor (el 8080
+    // lo puede ocupar cualquiera). `starting` sí proxyea: ya responde.
+    if !crate::agents::engine_reachable(&st) {
         let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
         return;
     }
@@ -2068,7 +2070,8 @@ fn handle_anthropic_messages(
     let stream = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let st = mgr.get_status();
-    if st.port == 0 {
+    // Fase A6: ver chat (el 8080 placeholder no es motor).
+    if !crate::agents::engine_reachable(&st) {
         let (code, text) = crate::translate::anthropic_error(
             502,
             "api_error",
@@ -2193,7 +2196,8 @@ fn handle_responses(
     let req_model = body.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
 
     let st = mgr.get_status();
-    if st.port == 0 {
+    // Fase A6: ver chat (el 8080 placeholder no es motor).
+    if !crate::agents::engine_reachable(&st) {
         let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
         return;
     }

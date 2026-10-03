@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::ConfigStore;
-use crate::profiles::HardwareProfile;
+use crate::config::HardwareProfile;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -124,7 +124,7 @@ pub struct LogEvent {
 struct ResolvedStart {
     model_filename: String,
     model_path: PathBuf,
-    profile: crate::profiles::HardwareProfile,
+    profile: crate::config::HardwareProfile,
     profile_id: String,
     context: usize,
     threads: usize,
@@ -628,7 +628,7 @@ impl ProcessManager {
         threads_batch: usize,
         priority: &str,
         engine: &crate::config::EngineConfig,
-        profile: &crate::profiles::HardwareProfile,
+        profile: &crate::config::HardwareProfile,
         llama_port: u16,
         skip_spec: bool,
         api_key: &str,
@@ -1306,12 +1306,12 @@ impl ProcessManager {
         let engine = &cfg.engine;
         // Perfil: request > config.last > config.profiles
         let profile: HardwareProfile = if let Some(id) = req.profile.as_ref().filter(|s| !s.is_empty()) {
-            crate::profiles::resolve_profile(&cfg.profiles, id)
+            crate::config::resolve_profile(&cfg.profiles, id)
         } else if let Some(last) = cfg.last.profile.as_ref().filter(|s| !s.is_empty()) {
-            crate::profiles::resolve_profile(&cfg.profiles, last).clone()
+            crate::config::resolve_profile(&cfg.profiles, last).clone()
         } else {
             cfg.profiles.first().cloned().unwrap_or_else(|| {
-                crate::profiles::resolve_profile(&cfg.profiles, crate::config::DEFAULT_PROFILE_ID).clone()
+                crate::config::resolve_profile(&cfg.profiles, crate::config::DEFAULT_PROFILE_ID).clone()
             })
         };
         // `profile_id` es siempre un id real (resuelto arriba): nunca se
@@ -2534,7 +2534,7 @@ mod tests {
         let mut engine = crate::config::EngineConfig::default();
         engine.reasoning_preserve = true;
         engine.extra_flags = vec!["--jinja".to_string(), "--no-warmup".to_string()];
-        let mut profile = crate::profiles::HardwareProfile::default();
+        let mut profile = crate::config::HardwareProfile::default();
         profile.cache_ram = 8192;
         profile.extra_flags = vec!["--mlock".to_string()];
 
@@ -2555,7 +2555,7 @@ mod tests {
     fn argv_no_repite_los_valores_de_las_flags() {
         let mut engine = crate::config::EngineConfig::default();
         engine.reasoning_preserve = true;
-        let mut profile = crate::profiles::HardwareProfile::default();
+        let mut profile = crate::config::HardwareProfile::default();
         profile.cache_ram = 8192;
 
         let tokens = argv_tokens(&engine, &profile, 32768, false);
@@ -2810,7 +2810,7 @@ mod tests {
     fn unknown_last_profile_falls_back_to_default() {
         // D-1: un id desconocido en el TOML cae al default real, no al fantasma.
         let profiles = crate::config::built_in_profiles();
-        let resolved = crate::profiles::resolve_profile(&profiles, "turbo");
+        let resolved = crate::config::resolve_profile(&profiles, "turbo");
         assert_eq!(resolved.id, profiles[0].id);
         assert_eq!(profiles[0].id, crate::config::DEFAULT_PROFILE_ID);
     }
@@ -3004,7 +3004,7 @@ mod tests {
 
     fn argv_tokens(
         engine: &crate::config::EngineConfig,
-        profile: &crate::profiles::HardwareProfile,
+        profile: &crate::config::HardwareProfile,
         context: usize,
         skip_spec: bool,
     ) -> Vec<String> {
@@ -3035,7 +3035,7 @@ mod tests {
         e
     }
 
-    fn ctx_profile(context: usize) -> crate::profiles::HardwareProfile {
+    fn ctx_profile(context: usize) -> crate::config::HardwareProfile {
         crate::config::HardwareProfile {
             id: "t".to_string(),
             name: String::new(),

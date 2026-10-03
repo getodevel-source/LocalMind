@@ -9,7 +9,6 @@ mod meta;
 mod models;
 mod notify;
 mod process;
-mod profiles;
 mod server;
 mod translate;
 mod usage;

@@ -34,6 +34,15 @@ pub fn engine_live(st: &ServerStatus) -> bool {
     st.port > 0 && st.status == "running"
 }
 
+/// ¿El proxy `/v1/*` puede hablar con el motor? (Fase A6) Puerto real + estado
+/// `running` o `starting` (durante el arranque el motor ya responde aunque la
+/// puerta verifique). `stopped`/`error` → `engine_down` aunque el puerto traiga
+/// el placeholder del default: el 8080 lo puede ocupar cualquiera (medido:
+/// `steamwebhelper` en una PC gamer respondiendo 404 vacío).
+pub fn engine_reachable(st: &ServerStatus) -> bool {
+    st.port > 0 && (st.status == "running" || st.status == "starting")
+}
+
 /// Id de modelo que el motor está sirviendo AHORA: el nombre del archivo sin
 /// la extensión `.gguf` (p. ej. `Ternary-Bonsai-2-27B-PTQ1_0.gguf` →
 /// `Ternary-Bonsai-2-27B-PTQ1_0`).
@@ -272,6 +281,26 @@ pub fn is_home_dir(dir: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn st(status: &str, port: u16) -> ServerStatus {
+        ServerStatus {
+            status: status.to_string(),
+            port,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn alcanzable_solo_con_puerto_y_arranque_o_marcha() {
+        // Fase A6: stopped/error con puerto placeholder → NO alcanzable (el
+        // 8080 de `steamwebhelper` no es un motor); starting sí (ya responde).
+        assert!(engine_reachable(&st("running", 8080)));
+        assert!(engine_reachable(&st("starting", 8080)));
+        assert!(!engine_reachable(&st("stopped", 8080)));
+        assert!(!engine_reachable(&st("error", 8080)));
+        assert!(!engine_reachable(&st("running", 0)));
+        assert!(!engine_reachable(&st("stopped", 0)));
+    }
 
     #[test]
     fn pi_json_apunta_al_gateway() {
