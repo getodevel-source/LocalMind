@@ -369,14 +369,7 @@ impl ProcessManager {
                     }
                     if let Some((title, body, tag)) = crash_notify {
                         let ncfg = cfg_poll.get().notifications;
-                        if crate::notify::should_notify(ncfg.enabled, ncfg.on_failure) {
-                            let logf = log_file_poll.clone();
-                            std::thread::spawn(move || {
-                                crate::notify::notify(&title, &body, &tag, |err| {
-                                    crate::filelog::write_log_line(&logf, err);
-                                });
-                            });
-                        }
+                        spawn_notify(title, body, tag, ncfg.enabled, ncfg.on_failure, log_file_poll.clone());
                     }
                 } else {
                     // 2. Poll health endpoint if still starting or running
@@ -514,7 +507,7 @@ impl ProcessManager {
                             }
                             consecutive_failures = if is_ok { 0 } else { consecutive_failures.saturating_add(1) };
                             // 10 fallos seguidos (~10s) con status running → el hijo murió sin exit visible
-                            if consecutive_failures >= 10 && st.status == "running" {
+                            if engine_lost(consecutive_failures, st.status == "running") {
                                 st.status = "error".to_string();
                                 st.last_error =
                                     Some("El motor dejó de responder el endpoint /health".to_string());
@@ -531,14 +524,15 @@ impl ProcessManager {
                                 if is_busy {
                                     // El motor está trabajando activamente: refrescar marca de actividad
                                     last_activity_poll.store(now, Ordering::Relaxed);
-                                } else {
-                                    let last = last_activity_poll.load(Ordering::Relaxed);
-                                    if last > 0 && now.saturating_sub(last) >= timeout {
-                                        st.status = "stopped".to_string();
-                                        st.is_healthy = false;
-                                        st.pid = None;
-                                        auto_stop = true;
-                                    }
+                                } else if should_auto_stop(
+                                    timeout,
+                                    last_activity_poll.load(Ordering::Relaxed),
+                                    now,
+                                ) {
+                                    st.status = "stopped".to_string();
+                                    st.is_healthy = false;
+                                    st.pid = None;
+                                    auto_stop = true;
                                 }
                             }
                         }
@@ -553,14 +547,7 @@ impl ProcessManager {
                                 "engine-failure" => ncfg.on_failure,
                                 _ => true,
                             };
-                            if crate::notify::should_notify(ncfg.enabled, flag) {
-                                let logf = log_file_poll.clone();
-                                std::thread::spawn(move || {
-                                    crate::notify::notify(&title, &body, &tag, |err| {
-                                        crate::filelog::write_log_line(&logf, err);
-                                    });
-                                });
-                            }
+                            spawn_notify(title, body, tag, ncfg.enabled, flag, log_file_poll.clone());
                         }
                     }
                 }
@@ -1869,6 +1856,42 @@ fn load_key(model: &str, context: usize) -> String {
     format!("{}|{}", model, context)
 }
 
+/// Decisión de auto-stop por inactividad (pura y testeable, Fase A5): el
+/// llamador ya filtró `status == "running"`, timeout > 0 y motor no ocupado
+/// (ocupado refresca la marca, nunca apaga). Sin marca previa (`last == 0`)
+/// no se apaga: solo el paso del tiempo real dispara.
+fn should_auto_stop(timeout_secs: u64, last_activity: u64, now_secs: u64) -> bool {
+    timeout_secs > 0 && last_activity > 0 && now_secs.saturating_sub(last_activity) >= timeout_secs
+}
+
+/// Decisión de "motor perdido" (pura y testeable, Fase A5): 10 fallos seguidos
+/// de `/health` (~10 s) con status `running` → el hijo murió sin exit visible.
+/// Fuera de `running` no aplica (el arranque/cierre tienen su propio ciclo).
+fn engine_lost(consecutive_failures: u32, status_running: bool) -> bool {
+    consecutive_failures >= 10 && status_running
+}
+
+/// Despacho único de avisos P20 (Fase A5): los dos puntos del poller
+/// (fallo de arranque y eventos en curso) hacían el mismo
+/// `should_notify` + `spawn`. El llamador ya resolvió el flag del evento.
+fn spawn_notify(
+    title: String,
+    body: String,
+    tag: String,
+    enabled: bool,
+    flag_on: bool,
+    log_file: std::path::PathBuf,
+) {
+    if !crate::notify::should_notify(enabled, flag_on) {
+        return;
+    }
+    std::thread::spawn(move || {
+        crate::notify::notify(&title, &body, &tag, |err| {
+            crate::filelog::write_log_line(&log_file, err);
+        });
+    });
+}
+
 /// Resolver el modelo pedido contra `models_dir`: acepta el basename plano
 /// (histórico, lo que manda la UI) o el `rel` de /api/models (`sub/m.gguf`).
 /// Rechaza `..`, rutas absolutas, prefijo de unidad y escapes de `models_dir`.
@@ -2845,6 +2868,28 @@ mod tests {
         assert!(gate_is_slow(19.9, 20.0));
         assert!(!gate_is_slow(20.0, 20.0));
         assert!(!gate_is_slow(34.0, 20.0));
+    }
+
+    #[test]
+    fn auto_stop_solo_con_tiempo_real_transcurrido() {
+        // timeout 5400, última actividad hace 5400 → apaga (borde incluido).
+        assert!(should_auto_stop(5400, 1000, 6400));
+        assert!(should_auto_stop(5400, 1000, 9999));
+        // Un segundo antes → no apaga.
+        assert!(!should_auto_stop(5400, 1000, 6399));
+        // Sin timeout o sin marca previa → nunca apaga.
+        assert!(!should_auto_stop(0, 1000, 99999));
+        assert!(!should_auto_stop(5400, 0, 99999));
+    }
+
+    #[test]
+    fn motor_perdido_a_los_10_fallos_en_running() {
+        assert!(!engine_lost(9, true));
+        assert!(engine_lost(10, true));
+        assert!(engine_lost(25, true));
+        // Fuera de running no aplica (arranque/cierre tienen su ciclo).
+        assert!(!engine_lost(10, false));
+        assert!(!engine_lost(99, false));
     }
 
     fn val_ids() -> Vec<String> {
