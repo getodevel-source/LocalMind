@@ -74,6 +74,24 @@ pub fn load_or_create_key() -> String {
     key
 }
 
+/// Rotar la clave del gateway (Fase B3, pairing): genera una nueva, la persiste
+/// y la devuelve. Toma efecto al REINICIAR: el gateway usa la instantánea del
+/// arranque y el motor su `--api-key` del spawn (más el caché `gateway_key()`).
+/// El llamador responde `restart_required: true` y lo loguea.
+pub fn rotate_key() -> Result<String, String> {
+    rotate_key_at(&gateway_key_path())
+}
+
+/// Núcleo testeable de `rotate_key` (no toca la ruta real en tests).
+pub fn rotate_key_at(path: &std::path::Path) -> Result<String, String> {
+    let key = generate_key();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, format!("{}\n", key)).map_err(|e| e.to_string())?;
+    Ok(key)
+}
+
 /// Valor para `Set-Cookie` en `/`, `/index.html`, `/localmind.ico`, `/localmind.png`.
 pub fn set_cookie_value(key: &str) -> String {
     format!("{}={}; Path=/; HttpOnly; SameSite=Strict", KEY_COOKIE_NAME, key)
@@ -176,5 +194,20 @@ mod tests {
         let k = generate_key();
         assert_eq!(k.len(), 64);
         assert!(k.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn rotar_clave_genera_distinta_y_persiste() {
+        // Nunca contra la ruta real: solo el temporal del test.
+        let dir = std::env::temp_dir().join(format!("lm-rotate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("gateway.key");
+        let k1 = rotate_key_at(&path).expect("rota");
+        assert_eq!(k1.len(), 64);
+        let k2 = rotate_key_at(&path).expect("re-rota");
+        assert_eq!(k2.len(), 64);
+        assert_ne!(k1, k2);
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), k2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

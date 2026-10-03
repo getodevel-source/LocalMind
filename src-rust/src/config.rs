@@ -225,6 +225,26 @@ pub struct LanConfig {
     pub enabled: bool,
 }
 
+/// Modo Cliente (Fase B3, diseño B1/B6): esta PC no computa, consume el
+/// Servidor remoto. Con `enabled`, `/api/start` se bloquea (409) y el
+/// chat `/v1/*` se proxyea al remoto (B3b). Default `false` = Todo-aquí.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClientConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Servidor remoto del modo Cliente (diseño B5/B6): `url` base (con o sin
+/// `/v1`, se normaliza al usar) y `key` Bearer. La UI jamás la devuelve
+/// completa (enmascarada) y nunca viaja en logs ni URLs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RemoteConfig {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub key: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationConfig {
     /// Temperatura de muestreo (0..=2). Base para exponer en la API (P16).
@@ -390,6 +410,12 @@ pub struct AppConfig {
     /// Red local (Fase B): ausente en TOMLs viejos → `false` (todo igual).
     #[serde(default)]
     pub lan: LanConfig,
+    /// Modo Cliente (Fase B3): ausente → `false`.
+    #[serde(default)]
+    pub client: ClientConfig,
+    /// Servidor remoto (Fase B3): ausente → vacío.
+    #[serde(default)]
+    pub remote: RemoteConfig,
 }
 
 impl Default for AppConfig {
@@ -403,6 +429,8 @@ impl Default for AppConfig {
             generation: GenerationConfig::default(),
             profiles_version: PROFILES_VERSION,
             lan: LanConfig::default(),
+            client: ClientConfig::default(),
+            remote: RemoteConfig::default(),
         }
     }
 }
@@ -1637,6 +1665,37 @@ mod tests {
         std::fs::write(&path, "[engine]\nthreads = 6\n\n[lan]\nenabled = true\n").unwrap();
         let store = ConfigStore::load_from_path(&path);
         assert!(store.get().lan.enabled);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cliente_y_remoto_apagados_por_defecto() {
+        // Fase B3: TOML viejo sin secciones → Todo-aquí (nada que computar
+        // en otro lado, nada a lo que conectarse).
+        assert!(!AppConfig::default().client.enabled);
+        assert!(AppConfig::default().remote.url.is_empty());
+        assert!(AppConfig::default().remote.key.is_empty());
+        let dir = std::env::temp_dir().join(format!("lm-no-client-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("localmind.toml");
+        std::fs::write(&path, "[engine]\nthreads = 6\n").unwrap();
+        let cfg = ConfigStore::load_from_path(&path).get();
+        assert!(!cfg.client.enabled);
+        assert!(cfg.remote.url.is_empty());
+        // …y con secciones → se respetan y sobreviven al save/load.
+        std::fs::write(
+            &path,
+            "[engine]\nthreads = 6\n\n[client]\nenabled = true\n\n[remote]\nurl = \"http://192.168.1.10:17860\"\nkey = \"k\"\n",
+        )
+        .unwrap();
+        let store = ConfigStore::load_from_path(&path);
+        assert!(store.get().client.enabled);
+        assert_eq!(store.get().remote.url, "http://192.168.1.10:17860");
+        store.save().unwrap();
+        let recargado = ConfigStore::load_from_path(&path).get();
+        assert!(recargado.client.enabled);
+        assert_eq!(recargado.remote.key, "k");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

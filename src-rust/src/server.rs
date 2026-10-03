@@ -962,6 +962,12 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/start" {
+        // Fase B3: en modo Cliente esta PC no computa: arrancar el motor acá
+        // sería mentirle a la UI (el cómputo vive en el remoto).
+        if cfg.get().client.enabled {
+            let _ = req.respond(json_response_for_origin(409, r#"{"error":"modo_cliente_sin_motor"}"#.into(), origin.as_deref()));
+            return;
+        }
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
         let start_req: StartRequest = match parse_start_body(&body) {
@@ -989,6 +995,134 @@ fn handle_request(
     if method == "POST" && url == "/api/stop" {
         mgr.stop();
         let _ = req.respond(json_response_for_origin(200, r#"{"status":"stopped"}"#.into(), origin.as_deref()));
+        return;
+    }
+
+    // ---- Fase B3: descubrimiento LAN, pairing y remoto (diseño B5/B6/B9) ----
+    // Todas bajo la puerta de auth D-7 de arriba: el payload de pairing lleva
+    // la clave vigente y solo lo ve el dueño autenticado.
+
+    // Descubrimiento + QR: IPs privadas de esta PC, puerto ligado y payloads
+    // `omni://ip:puerto#k=clave` (uno por IP).
+    if method == "GET" && url == "/api/lan" {
+        let c = cfg.get();
+        let ips = crate::meta::descubrir_ips_locales();
+        let pairings: Vec<String> = ips
+            .iter()
+            .map(|ip| crate::meta::pairing_url(ip, http_port, &gateway_key))
+            .collect();
+        let body = serde_json::json!({
+            "enabled": c.lan.enabled,
+            "client_mode": c.client.enabled,
+            "ips": ips,
+            "port": http_port,
+            "pairings": pairings,
+        });
+        let _ = req.respond(json_response_for_origin(200, body.to_string(), origin.as_deref()));
+        return;
+    }
+
+    // Rotación de clave: persiste la nueva e invalida clientes viejos al
+    // reiniciar (gateway y motor usan la instantánea del arranque, ver
+    // `auth::rotate_key`). Nunca devuelve la clave por esta vía: la nueva se
+    // recoge por pairing (`GET /api/lan`) tras reiniciar.
+    if method == "POST" && url == "/api/key/rotate" {
+        match crate::auth::rotate_key() {
+            Ok(_) => {
+                mgr.log("[LocalMind] Clave del gateway rotada: reiniciar para que tome efecto en gateway y motor.");
+                let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok","restart_required":true}"#.into(), origin.as_deref()));
+            }
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo rotar la clave: {}", e) }).to_string(), origin.as_deref()));
+            }
+        }
+        return;
+    }
+
+    // Probar remoto sin persistir: valida la forma y hace `GET /v1/models`
+    // contra el candidato (8 s). La clave viaja solo en el header Bearer del
+    // chequeo; el error nunca la incluye.
+    if method == "POST" && url == "/api/remote/test" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let v: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                return;
+            }
+        };
+        let url_in = v.get("url").and_then(|u| u.as_str()).unwrap_or("").trim().to_string();
+        let key_in = v.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
+        if !crate::config::remote_url_ok(&url_in) {
+            let _ = req.respond(json_response_for_origin(400, r#"{"error":"url remota inválida"}"#.into(), origin.as_deref()));
+            return;
+        }
+        let base = url_in.trim_end_matches('/').to_string();
+        let models_url = if base.ends_with("/v1/models") {
+            base
+        } else if base.ends_with("/v1") {
+            format!("{}/models", base)
+        } else {
+            format!("{}/v1/models", base)
+        };
+        match ureq::get(&models_url)
+            .set("Authorization", &crate::auth::bearer(&key_in))
+            .timeout(Duration::from_secs(8))
+            .call()
+        {
+            Ok(resp) => {
+                let text = resp.into_string().unwrap_or_default();
+                let ids: Vec<String> = serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|j| j.get("data").and_then(|d| d.as_array()).cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
+                    .collect();
+                let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "ok": true, "models": ids }).to_string(), origin.as_deref()));
+            }
+            Err(ureq::Error::Status(code, _)) => {
+                let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "ok": false, "error": format!("el remoto respondió {}", code) }).to_string(), origin.as_deref()));
+            }
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "ok": false, "error": format!("no se pudo contactar al remoto: {}", e) }).to_string(), origin.as_deref()));
+            }
+        }
+        return;
+    }
+
+    // Persistir remoto: valida la URL y guarda sin devolver la clave (el GET
+    // de estado nunca la expone completa; el log no la nombra).
+    if method == "POST" && url == "/api/remote" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let v: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                return;
+            }
+        };
+        let url_in = v.get("url").and_then(|u| u.as_str()).unwrap_or("").trim().to_string();
+        if !crate::config::remote_url_ok(&url_in) {
+            let _ = req.respond(json_response_for_origin(400, r#"{"error":"url remota inválida"}"#.into(), origin.as_deref()));
+            return;
+        }
+        let prev = cfg.get();
+        cfg.update(|c| {
+            c.remote.url = url_in.clone();
+            if let Some(k) = v.get("key").and_then(|k| k.as_str()) {
+                c.remote.key = k.to_string();
+            }
+        });
+        if let Err(e) = cfg.save() {
+            cfg.update(|c| *c = prev);
+            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo guardar el remoto: {}", e) }).to_string(), origin.as_deref()));
+            return;
+        }
+        mgr.log("[LocalMind] Remoto actualizado (aplica al modo Cliente).");
+        let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "status": "ok", "url": url_in }).to_string(), origin.as_deref()));
         return;
     }
 

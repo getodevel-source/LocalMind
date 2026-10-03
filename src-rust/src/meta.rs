@@ -351,6 +351,49 @@ pub fn lan_mode() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Descubrimiento LAN + pairing (Fase B3, diseño B5): la red que el dueño
+// muestra en QR para emparejar el Cliente.
+// ---------------------------------------------------------------------------
+
+/// Payload de pairing para el QR (diseño B5): `omni://<ip>:<puerto>#k=<clave>`.
+/// Puro: el llamador (autenticado) pone la clave vigente; la UI del Cliente
+/// lo escanea o pega como URL + clave.
+pub fn pairing_url(ip: &str, port: u16, key: &str) -> String {
+    format!("omni://{}:{}#k={}", ip, port, key)
+}
+
+/// IPs locales aptas para pairing (diseño B5): la IP de salida hacia internet
+/// (truco UDP sin tráfico: `connect` no envía nada, solo consulta la tabla de
+/// rutas) filtrada a red privada + loopback excluido. Vacío = sin red o solo
+/// loopback: la UI lo dice en vez de inventar. Ordenada y sin duplicados.
+pub fn descubrir_ips_locales() -> Vec<String> {
+    use std::net::UdpSocket;
+    let mut ips = Vec::new();
+    // Varios destinos por si la ruta por defecto apunta afuera de uno solo.
+    for destino in ["8.8.8.8:80", "1.1.1.1:80"] {
+        let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else {
+            continue;
+        };
+        if sock.connect(destino).is_err() {
+            continue;
+        }
+        let Ok(local) = sock.local_addr() else {
+            continue;
+        };
+        let ip = local.ip();
+        if ip.is_loopback() || !ip_red_privada(ip) {
+            continue;
+        }
+        let s = ip.to_string();
+        if !ips.contains(&s) {
+            ips.push(s);
+        }
+    }
+    ips.sort();
+    ips
+}
+
+// ---------------------------------------------------------------------------
 // Sello UTC `YYYYMMDD-HHMMSS` sin crates de fecha
 // ---------------------------------------------------------------------------
 
@@ -506,5 +549,27 @@ mod tests {
         assert!(!origen_permitido("http://evil.com", true));
         assert!(!origen_permitido("null", true));
         assert!(!origen_permitido("", true));
+    }
+
+    #[test]
+    fn pairing_url_con_forma_qr() {
+        assert_eq!(
+            pairing_url("192.168.1.10", 17860, "abc"),
+            "omni://192.168.1.10:17860#k=abc"
+        );
+    }
+
+    #[test]
+    fn descubrir_ips_solo_privadas_y_sin_duplicar() {
+        // Sin red el resultado es vacío (no inventa); con red, solo privadas.
+        for ip in descubrir_ips_locales() {
+            let parsed: IpAddr = ip.parse().expect("IP válida");
+            assert!(!parsed.is_loopback());
+            assert!(ip_red_privada(parsed), "{}", ip);
+        }
+        let mut v = descubrir_ips_locales();
+        v.sort();
+        v.dedup();
+        assert_eq!(v, descubrir_ips_locales());
     }
 }
