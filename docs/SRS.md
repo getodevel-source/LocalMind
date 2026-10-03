@@ -27,7 +27,14 @@ Este SRS fija el contrato del sistema para que cualquier sesión de trabajo futu
 ### 1.2 Alcance
 **Dentro:** ejecutable de escritorio, gestión de ciclo de vida del motor llama.cpp, perfiles de contexto/rendimiento, configuración TOML, API local, proxy OpenAI con contabilidad de uso, UI (Panel/Chat/Modelos/Uso/Logs/Specs/Ajustes, bilingüe), lanzadores pi/omp/opencode/web/deepseek, notificaciones de escritorio, logs a archivo con rotación, anti-apagón y auto-stop, telemetría local.
 
-**Fuera (por ahora):** inferencia remota/nube, multi-usuario, servidor de red (no LAN, no internet), fine-tuning, RAG/indexado de documentos, apps móviles. Cualquier cambio de alcance entra por P1/P2/P3 del cuestionario.
+**Fuera (por ahora):** inferencia en nube pública, multi-usuario, internet directa sin túnel, fine-tuning, RAG/indexado de documentos, apps móviles. Cualquier cambio de alcance entra por P1/P2/P3 del cuestionario.
+
+> Nota de alcance 2026-10-03 (rama `simplificacion/raices-fase-a`): la red
+> privada deja de estar "fuera". Modos Servidor (LAN opt-in con gate del peer
+> + pairing QR + desbloqueo) / Cliente (proxy `/v1/*` al remoto + `/api/start`
+> bloqueado) / Todo-aquí (default, igual que antes). Internet solo vía túnel
+> asistido (Tailscale documentado primero). Detalle y decisiones en
+> `docs/FASE-B-NET-DESIGN.md` (aprobado por el dueño).
 
 ### 1.3 Definiciones
 | Término | Definición |

@@ -125,10 +125,31 @@ Recorte esperado: **~40 % del código con 100 % de la visión**.
 ## 5. Riesgos y notas
 
 - Revertir "no LAN" del SRS es decisión de alcance, no bug: actualizar `docs/SRS.md` §1.2/§2.5.
-- `sd-server` sin auth + CORS reflectivo (riesgo C2 del proposal) queda contenido mientras
-  difusión esté tras flag.
 - Sin firma ni auto-update (D-24): fricción SmartScreen real; documentar hash + update-check.
 - `bin.bak-*/bin.prev-10683/bin-hip/`, `*.bak-*`, `target/` (284 MB) ensucian raíz pero no viajan al ZIP.
+
+## 6. Cierre de ejecución (2026-10-03, rama `simplificacion/raices-fase-a`)
+
+Fases A/B/C ejecutadas y verificadas (`cargo test` 163/0, clippy 53, puertas UI
+verdes, E2E vivo de dos instancias). Dos ítems del plan quedan DIFERIDOS a
+propósito, con motivo:
+
+- **Router por tabla del `handle_request`**: los brazos ya quedaron finos (A4
+  sacó la validación, B3 suma handlers chicos) y los 163 tests fijan el
+  comportamiento. Reescribir el dispatch es riesgo sin retorno funcional.
+- **Squash de la migración v0→v5**: INSEGURO de hacer — las "fotos previas"
+  (`previous_built_in_field`) son las que distinguen un perfil custom del
+  usuario de un default viejo; colapsarlas puede SOBREESCRIBIR customs.
+  Se mantiene la migración tal cual.
+
+Hallazgos al cierre (ya corregidos salvo indicación):
+
+- `steamwebhelper` ocupa el 8080 → el proxy con motor detenido le pegaba a él
+  (corregido con `engine_reachable`: `stopped`/`error` = `engine_down`).
+- `eventsSource` sin declarar → excepción en cada boot (corregido, 1 línea).
+- Single-instance furable entre TEMP distintos + `remove_file` incondicional
+  del lock (PENDIENTE: endurecer `acquire_single_instance`, no tocado).
+- Puertos vivos observados: Steam 8080; gateway 17860+10.
 
 ## 6. Trazabilidad
 
