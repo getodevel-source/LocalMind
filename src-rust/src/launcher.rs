@@ -43,6 +43,47 @@ pub fn parse_agent_id(agent: &str) -> Option<AgentId> {
     }
 }
 
+/// Destino LLM de un lanzamiento (Fase UX-Guest): a QUÉ gateway habla el CLI.
+/// En Oráculo es el gateway local (`http://127.0.0.1:<puerto>/v1`) con la
+/// clave local; en Guest es el Oráculo remoto (`<remote>/v1`) con su clave.
+/// Los builders reciben `base_url` ya compuesto y no saben de roles: la única
+/// decisión vive en `resolve_launch_target` (`server.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmTarget {
+    /// URL base SIN barra final (`.../v1`).
+    pub base_url: String,
+    pub key: String,
+    pub model_id: String,
+    pub context: usize,
+    pub remote: bool,
+}
+
+impl LlmTarget {
+    pub fn local(http_port: u16, key: &str, model_id: &str, context: usize) -> Self {
+        Self {
+            base_url: format!("http://127.0.0.1:{}/v1", http_port),
+            key: key.to_string(),
+            model_id: model_id.to_string(),
+            context,
+            remote: false,
+        }
+    }
+
+    pub fn remote(root_url: &str, key: &str, model_id: &str, context: usize) -> Self {
+        // La URL guardada puede traer o no el sufijo `/v1` (el POST lo acepta
+        // en ambas formas): normalizar a raíz para no duplicar.
+        let trimmed = root_url.trim().trim_end_matches('/');
+        let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+        Self {
+            base_url: format!("{}/v1", root),
+            key: key.to_string(),
+            model_id: model_id.to_string(),
+            context,
+            remote: true,
+        }
+    }
+}
+
 /// Etiqueta española para la UI y los logs.
 pub fn agent_label(id: AgentId) -> &'static str {
     match id {
@@ -199,13 +240,10 @@ pub fn deepseek_inner_cmd(task: Option<&str>) -> String {
 
 /// Línea completa para `cmd.exe /k` (o `wt … cmd.exe /k`): prefijo `cd /d`,
 /// env del harness y la clave leída del fichero (nunca en argv).
-pub fn deepseek_cmdline(cd_prefix: &str, inner: &str) -> String {
+/// `key_file` es `gateway.key` en local o `remote.key` del dir privado en Guest.
+pub fn deepseek_cmdline(cd_prefix: &str, inner: &str, key_file: &str) -> String {
     // `set /p` con redirección evita exponer la clave en la línea visible.
     let home = deepseek_home()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let key_file = std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("gateway.key"))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     format!(
@@ -216,13 +254,13 @@ pub fn deepseek_cmdline(cd_prefix: &str, inner: &str) -> String {
 
 /// Patch de perfil Cordis del harness (`profiles/headless/cordis.patch.yml`,
 /// ver `docs/agents/deepseek-harness.md` §3): apunta el provider `localmind`
-/// al GATEWAY (`http://127.0.0.1:<http_port>/v1`, nunca al motor) con el
-/// contexto VIVO. La clave viaja por `apiKeyEnv` (nombre de env, nunca cruda).
+/// al GATEWAY que atiende (`base_url` local o remoto, nunca al motor) con el
+/// contexto conocido. La clave viaja por `apiKeyEnv` (nombre de env, nunca cruda).
 /// `model_id` es el alias estable (`localmind`); `maxTokens` fijo 4096 (doc).
-pub fn deepseek_profile_patch(http_port: u16, context: usize, model_id: &str) -> String {
+pub fn deepseek_profile_patch(base_url: &str, context: usize, model_id: &str) -> String {
     format!(
-        "# LocalMind: punto del harness dsh contra el modelo local (generado).\n# - Proveedor OpenAI-compatible en http://127.0.0.1:{port}/v1 (protocolo openai-completions).\n# - Clave via env LOCALMIND_API_KEY (el lanzador la lee de %APPDATA%\\LocalMind\\gateway.key).\n# - Compat: el gateway/proxy LocalMind solo habla chat/completions clasico:\n#   sin rol \"developer\" (usa \"system\") y cap de salida como \"max_tokens\".\n- id: agent-default-model\n  config:\n    provider: localmind\n    model: {model}\n- id: llm-pi-ai\n  config:\n    providers:\n      localmind:\n        displayName: LocalMind\n        apiKeyEnv: LOCALMIND_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:{port}/v1\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n          supportsReasoningEffort: false\n        models:\n          - id: {model}\n            name: LocalMind local model\n            contextWindow: {context}\n            maxTokens: 4096\n",
-        port = http_port,
+        "# LocalMind: punto del harness dsh contra el modelo local (generado).\n# - Proveedor OpenAI-compatible en {base}/v1 (protocolo openai-completions).\n# - Clave via env LOCALMIND_API_KEY (el lanzador la lee del fichero de claves).\n# - Compat: el gateway/proxy LocalMind solo habla chat/completions clasico:\n#   sin rol \"developer\" (usa \"system\") y cap de salida como \"max_tokens\".\n- id: agent-default-model\n  config:\n    provider: localmind\n    model: {model}\n- id: llm-pi-ai\n  config:\n    providers:\n      localmind:\n        displayName: LocalMind\n        apiKeyEnv: LOCALMIND_API_KEY\n        api: openai-completions\n        baseURL: {base}/v1\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n          supportsReasoningEffort: false\n        models:\n          - id: {model}\n            name: LocalMind local model\n            contextWindow: {context}\n            maxTokens: 4096\n",
+        base = base_url.trim_end_matches("/v1"),
         model = model_id,
         context = context,
     )
@@ -257,6 +295,26 @@ pub fn write_deepseek_patch(home: &std::path::Path, content: &str) -> Result<boo
         return Err(format!("No se pudo activar {}: {}", dest.display(), e));
     }
     Ok(true)
+}
+
+/// Guardar la clave remota en el dir privado (Guest): `remote.key` junto a la
+/// config del agente, solo si cambia. El lanzador la lee con `set /p` igual
+/// que `gateway.key`: nunca viaja en argv ni en el comando visible.
+pub fn write_remote_key_file(home: &std::path::Path, key: &str) -> Result<PathBuf, String> {
+    if let Err(e) = std::fs::create_dir_all(home) {
+        return Err(format!("No se pudo crear {}: {}", home.display(), e));
+    }
+    let dest = home.join("remote.key");
+    let content = format!("{}\n", key.trim());
+    if let Ok(cur) = std::fs::read_to_string(&dest) {
+        if cur == content {
+            return Ok(dest);
+        }
+    }
+    if let Err(e) = std::fs::write(&dest, &content) {
+        return Err(format!("No se pudo escribir {}: {}", dest.display(), e));
+    }
+    Ok(dest)
 }
 
 /// ¿Existe `bin` resoluble en PATH? (misma detección que usa el lanzador).
@@ -386,14 +444,13 @@ pub fn effort_flag(effort: Option<&str>) -> &'static str {
 
 /// Línea de comando interna del CLI (`pi`/`omp`).
 /// `agent_path` es el dir privado ya escrito por `agents::write_agent_dir`.
-/// `http_port` es el puerto del GATEWAY (no el del motor): el CLI habla con
-/// `http://127.0.0.1:<http_port>/v1` para pasar por clave/aliasing/usage.
+/// `base_url` es la URL `/v1` del gateway que atiende (local o remoto).
 /// `served` = id del modelo realmente cargado (ver `cli_model`).
 pub fn cli_inner_cmd(
     id: AgentId,
     cd_prefix: &str,
-    http_port: u16,
-    gateway_key: &str,
+    base_url: &str,
+    api_key: &str,
     agent_path: &str,
     effort: Option<&str>,
     allow_home: &str,
@@ -406,10 +463,10 @@ pub fn cli_inner_cmd(
         _ => format!("--model {}", model),
     };
     format!(
-        "{}set \"OPENAI_BASE_URL=http://127.0.0.1:{}/v1\" && set \"OPENAI_API_KEY={}\" && set \"PI_CODING_AGENT_DIR={}\" && {} {}{}{}",
+        "{}set \"OPENAI_BASE_URL={}\" && set \"OPENAI_API_KEY={}\" && set \"PI_CODING_AGENT_DIR={}\" && {} {}{}{}",
         cd_prefix,
-        http_port,
-        gateway_key,
+        base_url,
+        api_key,
         agent_path,
         bin,
         model_flag,
@@ -419,8 +476,8 @@ pub fn cli_inner_cmd(
 }
 
 /// Config `opencode.json` del provider `localmind` (verificado v1.18.10 con
-/// `opencode debug config` + one-shot real): apunta al GATEWAY
-/// (`http://127.0.0.1:<http_port>/v1`) con el contexto VIVO. Se escribe como
+/// `opencode debug config` + one-shot real): apunta al GATEWAY que atiende
+/// (`base_url` local o remoto) con el contexto conocido. Se escribe como
 /// FICHERO en el dir privado (`XDG_CONFIG_HOME/opencode/opencode.json`),
 /// NUNCA por `OPENCODE_CONFIG_CONTENT`: el `set "VAR=<json>"` de cmd.exe
 /// corrompe el JSON (las `\"` sobreviven literales y opencode lo rechaza con
@@ -429,13 +486,13 @@ pub fn cli_inner_cmd(
 /// exporta por `set /p`); `inline` = clave cruda (solo tests, jamás argv).
 /// `model_id` es el alias corto (`qwen3.8-27b`, sin prefijo `localmind/`).
 #[allow(dead_code)]
-pub fn opencode_config_content(http_port: u16, context: usize, model_id: &str) -> String {
-    opencode_config_json(http_port, context, model_id, None)
+pub fn opencode_config_content(base_url: &str, context: usize, model_id: &str) -> String {
+    opencode_config_json(base_url, context, model_id, None)
 }
 
 /// Núcleo testeable: construye el JSON con la clave según el modo.
 /// `api_key=None` → `{env:LOCALMIND_API_KEY}` (lo que escribe el lanzador).
-pub fn opencode_config_json(http_port: u16, context: usize, model_id: &str, api_key: Option<&str>) -> String {
+pub fn opencode_config_json(base_url: &str, context: usize, model_id: &str, api_key: Option<&str>) -> String {
     let key = api_key.unwrap_or("{env:LOCALMIND_API_KEY}");
     serde_json::json!({
         "$schema": "https://opencode.ai/config.json",
@@ -446,7 +503,7 @@ pub fn opencode_config_json(http_port: u16, context: usize, model_id: &str, api_
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "LocalMind",
                 "options": {
-                    "baseURL": format!("http://127.0.0.1:{}/v1", http_port),
+                    "baseURL": base_url,
                     "apiKey": key
                 },
                 "models": {
@@ -662,11 +719,11 @@ mod tests {
         );
         // El CLI habla con el GATEWAY y lleva la clave (puerta con Bearer).
         assert_eq!(
-            cli_inner_cmd(AgentId::Pi, "", 17861, "CLAVE-GW", "C:\\dir", Some("max"), "", "M-VIVO"),
+            cli_inner_cmd(AgentId::Pi, "", "http://127.0.0.1:17861/v1", "CLAVE-GW", "C:\\dir", Some("max"), "", "M-VIVO"),
             "set \"OPENAI_BASE_URL=http://127.0.0.1:17861/v1\" && set \"OPENAI_API_KEY=CLAVE-GW\" && set \"PI_CODING_AGENT_DIR=C:\\dir\" && pi --provider localmind --model localmind/M-VIVO --thinking max"
         );
         // omp igual: gateway + clave, sin hardcodear 8080.
-        let omp = cli_inner_cmd(AgentId::Omp, "", 17860, "K2", "C:\\d", Some("low"), "", "M-VIVO");
+        let omp = cli_inner_cmd(AgentId::Omp, "", "http://127.0.0.1:17860/v1", "K2", "C:\\d", Some("low"), "", "M-VIVO");
         assert!(omp.contains("http://127.0.0.1:17860/v1"));
         assert!(omp.contains("OPENAI_API_KEY=K2"));
         assert!(!omp.contains("http://127.0.0.1:8080/v1"));
@@ -683,9 +740,9 @@ mod tests {
         assert_eq!(effort_flag(Some("high")), " --thinking high");
         assert_eq!(effort_flag(Some("max")), " --thinking max");
         // La línea construida solo lleva `--thinking low` cuando no se pidió effort.
-        let sin_effort = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", None, "", "M-VIVO");
+        let sin_effort = cli_inner_cmd(AgentId::Pi, "", "http://127.0.0.1:17861/v1", "K", "C:\\d", None, "", "M-VIVO");
         assert!(sin_effort.contains("--thinking low"), "{}", sin_effort);
-        let con_max = cli_inner_cmd(AgentId::Pi, "", 17861, "K", "C:\\d", Some("max"), "", "M-VIVO");
+        let con_max = cli_inner_cmd(AgentId::Pi, "", "http://127.0.0.1:17861/v1", "K", "C:\\d", Some("max"), "", "M-VIVO");
         assert!(con_max.contains("--thinking max"), "{}", con_max);
         assert!(!con_max.contains("--thinking low"), "{}", con_max);
     }
@@ -719,7 +776,7 @@ mod tests {
         assert!(evil.contains("\"\""));
         assert!(!evil.contains("&& del"));
         // La cmdline completa nunca lleva la clave en argv: va por `set /p`.
-        let full = deepseek_cmdline("cd /d \"C:\\proj\" && ", "dsh --profile headless");
+        let full = deepseek_cmdline("cd /d \"C:\\proj\" && ", "dsh --profile headless", "C:\\gw\\gateway.key");
         assert!(full.contains("set /p LOCALMIND_API_KEY<"));
         assert!(!full.contains("CLAVE-FALSA"));
         assert!(full.contains("dsh --profile headless"));
@@ -743,7 +800,7 @@ mod tests {
     fn opencode_payload_apunta_al_gateway() {
         // Payload con el puerto del GATEWAY (no el del motor) y contexto vivo;
         // la clave viaja por `{env:...}`, jamás cruda.
-        let raw = opencode_config_content(17861, 32768, "qwen3.8-27b");
+        let raw = opencode_config_content("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b");
         assert!(!raw.contains("CLAVE-FALSA"));
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["model"], serde_json::json!("localmind/qwen3.8-27b"));
@@ -760,7 +817,7 @@ mod tests {
         assert_eq!(m["limit"]["context"], serde_json::json!(32768));
         assert_eq!(m["limit"]["output"], serde_json::json!(8192));
         // Cambiar el puerto ligado cambia la URL (nada hardcodeado a 8080).
-        let raw2 = opencode_config_content(17860, 65536, "qwen3.8-27b");
+        let raw2 = opencode_config_content("http://127.0.0.1:17860/v1", 65536, "qwen3.8-27b");
         assert!(raw2.contains("http://127.0.0.1:17860/v1"));
         assert!(!raw2.contains("http://127.0.0.1:8080/v1"));
         assert!(raw2.contains("\"context\":65536"));
@@ -809,19 +866,19 @@ mod tests {
     fn opencode_config_fichero_gateway_y_estable() {
         // El fichero apunta al GATEWAY ligado con contexto vivo; con clave
         // `{env:}` por defecto y cruda solo si se pide explícito (tests).
-        let a = opencode_config_json(17861, 32768, "qwen3.8-27b", None);
+        let a = opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", None);
         assert!(a.contains("http://127.0.0.1:17861/v1"));
         assert!(!a.contains("http://127.0.0.1:8080/v1"));
         assert!(a.contains("{env:LOCALMIND_API_KEY}"));
         assert!(!a.contains("CLAVE-FALSA"));
         assert!(a.contains("\"context\":32768"));
-        let inline = opencode_config_json(17861, 32768, "qwen3.8-27b", Some("K-CRUDA"));
+        let inline = opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", Some("K-CRUDA"));
         assert!(inline.contains("K-CRUDA"));
         // Otro puerto/contexto → difieren; mismo input ⇒ idéntico.
-        let b = opencode_config_json(17862, 65536, "qwen3.8-27b", None);
+        let b = opencode_config_json("http://127.0.0.1:17862/v1", 65536, "qwen3.8-27b", None);
         assert!(b.contains("http://127.0.0.1:17862/v1"));
         assert_ne!(a, b);
-        assert_eq!(a, opencode_config_json(17861, 32768, "qwen3.8-27b", None));
+        assert_eq!(a, opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", None));
         // Ruta dentro del dir privado y escritura solo-si-cambia.
         let dir = std::env::temp_dir().join(format!("lm-oc-cfg-{}", std::process::id()));
         let home = dir.join("opencode");
@@ -852,7 +909,7 @@ mod tests {
     fn deepseek_patch_gateway_y_estable() {
         // El patch apunta al GATEWAY ligado (no al motor) con contexto vivo;
         // la clave viaja por `apiKeyEnv` (nombre), jamás cruda.
-        let a = deepseek_profile_patch(17861, 32768, "localmind");
+        let a = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "localmind");
         assert!(a.contains("baseURL: http://127.0.0.1:17861/v1"));
         assert!(a.contains("contextWindow: 32768"));
         assert!(a.contains("model: localmind"));
@@ -864,12 +921,12 @@ mod tests {
         assert!(!a.contains("CLAVE-FALSA"));
         assert!(!a.contains("17860") || a.contains("17861"));
         // Otro puerto/contexto → difieren exactamente en esos campos.
-        let b = deepseek_profile_patch(17862, 65536, "localmind");
+        let b = deepseek_profile_patch("http://127.0.0.1:17862/v1", 65536, "localmind");
         assert!(b.contains("baseURL: http://127.0.0.1:17862/v1"));
         assert!(b.contains("contextWindow: 65536"));
         assert_ne!(a, b);
         // Estable: mismo input ⇒ idéntico output (mtime estable).
-        let a2 = deepseek_profile_patch(17861, 32768, "localmind");
+        let a2 = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "localmind");
         assert_eq!(a, a2);
         // Escritura solo-si-cambia: segunda vez no toca el fichero.
         let dir = std::env::temp_dir().join(format!("lm-ds-patch-{}", std::process::id()));
@@ -907,7 +964,7 @@ mod tests {
         }
 
         // El `--model` que se ejecuta lleva el mismo id que la respuesta JSON.
-        let linea = cli_inner_cmd(AgentId::Omp, "", 17860, "K", "C:\\d", Some("low"), "", bonsai);
+        let linea = cli_inner_cmd(AgentId::Omp, "", "http://127.0.0.1:17860/v1", "K", "C:\\d", Some("low"), "", bonsai);
         assert!(linea.contains("--model localmind/Ternary-Bonsai-2-27B-PTQ1_0"), "{}", linea);
         assert!(!linea.contains("qwen3.8-27b"), "la línea aún nombra al modelo viejo: {}", linea);
     }
@@ -930,16 +987,50 @@ mod tests {
     /// Falla sobre el código original, que fijaba `"localmind"` en el patch.
     #[test]
     fn el_patch_de_deepseek_nombra_el_modelo_y_el_contexto_vivos() {
-        let a = deepseek_profile_patch(17861, 32768, "Ternary-Bonsai-2-27B-PTQ1_0");
+        let a = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "Ternary-Bonsai-2-27B-PTQ1_0");
         assert!(a.contains("model: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
         assert!(a.contains("id: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
         assert!(a.contains("contextWindow: 32768"), "{}", a);
         // Cambiar de modelo cambia el patch (se reescribe en cada lanzamiento).
-        let b = deepseek_profile_patch(17861, 32768, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let b = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert_ne!(a, b);
         // Cambiar de contexto también (nada queda colgado de una sesión vieja).
-        let c = deepseek_profile_patch(17861, 262144, "Ternary-Bonsai-2-27B-PTQ1_0");
+        let c = deepseek_profile_patch("http://127.0.0.1:17861/v1", 262144, "Ternary-Bonsai-2-27B-PTQ1_0");
         assert!(c.contains("contextWindow: 262144"), "{}", c);
         assert_ne!(a, c);
+    }
+
+    /// `LlmTarget` compone la base `/v1` (Fase UX-Guest): local en loopback,
+    /// remoto tal cual (con o sin `/v1` de más).
+    #[test]
+    fn target_local_y_remoto_componen_base() {
+        let l = LlmTarget::local(17861, "K", "M", 32768);
+        assert_eq!(l.base_url, "http://127.0.0.1:17861/v1");
+        assert_eq!(l.key, "K");
+        assert!(!l.remote);
+        let r = LlmTarget::remote("http://192.168.1.10:17860", "KR", "M", 65536);
+        assert_eq!(r.base_url, "http://192.168.1.10:17860/v1");
+        assert!(r.remote);
+        // Con `/v1` de más no se duplica.
+        let r2 = LlmTarget::remote("http://192.168.1.10:17860/v1", "KR", "M", 1);
+        assert_eq!(r2.base_url, "http://192.168.1.10:17860/v1");
+        // Y los builders la usan tal cual (nada hardcodeado a loopback).
+        let yml = crate::agents::omp_models_yml(&r.base_url, 1, "KR", false, "M");
+        assert!(yml.contains("baseUrl: http://192.168.1.10:17860/v1"), "{}", yml);
+        assert!(!yml.contains("127.0.0.1"), "{}", yml);
+    }
+
+    /// `remote.key` se guarda en el dir privado solo si cambia (Guest).
+    #[test]
+    fn remote_key_file_solo_si_cambia() {
+        let dir = std::env::temp_dir().join(format!("lm-rk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p1 = write_remote_key_file(&dir, "KR").expect("escribe");
+        assert_eq!(std::fs::read_to_string(&p1).unwrap(), "KR\n");
+        let p2 = write_remote_key_file(&dir, "KR").expect("idempotente");
+        assert_eq!(p1, p2);
+        let _ = write_remote_key_file(&dir, "OTRA").expect("rota");
+        assert_eq!(std::fs::read_to_string(&p1).unwrap(), "OTRA\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

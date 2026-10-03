@@ -90,7 +90,7 @@ pub fn agent_dir(agent: &str) -> PathBuf {
 /// alias `localmind` se conserva detrás: es el nombre con el que hay agentes
 /// configurados en la calle, y aunque no se use, el proxy reescribe cualquier
 /// `model` pedido al servido (D-2), así que nunca puede romper la conexión.
-pub fn pi_models_json(http_port: u16, context: usize, key: &str, vision: bool, model_id: &str) -> String {
+pub fn pi_models_json(base_url: &str, context: usize, key: &str, vision: bool, model_id: &str) -> String {
     let max_toks = (context / 2).min(16384);
     let input: Vec<&str> = if vision { vec!["text", "image"] } else { vec!["text"] };
     // thinkingLevelMap verificado contra el esquema pi (`model-config.d.ts`):
@@ -119,7 +119,7 @@ pub fn pi_models_json(http_port: u16, context: usize, key: &str, vision: bool, m
         "providers": {
             "localmind": {
                 "name": "LocalMind",
-                "baseUrl": format!("http://127.0.0.1:{}/v1", http_port),
+                "baseUrl": base_url,
                 "apiKey": key,
                 "api": "openai-completions",
                 "models": [
@@ -142,12 +142,12 @@ pub fn pi_models_json(http_port: u16, context: usize, key: &str, vision: bool, m
 /// el que el lanzador pasa por `--model`. `localmind` se conserva como alias
 /// detrás (D-2 reescribe lo que sea al servido, así que un config viejo sigue
 /// conectando).
-pub fn omp_models_yml(http_port: u16, context: usize, key: &str, vision: bool, model_id: &str) -> String {
+pub fn omp_models_yml(base_url: &str, context: usize, key: &str, vision: bool, model_id: &str) -> String {
     let input = if vision { "[text, image]" } else { "[text]" };
     format!(
         r#"providers:
   localmind:
-    baseUrl: http://127.0.0.1:{}/v1
+    baseUrl: {base}
     apiKey: {}
     api: openai-completions
     models:
@@ -196,7 +196,7 @@ pub fn omp_models_yml(http_port: u16, context: usize, key: &str, vision: bool, m
           reasoningContentField: reasoning_content
           supportsDeveloperRole: false
 "#,
-        http_port, key, input, context, input, context
+        key, input, context, input, context, base = base_url
     )
 }
 
@@ -218,10 +218,9 @@ pub fn vision_enabled() -> bool {
 }
 
 /// Escribir el dir privado del agente. Devuelve el dir o un mensaje español.
-/// `key` es la clave local ya cargada por el servidor (fuente única:
-/// `HttpServer::start` → `handle_launch` → aquí).
-/// `http_port` es el puerto del GATEWAY (no el del motor): los CLIs hablan
-/// con `http://127.0.0.1:<http_port>/v1` para pasar por clave/aliasing/usage.
+/// `key` es la clave ya cargada por el servidor (local) o la remota (Guest).
+/// `base_url` es la URL `/v1` del gateway que atiende (local o remoto): los
+/// CLIs hablan contra ella para pasar por clave/aliasing/usage.
 ///
 /// `model_id` es el id REALMENTE servido por el motor. Se reescribe en CADA
 /// lanzamiento: un `models.yml`/`models.json` escrito antes de un cambio de
@@ -229,7 +228,7 @@ pub fn vision_enabled() -> bool {
 /// seguir anunciando el modelo anterior.
 pub fn write_agent_dir(
     agent: &str,
-    http_port: u16,
+    base_url: &str,
     context: usize,
     key: &str,
     model_id: &str,
@@ -241,12 +240,12 @@ pub fn write_agent_dir(
     }
     if agent == "pi" {
         let p = dir.join("models.json");
-        if let Err(e) = std::fs::write(&p, pi_models_json(http_port, context, key, vision, model_id)) {
+        if let Err(e) = std::fs::write(&p, pi_models_json(base_url, context, key, vision, model_id)) {
             return Err(format!("No se pudo escribir {}: {}", p.display(), e));
         }
     } else {
         let m = dir.join("models.yml");
-        if let Err(e) = std::fs::write(&m, omp_models_yml(http_port, context, key, vision, model_id)) {
+        if let Err(e) = std::fs::write(&m, omp_models_yml(base_url, context, key, vision, model_id)) {
             return Err(format!("No se pudo escribir {}: {}", m.display(), e));
         }
         let c = dir.join("config.yml");
@@ -305,7 +304,7 @@ mod tests {
     #[test]
     fn pi_json_apunta_al_gateway() {
         // El puerto es el del GATEWAY (17860 ligado), no el del motor (8080).
-        let s = pi_models_json(17861, 65536, "clave-falsa", false, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let s = pi_models_json("http://127.0.0.1:17861/v1", 65536, "clave-falsa", false, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert!(s.contains("http://127.0.0.1:17861/v1"));
         assert!(!s.contains("http://127.0.0.1:8080/v1"));
         assert!(s.contains("\"contextWindow\": 65536") || s.contains("\"contextWindow\":65536") || s.contains("65536"));
@@ -313,13 +312,13 @@ mod tests {
         assert!(s.contains("\"localmind\""));
         assert!(s.contains("Qwen3.8-27B-IQ4_XS_4BPW"));
         // Otro puerto ligado → otro baseUrl (nada hardcodeado).
-        let s2 = pi_models_json(17860, 32768, "clave-falsa", false, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let s2 = pi_models_json("http://127.0.0.1:17860/v1", 32768, "clave-falsa", false, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert!(s2.contains("http://127.0.0.1:17860/v1"));
     }
 
     #[test]
     fn omp_yml_apunta_al_gateway() {
-        let s = omp_models_yml(17861, 65536, "clave-falsa", false, "Ternary-Bonsai-2-27B-PTQ1_0");
+        let s = omp_models_yml("http://127.0.0.1:17861/v1", 65536, "clave-falsa", false, "Ternary-Bonsai-2-27B-PTQ1_0");
         assert!(s.contains("http://127.0.0.1:17861/v1"));
         assert!(!s.contains("http://127.0.0.1:8080/v1"));
         assert!(s.contains("contextWindow: 65536"));
@@ -331,10 +330,10 @@ mod tests {
     fn configs_llevan_la_clave_y_texto_sin_vision() {
         // Clave falsa de prueba: jamás la real de %APPDATA%.
         let key = "clave-falsa-de-prueba-0123456789abcdef";
-        let pi = pi_models_json(8099, 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let pi = pi_models_json("http://127.0.0.1:8099/v1", 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert!(pi.contains(key), "models.json sin apiKey");
         assert!(!pi.contains("auth"), "models.json no usa auth");
-        let omp = omp_models_yml(8099, 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let omp = omp_models_yml("http://127.0.0.1:8099/v1", 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert!(omp.contains(&format!("apiKey: {}", key)), "models.yml sin apiKey");
         assert!(!omp.contains("auth: none"), "models.yml aún declara auth: none");
         // Motor solo-texto: ninguna config anuncia imagen.
@@ -349,8 +348,8 @@ mod tests {
         assert!(!crate::auth::is_authorized(&[], key));
         assert!(!crate::auth::is_authorized(&[h("Authorization", "Bearer otra")], key));
         // Con visión verificada sí se anuncia imagen en ambas.
-        let pi_v = pi_models_json(8099, 65536, key, true, "Qwen3.8-27B-IQ4_XS_4BPW");
-        let omp_v = omp_models_yml(8099, 65536, key, true, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let pi_v = pi_models_json("http://127.0.0.1:8099/v1", 65536, key, true, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let omp_v = omp_models_yml("http://127.0.0.1:8099/v1", 65536, key, true, "Qwen3.8-27B-IQ4_XS_4BPW");
         assert!(pi_v.contains("\"image\""), "pi con visión debe anunciar image");
         assert!(omp_v.contains("[text, image]"), "omp con visión debe anunciar image");
     }
@@ -385,8 +384,8 @@ mod tests {
     fn cada_config_nombra_el_modelo_servido() {
         let key = "clave-falsa-de-prueba-0123456789abcdef";
         let served = "Ternary-Bonsai-2-27B-PTQ1_0";
-        let pi = pi_models_json(8099, 65536, key, false, served);
-        let omp = omp_models_yml(8099, 65536, key, false, served);
+        let pi = pi_models_json("http://127.0.0.1:8099/v1", 65536, key, false, served);
+        let omp = omp_models_yml("http://127.0.0.1:8099/v1", 65536, key, false, served);
         for (nombre, cfg) in [("pi", &pi), ("omp", &omp)] {
             assert!(cfg.contains(served), "{} no anuncia el modelo servido: {}", nombre, cfg);
             // Compat: el alias por el que hay agentes configurados sigue ahí.
@@ -394,8 +393,8 @@ mod tests {
         }
         // Y un config escrito con el modelo ANTERIOR no sobrevive al relanzar:
         // el lanzador reescribe con el id nuevo en cada lanzamiento.
-        let antes = omp_models_yml(8099, 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
-        let despues = omp_models_yml(8099, 65536, key, false, served);
+        let antes = omp_models_yml("http://127.0.0.1:8099/v1", 65536, key, false, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let despues = omp_models_yml("http://127.0.0.1:8099/v1", 65536, key, false, served);
         assert_ne!(antes, despues, "el id nuevo no cambia el config: no se reescribe");
         assert!(!despues.contains("Qwen3.8-27B-IQ4_XS_4BPW"), "queda el modelo viejo: {}", despues);
     }
@@ -424,8 +423,8 @@ mod tests {
     fn el_contexto_publicado_segue_al_vivo() {
         let key = "clave-falsa-de-prueba-0123456789abcdef";
         for ctx in [32768usize, 65536, 131072, 262144] {
-            let pi = pi_models_json(8099, ctx, key, false, "M");
-            let omp = omp_models_yml(8099, ctx, key, false, "M");
+            let pi = pi_models_json("http://127.0.0.1:8099/v1", ctx, key, false, "M");
+            let omp = omp_models_yml("http://127.0.0.1:8099/v1", ctx, key, false, "M");
             assert!(pi.contains(&format!("\"contextWindow\": {}", ctx)), "pi no refleja ctx {}", ctx);
             assert!(omp.contains(&format!("contextWindow: {}", ctx)), "omp no refleja ctx {}", ctx);
         }

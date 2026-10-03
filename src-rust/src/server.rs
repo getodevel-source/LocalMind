@@ -1198,16 +1198,16 @@ fn handle_request(
     // `/api/launch_omp` y `/api/launch_pi` siguen como reenvíos finos hasta
     // que la nueva UI esté en producción; entonces podrán eliminarse.
     if method == "POST" && url == "/api/launch" {
-        handle_launch_generic(req, &mgr, &gateway_key, http_port, origin.clone());
+        handle_launch_generic(req, &mgr, &cfg, &gateway_key, http_port, origin.clone());
         return;
     }
     if method == "POST" && url == "/api/launch_omp" {
-        handle_launch_compat(req, &mgr, "omp", &gateway_key, http_port, origin.clone());
+        handle_launch_compat(req, &mgr, &cfg, "omp", &gateway_key, http_port, origin.clone());
         return;
     }
 
     if method == "POST" && url == "/api/launch_pi" {
-        handle_launch_compat(req, &mgr, "pi", &gateway_key, http_port, origin.clone());
+        handle_launch_compat(req, &mgr, &cfg, "pi", &gateway_key, http_port, origin.clone());
         return;
     }
 
@@ -1412,6 +1412,17 @@ fn open_browser_action(mgr: &Arc<ProcessManager>) {
     ));
 }
 
+/// Contexto compartido de los lanzadores (Fase UX-Guest): lo que todo
+/// lanzamiento necesita del request + estado vivo, sin firmas de 8-9
+/// parámetros. `gateway_key`/`http_port` solo se usan en la rama Oráculo
+/// (Guest resuelve el remoto desde `cfg`).
+struct LaunchCtx<'a> {
+    mgr: &'a Arc<ProcessManager>,
+    cfg: &'a Arc<ConfigStore>,
+    gateway_key: &'a str,
+    http_port: u16,
+}
+
 /// Lanzador genérico (`POST /api/launch {"agent":"pi"|"omp"|"opencode"|"web"|"deepseek"}`).
 ///
 /// - `pi`/`omp`: escribe `%APPDATA%\LocalMind\agents\<agent>\` con el puerto,
@@ -1427,10 +1438,19 @@ fn open_browser_action(mgr: &Arc<ProcessManager>) {
 fn handle_launch_generic(
     mut req: tiny_http::Request,
     mgr: &Arc<ProcessManager>,
+    cfg: &Arc<ConfigStore>,
     gateway_key: &str,
     http_port: u16,
     origin: Option<String>,
 ) {
+    // Contexto compartido (Fase UX-Guest): los lanzadores ya no arrastran
+    // 8-9 parámetros sueltos.
+    let ctx = LaunchCtx {
+        mgr,
+        cfg,
+        gateway_key,
+        http_port,
+    };
     let mut body = String::new();
     let _ = req.as_reader().read_to_string(&mut body);
     let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
@@ -1452,7 +1472,12 @@ fn handle_launch_generic(
         }
     };
     // `web` = misma acción que `/api/open_browser` (navegador al motor).
+    // En Guest no hay motor local que mostrar: 409 honesto.
     if id == crate::launcher::AgentId::Web {
+        if cfg.get().client.enabled {
+            let _ = req.respond(json_response_for_origin(409, r#"{"error":"modo_guest_sin_motor_local","message":"En modo Guest no hay motor local: usa el Chat contra el Oráculo."}"#.into(), origin.as_deref()));
+            return;
+        }
         open_browser_action(&mgr);
         let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok"}"#.into(), origin.as_deref()));
         return;
@@ -1485,15 +1510,15 @@ fn handle_launch_generic(
     // 409 siempre refleja el estado real del motor de esta instancia.
     // `deepseek`/`opencode` = harnesses reales; `pi`/`omp` = núcleo CLI.
     if id == crate::launcher::AgentId::DeepSeek {
-        launch_deepseek(req, &mgr, req_dir.as_deref(), req_task.as_deref(), http_port, origin.as_deref());
+        launch_deepseek(req, &ctx, req_dir.as_deref(), req_task.as_deref(), origin.as_deref());
         return;
     }
     if id == crate::launcher::AgentId::OpenCode {
-        launch_opencode(&mgr, req, req_dir.as_deref(), req_task.as_deref(), http_port, origin.as_deref());
+        launch_opencode(req, &ctx, req_dir.as_deref(), req_task.as_deref(), origin.as_deref());
         return;
     }
     // `pi`/`omp` llegan aquí (el `match` ya resolvió `web` y el 501).
-    launch_cli(req, &mgr, http_port, id, req_dir.as_deref(), req_effort.as_deref(), gateway_key, origin.as_deref());
+    launch_cli(req, &ctx, id, req_dir.as_deref(), req_effort.as_deref(), origin.as_deref());
 }
 
 /// Reenvíos finos de `/api/launch_omp` y `/api/launch_pi` (UI actual).
@@ -1501,6 +1526,7 @@ fn handle_launch_generic(
 fn handle_launch_compat(
     mut req: tiny_http::Request,
     mgr: &Arc<ProcessManager>,
+    cfg: &Arc<ConfigStore>,
     agent: &str,
     gateway_key: &str,
     http_port: u16,
@@ -1522,7 +1548,7 @@ fn handle_launch_compat(
             return;
         }
     };
-    launch_cli(req, &mgr, http_port, id, req_dir.as_deref(), req_effort.as_deref(), gateway_key, origin.as_deref());
+    launch_cli(req, &LaunchCtx { mgr, cfg, gateway_key, http_port }, id, req_dir.as_deref(), req_effort.as_deref(), origin.as_deref());
 }
 
 /// Helpers de spawn de terminal con verificación + fallback (`wt` → `cmd`).
@@ -1549,6 +1575,80 @@ fn cmd_start_command(cmd_str: &str) -> std::process::Command {
     c
 }
 
+/// Modelo + contexto del Oráculo desde su `/api/status` (Fase UX-Guest, puro):
+/// `model` con stem sin `.gguf` (alias `localmind` si vacío) y `context` > 0
+/// (default 32768 si ausente o cero). Nunca falla: el llamador ya validó que
+/// el remoto responde.
+fn remote_status_target(body: &str) -> (String, usize) {
+    let v: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+    let model = v
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .trim();
+    let stem = model
+        .strip_suffix(".gguf")
+        .or_else(|| model.strip_suffix(".GGUF"))
+        .unwrap_or(model);
+    let model_id = if stem.trim().is_empty() {
+        "localmind".to_string()
+    } else {
+        stem.to_string()
+    };
+    let context = v
+        .get("context")
+        .and_then(|c| c.as_u64())
+        .and_then(|c| usize::try_from(c).ok())
+        .filter(|c| *c > 0)
+        .unwrap_or(32768);
+    (model_id, context)
+}
+
+/// Destino LLM de un lanzamiento (Fase UX-Guest): a QUÉ gateway habla el CLI.
+/// En Oráculo (`client` apagado) es el gateway local con motor vivo, con los
+/// mensajes 409 históricos intactos. En Guest es el Oráculo remoto, que
+/// requiere remoto configurado y alcanzable (modelo/contexto del
+/// `/api/status` remoto con fallbacks honestos).
+/// `Err` = cuerpo JSON español listo para el 409.
+fn resolve_launch_target(
+    cfg: &crate::config::AppConfig,
+    st: &ServerStatus,
+    gateway_key: &str,
+    http_port: u16,
+) -> Result<crate::launcher::LlmTarget, String> {
+    if cfg.client.enabled {
+        let Some((root, key)) = remote_target(cfg) else {
+            return Err(r#"{"error":"remoto_no_configurado","message":"Modo Guest sin Oráculo: configura el Servidor en Conexión."}"#.to_string());
+        };
+        let status_url = format!("{}/api/status", root);
+        let body = ureq::get(&status_url)
+            .set("Authorization", &crate::auth::bearer(&key))
+            .timeout(Duration::from_secs(8))
+            .call()
+            .map(|r| r.into_string().unwrap_or_default())
+            .map_err(|e| {
+                format!(
+                    r#"{{"error":"remoto_no_alcanzado","message":"No se pudo contactar al Oráculo: {}"}}"#,
+                    e
+                )
+            })?;
+        let (model_id, context) = remote_status_target(&body);
+        return Ok(crate::launcher::LlmTarget::remote(&root, &key, &model_id, context));
+    }
+    if !crate::agents::engine_live(st) {
+        return Err(crate::agents::engine_down_error(st));
+    }
+    let served = crate::agents::served_model_id(st).ok_or_else(|| {
+        r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string()
+    })?;
+    Ok(crate::launcher::LlmTarget::local(
+        http_port,
+        gateway_key,
+        &served,
+        st.context,
+    ))
+}
+
 /// Los CLIs hablan con el GATEWAY ligado (`http://127.0.0.1:<http_port>/v1`,
 /// propagado desde `HttpServer::start` por cada request) para pasar por
 /// clave/aliasing/usage. El puerto del motor (`st.port`) es solo interno.
@@ -1557,47 +1657,26 @@ fn cmd_start_command(cmd_str: &str) -> std::process::Command {
 /// propio): 409 sin motor, dir privado con estado vivo, spawn verificado.
 fn launch_cli(
     req: tiny_http::Request,
-    mgr: &Arc<ProcessManager>,
-    http_port: u16,
+    ctx: &LaunchCtx,
     id: crate::launcher::AgentId,
     req_dir: Option<&str>,
     req_effort: Option<&str>,
-    gateway_key: &str,
     origin: Option<&str>,
 ) {
-    let st = mgr.get_status();
-    if !crate::agents::engine_live(&st) {
-        let err = crate::agents::engine_down_error(&st);
-        let _ = req.respond(json_response_for_origin(409, err, origin));
-        return;
-    }
-    let context = st.context;
-    // Id del modelo REALMENTE servido: con el motor vivo sale de `st.model`
-    // (p. ej. `Ternary-Bonsai-2-27B-PTQ1_0.gguf` → `Ternary-Bonsai-2-27B-PTQ1_0`).
-    // Es el dato que va al config privado del agente, al `--model` del binario
-    // y a la respuesta del endpoint: los tres coinciden con lo que sirve el
-    // motor. El guard de arriba ya-cvita el motor apagado, así que aquí el id
-    // nunca es el de la sesión anterior.
-    let served = match crate::agents::served_model_id(&st) {
-        Some(m) => m,
-        None => {
-            // Motor vivo sin nombre de modelo: no hay id honesto que escribir,
-            // y escribir el de la sesión anterior sería la misma mentira que
-            // se corrige aquí. Se rechaza el lanzamiento en vez de mentir.
-            mgr.log(&format!(
-                "[LocalMind] {} sin nombre de modelo en el estado: no se escribe config (quedaría con un id inventado).",
-                crate::launcher::agent_label(id)
-            ));
-            let _ = req.respond(json_response_for_origin(
-                409,
-                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
-                origin,
-            ));
+    let mgr = ctx.mgr;
+    // Destino LLM (Fase UX-Guest): Oráculo = gateway local con motor vivo;
+    // Guest = Oráculo remoto. Los 409 históricos salen del resolver.
+    let target = match resolve_launch_target(&ctx.cfg.get(), &mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = req.respond(json_response_for_origin(409, e, origin));
             return;
         }
     };
-    // `http_port` es el puerto del GATEWAY ligado (propagado desde `start`);
-    // el del motor (`st.port`) es solo interno (health/slots/metrics).
+    // `served` es el id que atiende (local vivo o remoto): va al config
+    // privado del agente, al `--model` y a la respuesta, los tres iguales.
+    let served = target.model_id.clone();
+    let context = target.context;
     let agent = match id {
         crate::launcher::AgentId::Pi => "pi",
         crate::launcher::AgentId::Omp => "omp",
@@ -1614,7 +1693,7 @@ fn launch_cli(
     };
     let cli_model = crate::launcher::cli_model(id, &served);
     let label = crate::launcher::agent_label(id);
-    let agent_dir = match crate::agents::write_agent_dir(agent, http_port, context, gateway_key, &served) {
+    let agent_dir = match crate::agents::write_agent_dir(agent, &target.base_url, context, &target.key, &served) {
         Ok(d) => d,
         Err(e) => {
             let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
@@ -1638,8 +1717,8 @@ fn launch_cli(
     let inner_cmd = crate::launcher::cli_inner_cmd(
         id,
         &cd_prefix,
-        http_port,
-        gateway_key,
+        &target.base_url,
+        &target.key,
         &agent_path,
         req_effort,
         &allow_home,
@@ -1667,13 +1746,18 @@ fn launch_cli(
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo abrir la terminal ({}): {}", via, detail) }).to_string(), origin));
         return;
     }
+    let via_donde = if target.remote {
+        format!("remoto {}", target.base_url)
+    } else {
+        format!("gateway local :{}", ctx.http_port)
+    };
     mgr.log(&format!(
-        "[LocalMind] Terminal {} lanzada ({} {}) en '{}' (gateway :{}, ctx: {}) conectada a {}.",
+        "[LocalMind] Terminal {} lanzada ({} {}) en '{}' ({}; ctx: {}) conectada a {}.",
         label, via, detail,
         req_dir.unwrap_or("directorio default"),
-        http_port, context, cli_model
+        via_donde, context, cli_model
     ));
-    let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","model":"{}","port":{},"context":{}}}"#, cli_model, http_port, context), origin));
+    let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","model":"{}","port":{},"context":{},"remote":{}}}"#, cli_model, if target.remote { 0 } else { ctx.http_port }, context, target.remote), origin));
 }
 
 /// Lanzador DeepSeek (`dsh --profile headless ["<tarea>"]`, verificado en
@@ -1683,44 +1767,29 @@ fn launch_cli(
 /// one-shot headless. La clave se lee aquí mismo de `gateway.key`.
 fn launch_deepseek(
     req: tiny_http::Request,
-    mgr: &Arc<ProcessManager>,
+    ctx: &LaunchCtx,
     req_dir: Option<&str>,
     req_task: Option<&str>,
-    http_port: u16,
     origin: Option<&str>,
 ) {
+    let mgr = ctx.mgr;
     let inner = crate::launcher::deepseek_inner_cmd(req_task);
     let cd_prefix = match req_dir {
         Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
         _ => String::new(),
     };
-    // Patch Cordis generado con valores VIVOS (gateway + contexto + modelo): el
-    // fichero estático con 17860 hardcodeado queda obsoleto en cuanto el HTTP
-    // liga otro puerto. Solo se reescribe si cambia (mtime estable).
-    //
-    // Mismo guard que `launch_cli`/`launch_opencode`: sin motor no se escribe
-    // ninguna config. Antes se escribía igual, con el contexto por defecto
-    // (32768) y el alias `localmind` fijo, y se abría una terminal contra un
-    // motor que no estaba sirviendo nada.
-    let st = mgr.get_status();
-    if !crate::agents::engine_live(&st) {
-        let err = crate::agents::engine_down_error(&st);
-        let _ = req.respond(json_response_for_origin(409, err, origin));
-        return;
-    }
-    let served = match crate::agents::served_model_id(&st) {
-        Some(m) => m,
-        None => {
-            let _ = req.respond(json_response_for_origin(
-                409,
-                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
-                origin,
-            ));
+    // Patch Cordis generado con el destino VIVO (Oráculo local o remoto):
+    // solo se reescribe si cambia (mtime estable). Sin destino no se escribe
+    // ninguna config ni se abre terminal contra la nada (409 del resolver).
+    let target = match resolve_launch_target(&ctx.cfg.get(), &ctx.mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = req.respond(json_response_for_origin(409, e, origin));
             return;
         }
     };
     let home = crate::launcher::deepseek_home().unwrap_or_else(|| crate::agents::agent_dir("deepseek"));
-    let patch = crate::launcher::deepseek_profile_patch(http_port, st.context, &served);
+    let patch = crate::launcher::deepseek_profile_patch(&target.base_url, target.context, &target.model_id);
     match crate::launcher::write_deepseek_patch(&home, &patch) {
         Ok(_) => {}
         Err(e) => {
@@ -1728,7 +1797,20 @@ fn launch_deepseek(
             return;
         }
     }
-    let cmd_str = crate::launcher::deepseek_cmdline(&cd_prefix, &inner);
+    let key_file = if target.remote {
+        // Guest: la clave remota vive en `remote.key` del dir privado (nunca
+        // en argv; el lanzador la lee con `set /p` igual que `gateway.key`).
+        match crate::launcher::write_remote_key_file(&home, &target.key) {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+                return;
+            }
+        }
+    } else {
+        crate::auth::gateway_key_path().to_string_lossy().to_string()
+    };
+    let cmd_str = crate::launcher::deepseek_cmdline(&cd_prefix, &inner, &key_file);
     let wt = wt_command(&cmd_str);
     let (ok, branch, detail) = crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
     let via = match branch {
@@ -1763,13 +1845,13 @@ fn launch_deepseek(
 /// dirs XDG aislados en el dir privado (nunca `~/.config/opencode`). Sin
 /// motor vivo: 409; sin binario: 501 en español. Spawn verificado + fallback.
 fn launch_opencode(
-    mgr: &Arc<ProcessManager>,
     req: tiny_http::Request,
+    ctx: &LaunchCtx,
     req_dir: Option<&str>,
     req_task: Option<&str>,
-    http_port: u16,
     origin: Option<&str>,
 ) {
+    let mgr = ctx.mgr;
     if !crate::launcher::opencode_installed() {
         let _ = req.respond(json_response_for_origin(
             501,
@@ -1778,37 +1860,27 @@ fn launch_opencode(
         ));
         return;
     }
-    let st = mgr.get_status();
-    if !crate::agents::engine_live(&st) {
-        let err = crate::agents::engine_down_error(&st);
-        let _ = req.respond(json_response_for_origin(409, err, origin));
-        return;
-    }
-    // Id corto = el REALMENTE servido por el motor (p. ej.
-    // `Ternary-Bonsai-2-27B-PTQ1_0`); el flag lleva el prefijo de provider.
-    // baseURL = GATEWAY (contabilidad/aliasing), no el motor.
-    // La config se escribe como FICHERO en el dir privado (no por env: el
-    // `set "VAR=<json>"` de cmd.exe corrompía el JSON con `\"` literales y
-    // opencode ignoraba el provider → `ProviderModelNotFoundError`).
-    let model_id = match crate::agents::served_model_id(&st) {
-        Some(m) => m,
-        None => {
-            let _ = req.respond(json_response_for_origin(
-                409,
-                r#"{"error":"modelo_desconocido","message":"El motor está en marcha pero no reporta qué modelo sirve. Reinícielo con /api/start."}"#.to_string(),
-                origin,
-            ));
+    // Destino LLM (Fase UX-Guest): Oráculo local con motor vivo o remoto.
+    let target = match resolve_launch_target(&ctx.cfg.get(), &ctx.mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = req.respond(json_response_for_origin(409, e, origin));
             return;
         }
     };
+    // Id corto = el que atiende (local servido o remoto anunciado); el flag
+    // lleva el prefijo de provider. baseURL = GATEWAY que atiende, no el motor.
+    // La config se escribe como FICHERO en el dir privado (no por env: el
+    // `set "VAR=<json>"` de cmd.exe corrompía el JSON con `\"` literales y
+    // opencode ignoraba el provider → `ProviderModelNotFoundError`).
+    let model_id = target.model_id.clone();
     let full = crate::launcher::cli_model(crate::launcher::AgentId::OpenCode, &model_id);
     let home = crate::agents::agent_dir("opencode");
     if let Err(e) = std::fs::create_dir_all(&home) {
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo crear {}: {}", home.display(), e) }).to_string(), origin));
         return;
     }
-    let gateway_key_live = crate::auth::load_or_create_key();
-    let content = crate::launcher::opencode_config_json(http_port, st.context, &model_id, Some(&gateway_key_live));
+    let content = crate::launcher::opencode_config_json(&target.base_url, target.context, &model_id, Some(&target.key));
     match crate::launcher::write_opencode_config(&home, &content) {
         Ok(_) => {}
         Err(e) => {
@@ -1817,10 +1889,18 @@ fn launch_opencode(
         }
     }
     let home_s = home.to_string_lossy().to_string();
-    let key_file = std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("gateway.key"))
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let key_file = if target.remote {
+        // Guest: clave remota en `remote.key` del dir privado (nunca en argv).
+        match crate::launcher::write_remote_key_file(&home, &target.key) {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+                return;
+            }
+        }
+    } else {
+        crate::auth::gateway_key_path().to_string_lossy().to_string()
+    };
     let inner = crate::launcher::opencode_inner_cmd(&model_id, req_task);
     let cd_prefix = match req_dir {
         Some(dir) if !dir.trim().is_empty() => format!("cd /d \"{}\" && ", dir),
@@ -1847,12 +1927,14 @@ fn launch_opencode(
         return;
     }
     mgr.log(&format!(
-        "[LocalMind] Terminal OpenCode lanzada ({} {}) en '{}' ({}) con modelo {} (gateway :{}, ctx: {}).",
+        "[LocalMind] Terminal OpenCode lanzada ({} {}) en '{}' ({}) con modelo {} ({}; ctx: {}).",
         via, detail,
         req_dir.unwrap_or("directorio default"),
-        what, full, http_port, st.context
+        what, full,
+        if target.remote { format!("remoto {}", target.base_url) } else { format!("gateway local :{}", ctx.http_port) },
+        target.context
     ));
-    let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","agent":"opencode","model":"{}","port":{},"context":{}}}"#, full, http_port, st.context), origin));
+    let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","agent":"opencode","model":"{}","port":{},"context":{},"remote":{}}}"#, full, if target.remote { 0 } else { ctx.http_port }, target.context, target.remote), origin));
 }
 
 /// Raíz + clave del remoto configurado (Fase B3b): la URL guardada puede traer
@@ -3002,6 +3084,46 @@ mod proxy {
             assert_eq!(ok[0].context, 131072);
         }
     }
+    // ---- Fase UX-Guest: target remoto y resolver sin red ----
+
+    #[cfg(test)]
+    fn cfg_guest(url: &str) -> crate::config::AppConfig {
+        let mut c = crate::config::AppConfig::default();
+        c.client.enabled = true;
+        c.remote.url = url.to_string();
+        c.remote.key = "KR".to_string();
+        c
+    }
+
+    #[test]
+    fn remoto_status_da_modelo_y_contexto_con_fallbacks() {
+        // Status real del Oráculo: stem + contexto.
+        let (m, c) = crate::server::remote_status_target(
+            r#"{"status":"running","model":"Qwen3.8-27B-IQ4_XS_4BPW.gguf","context":131072}"#,
+        );
+        assert_eq!((m.as_str(), c), ("Qwen3.8-27B-IQ4_XS_4BPW", 131072));
+        // Sin modelo → alias; sin contexto o cero → default honesto.
+        let (m, c) = crate::server::remote_status_target(r#"{"status":"running","model":"","context":0}"#);
+        assert_eq!((m.as_str(), c), ("localmind", 32768));
+        let (m, c) = crate::server::remote_status_target("no-json");
+        assert_eq!((m.as_str(), c), ("localmind", 32768));
+    }
+
+    #[test]
+    fn resolver_guest_sin_remoto_y_oraculo_apagado_dan_409() {
+        // Guest sin remoto: 409 sin tocar la red (el probe ni arranca).
+        let st = crate::process::ServerStatus {
+            status: "stopped".to_string(),
+            port: 8080,
+            ..Default::default()
+        };
+        let err = crate::server::resolve_launch_target(&cfg_guest(""), &st, "K", 17860).unwrap_err();
+        assert!(err.contains("remoto_no_configurado"), "{}", err);
+        // Oráculo apagado: mensaje histórico intacto, sin red.
+        let cfg = crate::config::AppConfig::default();
+        let err = crate::server::resolve_launch_target(&cfg, &st, "K", 17860).unwrap_err();
+        assert!(err.contains("motor_apagado"), "{}", err);
+    }
 }
 
 mod sse {
@@ -3077,4 +3199,5 @@ mod sse {
             Ok(n)
         }
     }
+
 }
