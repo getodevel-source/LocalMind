@@ -1494,8 +1494,8 @@
 
   <!-- Unlock overlay (Fase B4): la UI en red llega sin cookie; con 401 pide
        la clave del Servidor y la canjea por sesión vía POST /api/unlock. -->
-  <div id="unlock-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 100; align-items: center; justify-content: center;">
-    <div class="card" style="max-width: 360px; margin: 16px; width: 100%;">
+  <div id="unlock-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 100; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+    <div class="card" style="max-width: min(360px, 100%); margin: 0; width: 100%;">
       <div class="card-header">
         <span class="card-title" data-i18n="unlock.title">Desbloquear</span>
       </div>
@@ -1513,8 +1513,8 @@
 
   <!-- Onboarding de rol (Fase UX): primer arranque pregunta Oráculo/Guest.
        Se guarda en localStorage; "después" conserva el rol vigente. -->
-  <div id="onboard-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center;">
-    <div class="card" style="max-width: 460px; margin: 16px; width: 100%;">
+  <div id="onboard-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+    <div class="card" style="max-width: min(460px, 100%); margin: 0; width: 100%;">
       <div class="card-header">
         <span class="card-title" data-i18n="onboard.title">Elige el rol de esta PC</span>
       </div>
