@@ -7,7 +7,7 @@
   <link rel="icon" type="image/x-icon" href="omni.ico">
   <style>
     :root {
-      /* LocalMind design tokens: dark-first, single mint accent. */
+      /* OMNI design tokens: dark-first, monochrome (white/gray states). */
       /* Contrast on --bg (verified by docs/ui/contrast.mjs): */
       /* text 17.5:1, text-muted 10.7:1, text-subtle 8.0:1 (targets >= 7 / 4.5). */
       /* Card separators use --border (>= 1.5:1); --border-subtle is */
@@ -20,32 +20,32 @@
       --border: rgba(238, 243, 246, 0.18);
       --border-subtle: rgba(238, 243, 246, 0.08);
       --border-hover: rgba(238, 243, 246, 0.28);
-      --border-focus: rgba(61, 220, 151, 0.55);
+      --border-focus: rgba(245, 247, 247, 0.55);
 
       --text: #eef3f6;
       --text-muted: #b7c1cb;
       --text-subtle: #9aa7b4;
       --text-dim: #7d8a97;
 
-      --accent: #3ddc97;
-      --accent-bg: #3ddc97;
-      --accent-text: #06281a;
-      --accent-soft: rgba(61, 220, 151, 0.10);
-      --accent-line: rgba(61, 220, 151, 0.32);
+      --accent: #f5f7f7;
+      --accent-bg: #f5f7f7;
+      --accent-text: #0b0d0f;
+      --accent-soft: rgba(245, 247, 247, 0.08);
+      --accent-line: rgba(245, 247, 247, 0.30);
 
-      --ok: #3ddc97;
-      --ok-glow: rgba(61, 220, 151, 0.15);
-      --emerald: #3ddc97;
-      --emerald-glow: rgba(61, 220, 151, 0.15);
-      --warn: #f5b94f;
-      --warn-glow: rgba(245, 185, 79, 0.12);
-      --amber: #f5b94f;
-      --amber-glow: rgba(245, 185, 79, 0.12);
-      --danger: #f26d6d;
-      --danger-soft: #f6a3a3;
-      --red: #f26d6d;
-      --red-glow: rgba(242, 109, 109, 0.12);
-      --blue: #7cc7ff;
+      --ok: #c3cad2;
+      --ok-glow: rgba(195, 202, 210, 0.15);
+      --emerald: #c3cad2;
+      --emerald-glow: rgba(195, 202, 210, 0.15);
+      --warn: #9aa3ab;
+      --warn-glow: rgba(154, 163, 171, 0.12);
+      --amber: #9aa3ab;
+      --amber-glow: rgba(154, 163, 171, 0.12);
+      --danger: #ffffff;
+      --danger-soft: #ffffff;
+      --red: #ffffff;
+      --red-glow: rgba(255, 255, 255, 0.10);
+      --blue: #b7c1cb;
 
       --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       --font-mono: ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", monospace;
@@ -72,6 +72,7 @@
       --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
       --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55);
       --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+      color-scheme: dark;
     }
 
     * {
@@ -208,9 +209,9 @@
     }
     .header-status.online { color: var(--ok); border-color: var(--accent-line); background: var(--accent-soft); }
     .header-status.online .status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok-glow); }
-    .header-status.loading { color: var(--warn); border-color: rgba(245, 185, 79, 0.35); background: var(--warn-glow); }
+    .header-status.loading { color: var(--warn); border-color: rgba(154, 163, 171, 0.35); background: var(--warn-glow); }
     .header-status.loading .status-dot { background: var(--warn); animation: pulse 1.2s infinite ease-in-out; }
-    .header-status.error { color: var(--danger-soft); border-color: rgba(242, 109, 109, 0.35); background: var(--red-glow); }
+    .header-status.error { color: var(--danger-soft); border-color: rgba(255, 255, 255, 0.35); background: var(--red-glow); }
     .header-status.error .status-dot { background: var(--danger); }
 
     @keyframes pulse {
@@ -592,7 +593,7 @@
     .btn-danger {
       background: var(--red-glow);
       color: var(--danger-soft);
-      border-color: rgba(242, 109, 109, 0.35);
+      border-color: rgba(255, 255, 255, 0.35);
     }
     .btn-danger:hover:not(:disabled) { border-color: var(--danger); }
 
@@ -630,7 +631,7 @@
     .error-banner {
       display: none;
       background: var(--red-glow);
-      border: 1px solid rgba(242, 109, 109, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.35);
       border-radius: var(--r-s);
       padding: 10px 14px;
       font-size: var(--fs-s);
@@ -736,7 +737,7 @@
       white-space: nowrap;
     }
     .metric-box.warn {
-      border-color: rgba(245, 185, 79, 0.35);
+      border-color: rgba(154, 163, 171, 0.35);
       background: var(--warn-glow);
     }
     .metric-box.warn .metric-label { color: var(--warn); }
@@ -1216,7 +1217,7 @@
       border-radius: var(--r-s);
       background: var(--red-glow);
       color: var(--danger-soft);
-      border: 1px solid rgba(242, 109, 109, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1373,6 +1374,8 @@
       padding: 4px 0; cursor: pointer;
     }
     .cfg-check input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+    /* Radios del rol (Fase C): sin esto el navegador pinta el punto en azul. */
+    .cfg-check input[type="radio"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
     .cfg-ok { font-size: var(--fs-s); color: var(--accent); font-weight: var(--fw-medium); }
     .cfg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
     .spinner {
@@ -5057,7 +5060,7 @@
         if (err && err.name === 'AbortError') {
           // Handled in the loop; nothing extra needed here.
         } else {
-          botBubble.innerHTML = `<span style="color: #f87171;">${escapeHtml(T('chat.error') + err.message)}</span>`;
+          botBubble.innerHTML = `<span style="color: var(--danger-soft); font-weight: var(--fw-semibold);">${escapeHtml(T('chat.error') + err.message)}</span>`;
         }
       } finally {
         isGenerating = false;
