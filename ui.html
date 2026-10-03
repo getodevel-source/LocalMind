@@ -285,6 +285,31 @@
     }
     .tab-btn.active .tab-count { color: var(--text-muted); }
 
+    /* ---------- Role switcher (Oráculo/Guest, siempre visible) ---------- */
+    .role-switch {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      padding: 2px;
+    }
+    .role-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: var(--fs-s);
+      font-weight: var(--fw-medium);
+      font-family: inherit;
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .role-btn:hover { color: var(--text); }
+    .role-btn.active { background: var(--accent-bg); color: var(--accent-text); }
+
     /* ---------- Persistent engine status strip ---------- */
     .status-strip {
       display: flex;
@@ -1435,6 +1460,11 @@
       </div>
     </div>
 
+    <div class="role-switch" role="group" aria-label="Rol">
+      <button class="role-btn active" type="button" id="hs-oraculo" onclick="setRole('oraculo')" aria-pressed="true"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
+      <button class="role-btn" type="button" id="hs-guest" onclick="setRole('guest')" aria-pressed="false"><span data-i18n="settings.roleGuest">Guest</span></button>
+    </div>
+
     <nav class="tabs-nav" aria-label="OMNI" id="main-nav">
       <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard">
         <span data-i18n="nav.panel">Panel</span>
@@ -1480,6 +1510,32 @@
         <div id="unlock-error" class="error-banner" role="alert"></div>
         <div style="display: flex; gap: 6px; margin-top: 8px;">
           <button class="btn btn-primary" type="button" id="unlock-go" onclick="doUnlock()"><span data-i18n="unlock.go">Entrar</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding de rol (Fase UX): primer arranque pregunta Oráculo/Guest.
+       Se guarda en localStorage; "después" conserva el rol vigente. -->
+  <div id="onboard-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center;">
+    <div class="card" style="max-width: 460px; margin: 16px; width: 100%;">
+      <div class="card-header">
+        <span class="card-title" data-i18n="onboard.title">Elige el rol de esta PC</span>
+      </div>
+      <div class="card-body">
+        <div class="profile-hint" data-i18n="onboard.sub">Puedes cambiarlo cuando quieras desde el encabezado o Conexión.</div>
+        <div class="fields-row cfg-2col" style="margin-top: 8px;">
+          <div class="field-group">
+            <button class="btn btn-primary" type="button" style="width: 100%;" onclick="chooseRole('oraculo')"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
+            <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
+          </div>
+          <div class="field-group">
+            <button class="tool-btn" type="button" style="width: 100%;" onclick="chooseRole('guest')"><span data-i18n="settings.roleGuest">Guest</span></button>
+            <div class="profile-hint" data-i18n="settings.roleGuestDesc">Sin modelo: chatea y lanza CLIs contra el Oráculo.</div>
+          </div>
+        </div>
+        <div style="margin-top: 8px; text-align: center;">
+          <button class="tool-btn" type="button" onclick="laterRole()"><span data-i18n="onboard.later">Decidir después</span></button>
         </div>
       </div>
     </div>
@@ -2373,6 +2429,9 @@
         'settings.roleGuestDesc': 'Sin modelo: chatea y lanza CLIs contra el Oráculo.',
         'settings.roleRestart': 'Exponer en LAN rige al reiniciar la app.',
         'settings.lanExposed': 'Exponer en la LAN',
+        'onboard.title': 'Elige el rol de esta PC',
+        'onboard.sub': 'Puedes cambiarlo cuando quieras desde el encabezado o Conexión.',
+        'onboard.later': 'Decidir después',
         'settings.serverIps': 'Esta PC en la LAN',
         'settings.serverPairing': 'Emparejar (QR o copiar)',
         'settings.serverCopy': 'Copiar',
@@ -2605,6 +2664,9 @@
         'settings.roleGuestDesc': 'No model: chats and launches CLIs against the Oráculo.',
         'settings.roleRestart': 'LAN exposure applies after restarting the app.',
         'settings.lanExposed': 'Expose on LAN',
+        'onboard.title': 'Choose this PC role',
+        'onboard.sub': 'You can change it anytime from the header or Connection.',
+        'onboard.later': 'Decide later',
         'settings.serverIps': 'This PC on the LAN',
         'settings.serverPairing': 'Pair (QR or copy)',
         'settings.serverCopy': 'Copy',
@@ -3653,6 +3715,7 @@
         const el = document.getElementById('cfg-role-' + r);
         if (el) el.checked = (r === role);
       }
+      syncRoleSwitcher(role);
       const lanCk = document.getElementById('cfg-lan-enabled');
       if (lanCk && cfg && cfg.lan) lanCk.checked = !!cfg.lan.enabled;
       cfgShow(document.getElementById('cfg-server-panel'), role === 'oraculo');
@@ -3660,6 +3723,42 @@
       const url = document.getElementById('cfg-remote-url');
       if (url && cfg && cfg.remote && typeof cfg.remote.url === 'string' && !url.value) url.value = cfg.remote.url;
       if (role === 'oraculo') refreshLanPanel();
+    }
+
+    // Switcher del header: refleja el rol vigente (lo llama refreshRoleCard).
+    function syncRoleSwitcher(role) {
+      for (const r of ['oraculo', 'guest']) {
+        const el = document.getElementById('hs-' + r);
+        if (!el) continue;
+        const on = (r === role);
+        el.classList.toggle('active', on);
+        el.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+    }
+
+    /* ---------- Onboarding de rol: una sola vez por perfil de navegador.
+       Sin marca → overlay. Elegir guarda el rol y la marca; "después"
+       conserva el rol vigente y solo guarda la marca. */
+    const ROLE_SEEN_KEY = 'omni_role_seen';
+    function roleSeen() {
+      try { return localStorage.getItem(ROLE_SEEN_KEY) === '1'; } catch (e) { return true; }
+    }
+    function markRoleSeen() {
+      try { localStorage.setItem(ROLE_SEEN_KEY, '1'); } catch (e) {}
+      const ov = document.getElementById('onboard-overlay');
+      if (ov) ov.style.display = 'none';
+    }
+    function maybeOnboard() {
+      if (roleSeen()) return;
+      const ov = document.getElementById('onboard-overlay');
+      if (ov) ov.style.display = 'flex';
+    }
+    async function chooseRole(role) {
+      markRoleSeen();
+      await setRole(role);
+    }
+    function laterRole() {
+      markRoleSeen();
     }
 
     async function setRole(role) {
@@ -5159,6 +5258,13 @@
         });
         connectEvents();
         maybeUnlock();
+        maybeOnboard();
+        // Switcher del header al día desde el arranque (sin abrir Conexión).
+        try {
+          api.getAppConfig().then(cfg => {
+            if (cfg && !cfg.missing) syncRoleSwitcher(roleFromCfg(cfg));
+          }).catch(() => {});
+        } catch (e) {}
       }
       const modelSel = document.getElementById('model-select');
       if (modelSel) modelSel.addEventListener('change', () => updateModelBadges(lastModelsCache));
