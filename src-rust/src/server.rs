@@ -28,10 +28,9 @@ pub struct HttpServer {
 
 /// Cabeceras CORS fijas (sin `Origin`): métodos y headers permitidos.
 /// `Access-Control-Allow-Origin` ya NO se envía con `*` (SRS P29): solo se
-/// refleja el `Origin` de la petición cuando es loopback
-/// (`http://127.0.0.1|localhost|[::1][:puerto]`); cualquier otro origen no
-/// recibe cabeceras CORS. Las lecturas de la WebView (mismo origen) no
-/// necesitan CORS en absoluto.
+/// refleja el `Origin` permitido por la allowlist (`cors_origin_header`:
+/// loopback siempre, red privada solo en modo LAN). Las lecturas de la
+/// WebView (mismo origen) no necesitan CORS en absoluto.
 fn cors_fixed_headers() -> [Header; 2] {
     [
         Header::from_bytes(
@@ -47,10 +46,14 @@ fn cors_fixed_headers() -> [Header; 2] {
     ]
 }
 
-/// `Access-Control-Allow-Origin: <origen>` solo si el origen es loopback.
+/// `Access-Control-Allow-Origin: <origen>` según la allowlist vigente (Fase B2,
+/// diseño B3): loopback como siempre (P29), más red privada cuando el proceso
+/// arrancó en modo LAN. El flag se lee del interruptor global que fijó
+/// `HttpServer::start` (ver `meta::set_lan_mode`): con `lan.enabled=false`
+/// esta función es idéntica a la histórica.
 fn cors_origin_header(origin: Option<&str>) -> Option<Header> {
     let o = origin?;
-    if !crate::meta::is_loopback_origin(o) {
+    if !crate::meta::origen_permitido(o, crate::meta::lan_mode()) {
         return None;
     }
     Header::from_bytes(&b"Access-Control-Allow-Origin"[..], o.as_bytes()).ok()
@@ -379,12 +382,19 @@ impl HttpServer {
         // Clave local: crearla en el primer arranque para que las rutas
         // protegidas y la cookie de la WebView funcionen desde el inicio.
         let gateway_key = crate::auth::load_or_create_key();
+        // Fase B2: bind según `[lan].enabled` (default false = loopback como
+        // siempre). El motor (llama-server) queda en `127.0.0.1` en todos los
+        // modos: solo este gateway sale a la LAN. Sin hot-swap: cambiarlo
+        // exige reiniciar (diseño B11).
+        let lan_enabled = config.get().lan.enabled;
+        crate::meta::set_lan_mode(lan_enabled);
+        let bind_host = if lan_enabled { "0.0.0.0" } else { "127.0.0.1" };
         let preferred = config.get().engine.http_port;
         let mut server = None;
         let mut port = preferred;
 
         for p in preferred..preferred + 10 {
-            if let Ok(s) = Server::http(("127.0.0.1", p)) {
+            if let Ok(s) = Server::http((bind_host, p)) {
                 server = Some(s);
                 port = p;
                 break;
@@ -393,7 +403,8 @@ impl HttpServer {
 
         let server = server.ok_or_else(|| {
             format!(
-                "No se pudo iniciar el servidor HTTP en el rango {}-{}",
+                "No se pudo iniciar el servidor HTTP en {} en el rango {}-{}",
+                bind_host,
                 preferred,
                 preferred + 10
             )
@@ -404,6 +415,12 @@ impl HttpServer {
         // motor) para pasar por clave/aliasing/usage. Se propaga a cada
         // request junto con la clave (ambos se clonan por request).
         let bound_port = port;
+        process_mgr.log(&format!(
+            "[LocalMind] Gateway HTTP en {}:{} (modo LAN {}).",
+            bind_host,
+            port,
+            if lan_enabled { "activado" } else { "desactivado" }
+        ));
         thread::spawn(move || {
             for req in srv_clone.incoming_requests() {
                 let url = req.url().to_string();
@@ -449,11 +466,25 @@ fn handle_request(
     gateway_key: String,
     http_port: u16,
 ) {
-    // Origen de esta petición para CORS estricto (P29): solo los orígenes
-    // loopback reciben `Access-Control-Allow-Origin` reflejado.
+    // Origen de esta petición para CORS estricto (P29/B3): allowlist según
+    // el modo LAN vigente (ver `cors_origin_header`).
     let origin = crate::meta::request_origin(req.headers());
     let origin_ref = origin.as_deref();
     let fixed = cors_fixed_headers();
+
+    // Fase B2: regla del peer ANTES de auth (diseño B2). Fail-closed: sin
+    // dirección de peer no hay de dónde fiarse y se deniega. Con
+    // `lan.enabled=false` esto deja pasar exactamente lo mismo que antes
+    // (solo loopback).
+    let peer_ip = req.remote_addr().map(|a| a.ip());
+    if !peer_ip.is_some_and(|ip| crate::meta::peer_permitido(ip, crate::meta::lan_mode())) {
+        let _ = req.respond(json_response_for_origin(403, r#"{"error":"red_no_permitida"}"#.into(), origin_ref));
+        return;
+    }
+    // La cookie de sesión (`lm_key`) solo se fija a loopback (diseño B4,
+    // mínimo de esta ronda): en LAN la UI llega sin auto-autenticar y la API
+    // sigue exigiendo la clave. La pantalla de desbloqueo es Fase B4/C.
+    let peer_loopback = peer_ip.is_some_and(|ip| ip.is_loopback());
 
     if method == "OPTIONS" {
         let mut resp = Response::empty(200);
@@ -475,13 +506,15 @@ fn handle_request(
             include_str!("../ui_fallback.html").to_string()
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
-        let Some(cookie) = session_cookie_header(&gateway_key) else {
-            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
-            return;
-        };
         let mut resp = Response::from_string(html);
         resp.add_header(ct);
-        resp.add_header(cookie);
+        if peer_loopback {
+            let Some(cookie) = session_cookie_header(&gateway_key) else {
+                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                return;
+            };
+            resp.add_header(cookie);
+        }
         add_cors_for(&mut resp, origin_ref);
         let _ = req.respond(resp);
         return;
@@ -496,13 +529,15 @@ fn handle_request(
             }
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/x-icon"[..]).unwrap();
-        let Some(cookie) = session_cookie_header(&gateway_key) else {
-            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
-            return;
-        };
         let mut resp = Response::from_data(bytes);
         resp.add_header(ct);
-        resp.add_header(cookie);
+        if peer_loopback {
+            let Some(cookie) = session_cookie_header(&gateway_key) else {
+                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                return;
+            };
+            resp.add_header(cookie);
+        }
         add_cors_for(&mut resp, origin_ref);
         let _ = req.respond(resp);
         return;
@@ -517,13 +552,15 @@ fn handle_request(
             }
         };
         let ct = Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap();
-        let Some(cookie) = session_cookie_header(&gateway_key) else {
-            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
-            return;
-        };
         let mut resp = Response::from_data(bytes);
         resp.add_header(ct);
-        resp.add_header(cookie);
+        if peer_loopback {
+            let Some(cookie) = session_cookie_header(&gateway_key) else {
+                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                return;
+            };
+            resp.add_header(cookie);
+        }
         add_cors_for(&mut resp, origin_ref);
         let _ = req.respond(resp);
         return;

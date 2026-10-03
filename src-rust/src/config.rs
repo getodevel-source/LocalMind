@@ -214,6 +214,17 @@ impl Default for NotificationsConfig {
     }
 }
 
+/// Red local (Fase B, diseño B1/B2): opt-in explícito para exponer el gateway
+/// más allá de loopback. Default `false` = comportamiento histórico (solo
+/// `127.0.0.1`, sin ningún cambio). Se lee al arrancar: cambiarlo exige
+/// reiniciar la app (el socket se liga una vez, sin hot-swap en v1).
+/// `default` para TOMLs viejos sin sección.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LanConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationConfig {
     /// Temperatura de muestreo (0..=2). Base para exponer en la API (P16).
@@ -376,6 +387,9 @@ pub struct AppConfig {
     /// Ausente en TOMLs viejos → 0. Actual: `PROFILES_VERSION`.
     #[serde(default)]
     pub profiles_version: u32,
+    /// Red local (Fase B): ausente en TOMLs viejos → `false` (todo igual).
+    #[serde(default)]
+    pub lan: LanConfig,
 }
 
 impl Default for AppConfig {
@@ -388,6 +402,7 @@ impl Default for AppConfig {
             notifications: NotificationsConfig::default(),
             generation: GenerationConfig::default(),
             profiles_version: PROFILES_VERSION,
+            lan: LanConfig::default(),
         }
     }
 }
@@ -1604,6 +1619,24 @@ mod tests {
         assert!(store.take_migration_note().is_none());
         // Defaults completos (perfiles repuestos, D-1).
         assert!(!store.get().profiles.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lan_apagada_por_defecto_y_toml_viejo_sin_seccion() {
+        // Fase B2: sin `[lan]` (TOML de cualquier versión anterior) → false,
+        // o sea comportamiento histórico. Con la sección → respeta el valor.
+        assert!(!AppConfig::default().lan.enabled);
+        let dir = std::env::temp_dir().join(format!("lm-no-lan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("localmind.toml");
+        std::fs::write(&path, "[engine]\nthreads = 6\n").unwrap();
+        let store = ConfigStore::load_from_path(&path);
+        assert!(!store.get().lan.enabled);
+        std::fs::write(&path, "[engine]\nthreads = 6\n\n[lan]\nenabled = true\n").unwrap();
+        let store = ConfigStore::load_from_path(&path);
+        assert!(store.get().lan.enabled);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

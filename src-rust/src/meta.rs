@@ -328,6 +328,29 @@ pub fn origen_permitido(origin: &str, lan_enabled: bool) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Interruptor LAN del proceso (Fase B2): se fija UNA vez al arrancar el gateway
+// desde `[lan].enabled` y no cambia en toda la vida del proceso (cambiarlo
+// exige reiniciar: el socket se liga una vez, diseño B11). Existe como estado
+// global por la misma razón que `auth::CACHED_KEY`: los helpers CORS puros de
+// `server.rs` (`cors_origin_header`, `json_response_for_origin`, ...) se llaman
+// en ~120 sitios y no arrastran la config; la alternativa era cambiar todas
+// esas firmas. Las funciones puras con parámetro explícito (`peer_permitido`,
+// `origen_permitido`) siguen siendo la referencia testeable.
+// ---------------------------------------------------------------------------
+
+static LAN_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Fijar el modo LAN al arrancar. Llamar una sola vez (`HttpServer::start`).
+pub fn set_lan_mode(enabled: bool) {
+    LAN_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// ¿El gateway escucha fuera de loopback? Lo que se fijó al arrancar.
+pub fn lan_mode() -> bool {
+    LAN_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+// ---------------------------------------------------------------------------
 // Sello UTC `YYYYMMDD-HHMMSS` sin crates de fecha
 // ---------------------------------------------------------------------------
 
