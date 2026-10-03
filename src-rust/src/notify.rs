@@ -68,6 +68,29 @@ pub fn should_notify(enabled: bool, flag_on: bool) -> bool {
     enabled && flag_on
 }
 
+/// Frontera de plugin (Fase A2, vuelta a raíces): el núcleo solo necesita
+/// `should_notify` + este trait. El toast de Windows es una implementación más.
+pub trait Notifier {
+    fn notify(&self, title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str));
+}
+
+/// Implementación nula: ignora el aviso pero reporta por el canal de log.
+/// Útil en modo Cliente (sin motor local) y en tests.
+pub struct NoopNotifier;
+
+impl Notifier for NoopNotifier {
+    fn notify(&self, _title: &str, _body: &str, _tag: &str, _log_on_fail: impl FnOnce(&str)) {}
+}
+
+/// Implementación Windows (toast PowerShell desacoplado).
+pub struct PowerShellNotifier;
+
+impl Notifier for PowerShellNotifier {
+    fn notify(&self, title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str)) {
+        notify(title, body, tag, log_on_fail);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
