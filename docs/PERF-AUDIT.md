@@ -96,6 +96,33 @@ Clippy bin: 36 → 28 warnings.
 - Thread-por-request (`tiny_http` + `ureq` bloqueante): bien para uso hogar
   (1 Oráculo + 1 Guest); no es un servidor multiusuario y no debe serlo.
 
+## A/B de flags con Qwen3.8-27B (veredicto: la config ya está en el techo)
+
+Arnés: P1 decode 200 tok + P2 prefill 12,6K frío con nonce + TTFT, 3 réplicas.
+Motor 10743, RX 6800 XT, threads 6 = físicos.
+
+| Brazo | Decode t/s | Prefill 12,6K t/s | TTFT | Efecto |
+|---|---|---|---|---|
+| Base (b1024, FA on, t6) | 26,3 | 205 | 1,2–1,6 s | referencia |
+| batch 2048 | 26,4 | 204 | = | nulo |
+| FA off | 26,4 | 203 | = | nulo (Vulkan FA ≈ auto acá) |
+| threads 8 | 26,4 | 203 | = | nulo (GPU-bound; se queda 6: menos CPU para juegos) |
+| +mlock | 26,3 | 203 | = | nulo en velocidad y carga (RAM sobra) |
+
+Descartados sin ejecutar (con motivo): `ubatch` 1024 (fijado en 512 por
+restricción eléctrica documentada en el código; subirlo es jugar con la
+protección de PSU, no un benchmark aceptable) y speculative/MTP (el .gguf
+no trae capas MTP: los 5 hits de "mtp" son substrings del template).
+
+Hallazgo lateral: el caché de prefijo del motor funciona — el mismo prompt
+largo repetido pasa de 63 s a ~5 s (solo re-procesa el nonce). Gratis y ya
+activo.
+
+Conclusión: decode memory-bound por VRAM y prefill compute-bound por
+Vulkan; sin cambios de modelo no hay más techo que exprimir por flags. Las
+ganancias reales están en no pagar la carga (motor vivo, idle largo) y en
+el caché de prefijo. **Ningún cambio de config aplicado (todo nulo).**
+
 ## Research pendiente (web_fetch)
 
 - `docs/development/token_generation_performance_tips.md`: traído (threads
