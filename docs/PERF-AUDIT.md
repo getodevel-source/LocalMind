@@ -23,6 +23,8 @@ Metodología: números medidos, no estimados. Research upstream vía
 | Cambio de tab | p50 **33 ms** | click → paint, 10 iter CDP |
 | Log del motor en arranque | O(n²) → **O(1)** por línea | `textContent +=` re-serializaba 200 KB por línea; ahora nodos de texto con poda por conteo |
 | Historial de chat | tope **300 mensajes** | sin tope mataba la cuota localStorage de 5 MB en silencio |
+| Arranque completo (frío) | **~47 s** (carga ~30 s + puerta ~15 s) | 1×16 + 2×200 tokens a 25 t/s |
+| Chat una línea (stream) | TTFT **1,6 s**, primer texto **2,9 s**, total 3,0 s | thinking breve en el medio; UX adecuada, nada que arreglar del lado gateway (proxy aporta ~6 ms) |
 
 Nota honesta: dos intentos de medir "cold start a API 200" dieron 30-60 s,
 pero estaban contaminados por mi propio setup (locks stale + puertos de
