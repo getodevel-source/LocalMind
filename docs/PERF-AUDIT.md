@@ -84,8 +84,10 @@ Clippy bin: 36 → 28 warnings.
 
 ## Costos conocidos, sin tocar (con motivo)
 
-- Puerta de aceptación: 1×16 + 3×200 tokens ≈ 25 s a 25 t/s por arranque.
-  Cambiar el muestreo debilita la mediana (D1); solo con A/B en vivo.
+- Puerta de aceptación: 1×16 + 2×200 tokens ≈ 15 s a 25 t/s por arranque
+  (era 3×200 ≈ 23 s; cambio medido: dispersión ±2% con warmup, el mínimo de
+  2 equivale a la mediana y peca de precavido ante degradación real).
+  Verificado en vivo: veredicto `running` + `acceptance_ok` con 2 muestras.
 - Poller 500 ms: 1-2 HTTP localhost + ~5 clones de `AppConfig` por tick.
   Medido por diseño: ~1-3 ms CPU por tick, despreciable. No churn.
 - `usage.jsonl`: append sin fsync por request. Correcto así.

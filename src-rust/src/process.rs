@@ -46,11 +46,11 @@ pub struct ServerStatus {
     pub eta_secs: u64,
     #[serde(default)]
     pub decode_tps: Option<f64>,
-    /// Las 3 muestras de la puerta (mediana en `decode_tps`); vacías si no
-    /// hubo puerta en este arranque. Para que la UI vea la dispersión.
+    /// Las 2 muestras de la puerta (mínimo en `decode_tps`, conservador);
+    /// vacías si no hubo puerta en este arranque. Para que la UI vea la dispersión.
     #[serde(default)]
     pub decode_tps_samples: Vec<f64>,
-    /// true si la mediana de la puerta quedó bajo `[engine] slow_gate_tps`
+    /// true si el mínimo de la puerta quedó bajo `[engine] slow_gate_tps`
     /// (default 20). Solo informativo: sin reintentos (LM-NF-3). Mensaje UI:
     /// `El motor cargó lento (N t/s); puede mejorarse reiniciándolo una vez`.
     #[serde(default)]
@@ -476,7 +476,7 @@ impl ProcessManager {
                                             st.acceptance_ok = Some(true);
                                             st.acceptance_error = None;
                                             st.last_error = None;
-                                            pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mediana de {})", tps.round() as u64, samples.len()));
+                                            pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mínimo de {})", tps.round() as u64, samples.len()));
                                             // Aviso P20: motor listo con modelo y velocidad.
                                             pending_notify = Some((
                                                 "Motor listo".to_string(),
@@ -895,18 +895,21 @@ impl ProcessManager {
     /// Nunca paniquea: todo fallo se devuelve como `Err(detalle)` en español.
     /// La puerta usa `temperature: 0` FIJO a propósito (determinista): aunque
     /// `[generation]` (P16) exponga otra temperatura para el chat, la puerta no
-    /// la consume. Calienta con 1 request desechable y reporta la MEDIANA de
-    /// 3 muestras (la primera medida en frío no representa el estado
-    /// estacionario: bimodalidad 128K medida 34,8 vs 71,9 t/s prompt-eval).
+    /// la consume. Calienta con 1 request desechable y reporta el MÍNIMO de
+    /// 2 muestras (auditoría: con warmup previo la dispersión medida es ±1,5%,
+    /// así que el mínimo equivale a la mediana y ahorra ~8 s por arranque; el
+    /// mínimo además peca de precavido: ante degradación real falla antes que
+    /// una mediana. La bimodalidad en frío la absorbe el warmup, no las muestras).
     fn run_acceptance_gate(port: u16) -> Result<(f64, u64, Vec<f64>), String> {
         // Calentamiento desechable (mismo path de chat, pocos tokens): estabiliza
         // la primera medida. Solo en la puerta; con el motor en `running` no
         // hay re-calentamiento (la puerta solo corre en starting).
         let _ = Self::gate_sample(port, 16);
-        // 3 muestras iguales; la mediana es el `decode_tps` reportado.
+        // 2 muestras iguales; `gate_median` con 2 devuelve el mínimo
+        // (cota inferior, conservador). Veredicto en `decode_tps`.
         let mut samples = Vec::new();
         let mut last_err = String::new();
-        for _ in 0..3 {
+        for _ in 0..2 {
             match Self::gate_sample(port, 200) {
                 Ok((tps, _)) => samples.push(tps),
                 Err(e) => last_err = e,
