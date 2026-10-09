@@ -1,7 +1,7 @@
 //! Actualización automática de OMNI (canal GitHub Releases).
 //!
 //! - Origen: `GET {feed}/latest` (por defecto el repo del binario:
-//!   `getodevel-source/LocalMind`, release GitHub). El JSON trae
+//!   `getodevel-source/OMNI`, release GitHub). El JSON trae
 //!   `tag_name`, `body` y `assets` (`name` + `browser_download_url`).
 //! - Elegibilidad: el asset debe llamarse `OMNI-portable-<semver>-<fecha>.zip`
 //!   y su versión ser MAYOR que `CARGO_PKG_VERSION` (comparación semver
@@ -26,8 +26,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 // Configuración del canal
 // ---------------------------------------------------------------------------
 
-/// Repo por defecto del canal (dueño del binario).
-pub const DEFAULT_FEED_REPO: &str = "getodevel-source/LocalMind";
+/// Repo por defecto del canal (dueño del binario). El repo se mudó de
+/// `LocalMind` a `OMNI`: el default apunta al nombre vivo (GitHub redirige el
+/// viejo, pero no se depende de la redirección).
+pub const DEFAULT_FEED_REPO: &str = "getodevel-source/OMNI";
 
 /// URL base de la API de releases (testeable: los tests apuntan a un stub).
 pub fn releases_api_base() -> String {
@@ -879,6 +881,18 @@ mod tests {
         assert!(parse_version("v2.1.0").is_some());
         assert!(parse_version("2.1").is_none());
         assert!(!is_newer("2.0.0", "no-version"));
+    }
+
+    /// El canal default apunta al repo vivo (`OMNI`, no el viejo `LocalMind`
+    /// mudado): un tercero con config limpia chequea contra el repo real.
+    #[test]
+    fn canal_default_apunta_al_repo_omni() {
+        assert_eq!(DEFAULT_FEED_REPO, "getodevel-source/OMNI");
+        assert_eq!(feed_repo(""), Some(DEFAULT_FEED_REPO.to_string()));
+        assert_eq!(
+            latest_url(DEFAULT_FEED_REPO, "https://api.github.com"),
+            "https://api.github.com/repos/getodevel-source/OMNI/releases/latest"
+        );
     }
 
     #[test]

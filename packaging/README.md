@@ -66,7 +66,7 @@ resolution (`get_base_dir`, `src-rust/src/main.rs:25-44`):
 GitHub Release with the ZIP + `.sha256.txt`. The release body MUST contain
 a line `SHA256 <asset> <hex>` (the workflow writes it): the app rejects any
 package without a checksum match. The app polls `releases/latest` on the
-configured feed (`[update].feed`, default `getodevel-source/LocalMind`),
+configured feed (`[update].feed`, default `getodevel-source/OMNI`),
 only accepts assets named `OMNI-portable-<semver>-<YYYYMMDD>.zip` newer
 than the running version, and installs on restart via a directory swap with
 `.prev-<ver>` rollback. `models/` and `%APPDATA%\LocalMind` are never

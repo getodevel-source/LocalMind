@@ -6,6 +6,14 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-09
+
+### Corregido
+- Canal de auto-update para terceros: el feed default apuntaba al nombre
+  viejo del repo (`getodevel-source/LocalMind`, mudado a `OMNI`). Ahora
+  apunta a `getodevel-source/OMNI` con test (`canal_default_apunta_al_repo_omni`).
+  Sin esto, una config limpia chequeaba contra la redirección en vez del repo real.
+
 ## [2.0.1] - 2026-10-09
 
 ### Corregido
