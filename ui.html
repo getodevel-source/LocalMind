@@ -2098,6 +2098,7 @@
               <span id="cfg-guard-slow">umbral lento: —</span>
               <span id="cfg-guard-power">power_safe: —</span>
             </div>
+            <div class="profile-hint" role="note"><span data-i18n="settings.backendNote">Backend GPU (solo lectura, se cambia en el TOML):</span> <code id="cfg-backend-id">—</code></div>
             <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.notifTitle">Avisos del sistema</span></div>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-enabled"> <span data-i18n="settings.notifEnabled">Avisos activados</span></label>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-ready"> <span data-i18n="settings.notifReady">Avisar al quedar listo</span></label>
@@ -2118,6 +2119,7 @@
           </div>
           <div class="card-body">
             <div id="models-empty" class="empty-state" style="display: none;" data-i18n="models.empty">Todavía no hay modelos. Importa un .gguf o descarga uno verificado.</div>
+            <div id="models-starter" class="profile-hint" style="display: none;" role="note"><span data-i18n="models.starterHint">¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.</span> <button class="tool-btn" type="button" id="btn-starter-fill" onclick="fillStarterModel()"><span data-i18n="models.starterFill">Rellenar ejemplo</span></button></div>
             <table class="models-table" id="models-table">
               <thead>
                 <tr>
@@ -2317,6 +2319,9 @@
         'models.sub': 'Pesos GGUF locales, importación y descarga verificada.',
         'models.localTitle': 'Modelos locales',
         'models.empty': 'Todavía no hay modelos. Importa un .gguf o descarga uno verificado.',
+        'models.starterHint': '¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.',
+        'models.starterFill': 'Rellenar ejemplo',
+        'settings.backendNote': 'Backend GPU (solo lectura, se cambia en el TOML):',
         'models.searching': 'Buscando modelos...',
         'models.count': '{n} modelos',
         'models.colModel': 'Modelo', 'models.colSize': 'Tamaño',
@@ -2576,6 +2581,9 @@
         'models.sub': 'Local GGUF weights, import and verified download.',
         'models.localTitle': 'Local models',
         'models.empty': 'No models yet. Import a .gguf or download a verified one.',
+        'models.starterHint': 'First time? Start with a small one (2-3 GB, runs on almost any GPU), then move up to 27B if your VRAM allows it.',
+        'models.starterFill': 'Fill example',
+        'settings.backendNote': 'GPU backend (read-only, change it in the TOML):',
         'models.searching': 'Looking for models...',
         'models.count': '{n} models',
         'models.colModel': 'Model', 'models.colSize': 'Size',
@@ -4238,6 +4246,8 @@
       if (meta) meta.textContent = T('models.count', { n: list.length });
       if (count) count.textContent = String(list.length);
       if (empty) empty.style.display = list.length ? 'none' : '';
+      const starter = document.getElementById('models-starter');
+      if (starter) starter.style.display = list.length ? 'none' : '';
       if (table) table.style.display = list.length ? '' : 'none';
       list.forEach(m => {
         const tr = document.createElement('tr');
@@ -4796,6 +4806,17 @@
       }
     }
 
+    // Sugerencia inicial (portabilidad): rellena un repo pequeño y verificado
+    // para que el usuario nuevo no parta de un input vacío. No descarga nada
+    // solo: el usuario pulsa Descargar y confirma. Repo real, ~2 GB.
+    function fillStarterModel() {
+      const repoEl = document.getElementById('dl-repo');
+      if (repoEl && !repoEl.value.trim()) repoEl.value = 'Qwen/Qwen2.5-1.5B-Instruct-GGUF';
+      const section = document.getElementById('model-dl-section');
+      if (section) section.style.display = '';
+      try { document.getElementById('dl-repo').focus(); } catch (e) {}
+    }
+
     async function cancelModelDownload() {
       try {
         await fetch('/api/models/download/cancel', { method: 'POST' });
@@ -4852,6 +4873,8 @@
           const primary = hw.gpus[0];
           if (gpuNameEl) gpuNameEl.textContent = primary.name;
           if (gpuVramEl) gpuVramEl.textContent = primary.vram;
+          const beEl = document.getElementById('cfg-backend-id');
+          if (beEl) beEl.textContent = primary.id || '—';
         } else {
           if (gpuNameEl) gpuNameEl.textContent = T('specs.gpuFallback');
           if (gpuVramEl) gpuVramEl.textContent = T('specs.gpuMemFallback');

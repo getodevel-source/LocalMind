@@ -11,6 +11,25 @@ pub(crate) fn gate_is_slow(median_tps: f64, slow_at: f64) -> bool {
     median_tps < slow_at
 }
 
+/// Umbral efectivo de puerta lenta según el tamaño del modelo (portabilidad).
+/// El fijo 20 t/s se calibró para 27B en 16 GB: un 2B en integrada lo pasa
+/// sobrado (falso "rápido" si va mal) y un 70B falla siempre (falso "lento").
+/// Escalón por GB del .gguf (decode Vulkan medido: 27B ~26-42 t/s, 2.6B
+/// ~187 t/s): ≤9 GB → 25, ≤17 GB → 20, >17 GB → 12. Desconocido (0) → cfg.
+/// El cfg es TECHO: si el dueño lo baja, manda el suyo (más estricto gana).
+pub(crate) fn slow_threshold(cfg_base: f64, size_gb: f64) -> f64 {
+    let by_size = if size_gb <= 0.0 {
+        cfg_base
+    } else if size_gb < 9.0 {
+        25.0
+    } else if size_gb < 17.0 {
+        20.0
+    } else {
+        12.0
+    };
+    cfg_base.min(by_size)
+}
+
 /// ETA en segundos: duración guardada para la misma clave; en frío,
 /// `6 s × tamaño del modelo en GB` (0 si se desconoce el tamaño).
 pub(crate) fn eta_secs(stored: Option<u64>, size_gb: f64) -> u64 {
@@ -125,6 +144,43 @@ pub(crate) fn vram_total_mb() -> Option<u64> {
     parse_adapter_ram(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// ¿Cabe `modelo + KV estimado` en la VRAM? (puro salvo lectura del .gguf).
+/// `kv_mb` ≈ `contexto × 32 B/tok` (techo conservador: q4_0 ≈ 0.5 B por token
+/// y capa × ~60 capas en 27B), menos `cache_ram` (MB que desbordan a RAM y NO
+/// ocupan VRAM). Margen 0.9: la VRAM no se llena al 100% (driver +
+/// framebuffer). `None` en VRAM total = sin veredicto (`Ok`, no se bloquea
+/// sin dato). `Err` en español con GB concretos.
+pub(crate) fn check_vram_fit(
+    model_path: &std::path::Path,
+    context: usize,
+    cache_ram_mb: usize,
+    vram_total: Option<u64>,
+) -> Result<(), String> {
+    let total = match vram_total {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+    let model_mb = std::fs::metadata(model_path)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
+    let kv_mb =
+        ((context as u64).saturating_mul(32) / (1024 * 1024)).saturating_sub(cache_ram_mb as u64);
+    let need_mb = model_mb + kv_mb;
+    let budget_mb = total * 9 / 10;
+    if need_mb <= budget_mb {
+        return Ok(());
+    }
+    Err(format!(
+        "El modelo no cabe en la VRAM: necesita ~{} MB (pesos) + ~{} MB (KV a {}K) = ~{:.1} GB frente a {:.1} GB instalados (útil ~{:.1} GB). Usa un .gguf más pequeño o un perfil de menor contexto.",
+        model_mb,
+        kv_mb,
+        context / 1024,
+        need_mb as f64 / 1024.0,
+        total as f64 / 1024.0,
+        budget_mb as f64 / 1024.0,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +207,38 @@ mod tests {
             parse_adapter_ram_min("AdapterRAM=2147483648\r\n", 1024),
             Some(2048)
         );
+    }
+    /// Guard VRAM: 27B (~14 GB) + KV 32K con cache_ram del perfil en 16 GB
+    /// pasa; en 8 GB falla con GB concretos; sin dato nunca bloquea.
+    #[test]
+    fn vram_fit_avisa_con_gb_y_no_bloquea_sin_dato() {
+        let dir = std::env::temp_dir().join(format!("lm-vram-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let big = dir.join("grande.gguf");
+        // 14 GB disperso: metadatos, no 14 GB reales en disco.
+        let f = std::fs::File::create(&big).unwrap();
+        f.set_len(14 * 1024 * 1024 * 1024).unwrap();
+        // KV 32K = 32768*32/1MiB = 1024 MB; con cache_ram 6144 del perfil:
+        // 14336+1024-6144 = 9216 <= 14745 (16 GB*0.9) OK.
+        assert!(check_vram_fit(&big, 32768, 6144, Some(16384)).is_ok());
+        let err = check_vram_fit(&big, 32768, 0, Some(8192)).unwrap_err();
+        assert!(err.contains("no cabe en la VRAM"), "{}", err);
+        assert!(err.contains("GB"), "{}", err);
+        assert!(check_vram_fit(&big, 32768, 0, None).is_ok());
+        assert!(check_vram_fit(&big, 32768, 0, Some(32768)).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Umbral relativo: 2B→25, 27B→20, 70B→12, desconocido→cfg; el cfg como
+    /// techo (dueño más estricto gana).
+    #[test]
+    fn slow_threshold_escala_con_tamano_y_cfg_es_techo() {
+        assert_eq!(slow_threshold(20.0, 0.0), 20.0);
+        assert_eq!(slow_threshold(20.0, 2.0), 20.0);
+        assert_eq!(slow_threshold(99.0, 2.0), 25.0);
+        assert_eq!(slow_threshold(99.0, 14.0), 20.0);
+        assert_eq!(slow_threshold(99.0, 40.0), 12.0);
+        assert_eq!(slow_threshold(10.0, 2.0), 10.0);
     }
 
     #[test]

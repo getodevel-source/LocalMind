@@ -6,6 +6,27 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-10-09
+
+### Añadido (portabilidad: pensado para otro hardware, no solo esta máquina)
+- Guard de VRAM pre-arranque: `POST /api/start` rechaza con 400 y GB
+  concretos si `modelo + KV(contexto)` no cabe en la VRAM (margen 0.9,
+  `cache_ram` descuenta). Sin dato de VRAM nunca bloquea. Test
+  `vram_fit_avisa_con_gb_y_no_bloquea_sin_dato`.
+- Onboarding: estado vacío de Modelos con sugerencia + botón que rellena un
+  repo pequeño real (`Qwen/Qwen2.5-1.5B-Instruct-GGUF`, ~2 GB). Claves
+  `models.starterHint/starterFill` es/en. No descarga solo.
+- Puerta lenta relativa al tamaño: `slow_threshold` (≤9 GB→25, ≤17 GB→20,
+  >17 GB→12 t/s; cfg como techo). Un 2B en integrada y un 70B ya no comparten
+  el umbral calibrado para 27B. Test `slow_threshold_escala_con_tamano_y_cfg_es_techo`.
+- Sampler por familia (`Qwen|Llama|Mistral|Generic` por nombre de archivo):
+  Llama (0.6/40/0.9) y Mistral (0.7/40/1.0) dejan de recibir el sampler Qwen;
+  Qwen/Bonsai/desconocido = Qwen (medido). Solo rellena ausentes; lo
+  explícito gana. Test `sampler_por_familia_qwen_llama_mistral_generico`.
+- Backend GPU visible y honesto: fila solo-lectura en Ajustes → Motor con el
+  `device` efectivo (`Vulkan0`…); `engine.device` sigue solo-lectura en API
+  (se cambia en el TOML). Clave `settings.backendNote` es/en.
+
 ## [2.0.2] - 2026-10-09
 
 ### Corregido

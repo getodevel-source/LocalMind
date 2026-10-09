@@ -305,6 +305,59 @@ fn normalize_reasoning_effort(v: &str) -> Option<String> {
     }
 }
 
+/// Familia del modelo servido por su nombre de archivo (portabilidad): el
+/// sampler de respaldo debe parecerse a la model card del modelo, no imponer
+/// la de Qwen a un Llama/Mistral. Qwen es el fallback (compat con lo medido:
+/// el 100% de las evals de esta máquina son Qwen/Bonsai).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelFamily {
+    Qwen,
+    Llama,
+    Mistral,
+    Generic,
+}
+
+/// Puro y testeable: `qwen|qwq` → Qwen; `llama` → Llama; `mistral|mixtral` →
+/// Mistral; resto/vacío → Generic (= Qwen como fallback medido, documentado).
+fn model_family(served: &str) -> ModelFamily {
+    let low = served.to_lowercase();
+    if low.contains("qwen") || low.contains("qwq") || low.contains("bonsai") {
+        ModelFamily::Qwen
+    } else if low.contains("llama") {
+        ModelFamily::Llama
+    } else if low.contains("mistral") || low.contains("mixtral") {
+        ModelFamily::Mistral
+    } else {
+        ModelFamily::Generic
+    }
+}
+
+/// Sampler de respaldo por familia y modo (solo rellena claves AUSENTES: lo
+/// explícito siempre gana). Qwen = model card `Qwen/Qwen3.8-27B` (medido
+/// aquí); Llama = defaults Meta (temp 0.6/0.6, top_p 0.9, sin presence);
+/// Mistral = guía Mistral (temp 0.7, top_p 1.0); Generic = Qwen (fallback).
+fn sampler_defaults(family: ModelFamily, thinking: bool) -> [(&'static str, serde_json::Value); 5] {
+    match family {
+        ModelFamily::Qwen | ModelFamily::Generic => qwen_sampler_defaults(thinking),
+        // Llama/Mistral: sus guías no varían por modo thinking/instruct, así
+        // que una sola tabla por familia (sin ramas idénticas).
+        ModelFamily::Llama => [
+            ("temperature", serde_json::json!(0.6)),
+            ("top_k", serde_json::json!(40)),
+            ("top_p", serde_json::json!(0.9)),
+            ("min_p", serde_json::json!(0.0)),
+            ("presence_penalty", serde_json::json!(0.0)),
+        ],
+        ModelFamily::Mistral => [
+            ("temperature", serde_json::json!(0.7)),
+            ("top_k", serde_json::json!(40)),
+            ("top_p", serde_json::json!(1.0)),
+            ("min_p", serde_json::json!(0.0)),
+            ("presence_penalty", serde_json::json!(0.0)),
+        ],
+    }
+}
+
 /// Sampler oficial de Qwen3.8-27B (model card `Qwen/Qwen3.8-27B`) según el modo
 /// resuelto: thinking → temp 1.0 / top_p 0.95 / top_k 20 / min_p 0.0 /
 /// presence 0.0; instruct sin thinking → 0.7 / 0.80 / 20 / 0.0 / 1.5.
@@ -329,7 +382,6 @@ fn qwen_sampler_defaults(thinking: bool) -> [(&'static str, serde_json::Value); 
         ]
     }
 }
-
 /// Preparar el payload de `POST /v1/chat/completions` en UN solo parseo
 /// (auditoría de rendimiento: antes parseaba/serializaba el cuerpo 5 veces
 /// por request). Devuelve `(bytes_a_enviar, modelo_pedido, stream_pedido)`.
@@ -390,7 +442,9 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
             .and_then(|b| b.as_bool())
             == Some(false);
         let thinking = effort != "none" && !kwargs_off;
-        for (k, val) in qwen_sampler_defaults(thinking) {
+        // Sampler por familia del SERVIDO (no del pedido: el pedido se reescribe
+        // al servido justo debajo). Qwen/Bonsai/desconocido = Qwen (medido).
+        for (k, val) in sampler_defaults(model_family(served), thinking) {
             if !obj.contains_key(k) {
                 obj.insert(k.to_string(), val);
             }
@@ -3691,6 +3745,63 @@ mod proxy {
             );
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             assert_eq!(v["presence_penalty"], serde_json::json!(1.5));
+        }
+
+        #[test]
+        fn sampler_por_familia_qwen_llama_mistral_generico() {
+            use super::super::{model_family, sampler_defaults, ModelFamily};
+            assert_eq!(model_family("Qwen3.8-27B-IQ4_XS_4BPW"), ModelFamily::Qwen);
+            assert_eq!(
+                model_family("Ternary-Bonsai-2-27B-PTQ1_0"),
+                ModelFamily::Qwen
+            );
+            assert_eq!(model_family("Llama-3.1-8B-Q4_K_M"), ModelFamily::Llama);
+            assert_eq!(model_family("Mistral-7B-v0.3-Q4_K_M"), ModelFamily::Mistral);
+            assert_eq!(model_family("Mixtral-8x7B-Q4"), ModelFamily::Mistral);
+            assert_eq!(model_family("Phi-4-14B-Q4"), ModelFamily::Generic);
+            assert_eq!(model_family(""), ModelFamily::Generic);
+            // Qwen/Generic = card medida; Llama/Mistral = sus guías.
+            let get = |fam, th: bool| {
+                let m: std::collections::HashMap<&str, serde_json::Value> =
+                    sampler_defaults(fam, th).into_iter().collect();
+                (
+                    m["temperature"].clone(),
+                    m["top_k"].clone(),
+                    m["top_p"].clone(),
+                )
+            };
+            assert_eq!(
+                get(ModelFamily::Qwen, true),
+                (
+                    serde_json::json!(1.0),
+                    serde_json::json!(20),
+                    serde_json::json!(0.95)
+                )
+            );
+            assert_eq!(
+                get(ModelFamily::Llama, false),
+                (
+                    serde_json::json!(0.6),
+                    serde_json::json!(40),
+                    serde_json::json!(0.9)
+                )
+            );
+            assert_eq!(
+                get(ModelFamily::Mistral, false),
+                (
+                    serde_json::json!(0.7),
+                    serde_json::json!(40),
+                    serde_json::json!(1.0)
+                )
+            );
+            // Payload con servido Llama: el sampler es Llama (0.6), no Qwen.
+            let (out, _, _) = super::super::prepare_chat_payload(
+                br#"{"model":"m","messages":[]}"#,
+                "Llama-3.1-8B-Q4_K_M",
+            );
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(v["temperature"], serde_json::json!(0.6));
+            assert_eq!(v["top_k"], serde_json::json!(40));
         }
 
         #[test]

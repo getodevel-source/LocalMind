@@ -464,7 +464,13 @@ impl ProcessManager {
                                             st.decode_tps_samples = samples.clone();
                                             st.engine_slow = gate_is_slow(
                                                 tps,
-                                                cfg_poll.get().engine.slow_gate_tps,
+                                                crate::engine_gate::slow_threshold(
+                                                    cfg_poll.get().engine.slow_gate_tps,
+                                                    Self::model_size_gb(
+                                                        &models_dir_poll,
+                                                        &st.model,
+                                                    ),
+                                                ),
                                             );
                                             st.acceptance_ok = Some(false);
                                             st.acceptance_error = Some(msg.clone());
@@ -484,7 +490,10 @@ impl ProcessManager {
                                                 &load_times_path_poll,
                                                 &load_times_poll.lock(),
                                             );
-                                            let slow_at = cfg_poll.get().engine.slow_gate_tps;
+                                            let slow_at = crate::engine_gate::slow_threshold(
+                                                cfg_poll.get().engine.slow_gate_tps,
+                                                Self::model_size_gb(&models_dir_poll, &st.model),
+                                            );
                                             st.status = "running".to_string();
                                             st.verifying = false;
                                             st.starting_for_secs = 0;
@@ -1529,7 +1538,38 @@ impl ProcessManager {
         // Acepta el basename plano (histórico) o el `rel` de /api/models
         // (`sub/model.gguf`); rechaza `..`, absolutas y escapes de models/.
         let model_path = resolve_model_path(&self.models_dir, &model_filename)?;
-
+        // Precedencia de contexto: request explícito > perfil explícito > última
+        // sesión (solo si coincide perfil+modelo) > contexto del perfil resuelto.
+        let req_profile_opt = req
+            .profile
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let context = resolve_context(
+            req.context,
+            req_profile_opt,
+            profile.context,
+            cfg.last.profile.as_deref(),
+            cfg.last.model.as_deref(),
+            cfg.last.context,
+            &profile.id,
+            &model_filename,
+        );
+        // Guard de VRAM (portabilidad): un tercero con 8 GB que pida un 27B
+        // (~14 GB) lo descubre por OOM si no se avisa. Se estima
+        // `modelo + KV(contexto resuelto)` contra la VRAM total; si no hay
+        // dato de VRAM (sin nvidia-smi ni WMI válido), NO se bloquea: sin dato
+        // no hay veredicto. El error nombra GB concretos. Va tras el contexto
+        // porque el KV depende del contexto resuelto, no del pedido.
+        if let Err(e) = crate::engine_gate::check_vram_fit(
+            &model_path,
+            context,
+            profile.cache_ram,
+            crate::engine_gate::vram_total_mb(),
+        ) {
+            self.log(&e);
+            return Err(e);
+        }
         // Precedencia de contexto: request explícito > perfil explícito > última
         // sesión (solo si coincide perfil+modelo) > contexto del perfil resuelto.
         let req_profile_opt = req
