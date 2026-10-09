@@ -1274,9 +1274,12 @@ impl ProcessManager {
         }
         // D-21: consumo REAL de VRAM (Windows): `nvidia-smi` si hay NVIDIA.
         // Sin NVIDIA (AMD/Intel) no hay contador de USO barato y estable desde
-        // aquí: se informa el TOTAL instalado vía WMI `AdapterRAM` (el texto
-        // del motor queda como base y se anota el total; el uso sigue sin
-        // dato y no se inventa). Best-effort: sin dato se deja el texto.
+        // aquí y no se inventa. El WMI `AdapterRAM` solo se usa como último
+        // recurso (sin dato del motor): si `--list-devices` ya trae la VRAM
+        // (texto con "MiB"/"GB"/"MB"), NO se anexa nada de WMI — sus drivers
+        // suelen saturar el uint32 (p. ej. 4095 MB falsos en una RX 6800 XT
+        // de 16 GB) y ensucia el dato real. Best-effort: sin dato se deja el
+        // texto del motor intacto.
         if let Some(used) = vram_used_mb() {
             for (i, g) in gpus.iter_mut().enumerate() {
                 if i == 0 {
@@ -1292,13 +1295,8 @@ impl ProcessManager {
                     vram: format!("{} MB instalados (uso no disponible en AMD/Intel)", total),
                 });
             }
-        } else if let Some(total) = vram_total_mb() {
-            for (i, g) in gpus.iter_mut().enumerate() {
-                if i == 0 && !g.vram.to_lowercase().contains("instalados") {
-                    g.vram = format!("{} · {} MB instalados", g.vram, total);
-                }
-            }
         }
+        // Con dato del motor: nada de WMI (evita el "4095 MB instalados" falso).
         HardwareInfo {
             cpu_cores,
             cpu_name,

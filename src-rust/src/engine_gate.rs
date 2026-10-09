@@ -46,18 +46,30 @@ pub(crate) fn engine_lost(consecutive_failures: u32, status_running: bool) -> bo
 }
 
 /// Puro: máximo `AdapterRAM` en MB desde salida `wmic ... /value`.
-/// Filtra el saturado uint32 (4294967295) y valores <256 MB (ruido/integradas
-/// sin dedicada). `None` = sin adaptador válido.
+/// `AdapterRAM` es uint32 y muchos drivers AMD lo saturan: el valor exacto
+/// `4294967295` (4 GB-1) es el caso conocido, pero hay drivers que reportan
+/// otros techos falsos (p. ej. `4293918720` ≈ 4095 MB en una RX 6800 XT de
+/// 16 GB). Regla: se acepta solo `n >= 8 GB` (descarta saturados parciales e
+/// integradas sin dedicada); por debajo, `None` aunque haya dígitos.
+/// `None` = sin adaptador válido.
 pub(crate) fn parse_adapter_ram(text: &str) -> Option<u64> {
+    parse_adapter_ram_min(text, 8 * 1024)
+}
+
+/// Núcleo testeable con umbral explícito en MB.
+pub(crate) fn parse_adapter_ram_min(text: &str, min_mb: u64) -> Option<u64> {
     let mut best: Option<u64> = None;
     for line in text.lines() {
         let v = line.split('=').nth(1).unwrap_or("").trim();
         let digits: String = v.chars().filter(|c| c.is_ascii_digit()).collect();
         if let Ok(n) = digits.parse::<u64>() {
-            if n == 4294967295 || n < 256 * 1024 * 1024 {
+            if n == 4294967295 {
                 continue;
             }
             let mb = n / (1024 * 1024);
+            if mb < min_mb {
+                continue;
+            }
             best = Some(best.map_or(mb, |b: u64| b.max(mb)));
         }
     }
@@ -112,17 +124,27 @@ mod tests {
     use super::*;
 
     /// D-21: `AdapterRAM` dice el TECHO instalado, no el uso. 16 GB =
-    /// 17179869184 B → 16384 MB; el saturado uint32 y el ruido <256 MB se
-    /// filtran; gana el máximo entre adaptadores.
+    /// 17179869184 B → 16384 MB; gana el máximo entre adaptadores.
+    /// Saturados (uint32 exacto o techos falsos <8 GB como los 4095 MB de una
+    /// RX 6800 XT de 16 GB) y ruido <8 GB → `None`: mejor sin dato que con
+    /// dato falso junto al real del motor.
     #[test]
     fn adapter_ram_da_techo_maximo_y_filtra_basura() {
         assert_eq!(
-            parse_adapter_ram("AdapterRAM=17179869184\r\nAdapterRAM=2147483648\r\n"),
+            parse_adapter_ram("AdapterRAM=17179869184\r\nAdapterRAM=17179869184\r\n"),
             Some(16384)
         );
+        // Caso real medido 2026-10-09 (RX 6800 XT 16 GB): driver saturado.
+        assert_eq!(parse_adapter_ram("AdapterRAM=4293918720\r\n"), None);
         assert_eq!(parse_adapter_ram("AdapterRAM=4294967295\r\n"), None);
+        assert_eq!(parse_adapter_ram("AdapterRAM=2147483648\r\n"), None);
         assert_eq!(parse_adapter_ram("AdapterRAM=134217728\r\n"), None);
         assert_eq!(parse_adapter_ram(""), None);
+        // Umbral explícito: con min 1 GB, 2 GB sí pasa (integradas honestas).
+        assert_eq!(
+            parse_adapter_ram_min("AdapterRAM=2147483648\r\n", 1024),
+            Some(2048)
+        );
     }
 
     #[test]

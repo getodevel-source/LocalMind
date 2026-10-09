@@ -6,7 +6,13 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-09
+
 ### Corregido
+- VRAM falsa en AMD: drivers que saturan `AdapterRAM` con techos falsos
+  (medido: 4095 MB en una RX 6800 XT de 16 GB) ya no ensucian el dato real
+  del motor: el WMI solo se usa sin dato de `--list-devices` y con umbral
+  ≥8 GB (D-21). `GET /api/hardware` muestra lo real del motor.
 - El chat servía Qwen3.8 siempre en su modo más lento y propenso a fallar
   (`xhigh` por defecto de la plantilla + sampler ajeno): ahora el gateway
   aplica `reasoning_effort: medium` y el sampler oficial cuando el cliente
