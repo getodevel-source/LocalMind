@@ -10,6 +10,7 @@ mod models;
 mod notify;
 mod process;
 mod server;
+mod tray;
 mod update;
 mod usage;
 
@@ -263,39 +264,141 @@ fn main() {
 
     window.set_focus();
 
+    // Bandeja (segundo plano real): X/minimizar ocultan, no salen. Si la
+    // bandeja falla (entorno sin tray), la app sigue con cierre clásico.
+    // Los handles NO son `Send`: viven en este hilo (event-loop), nunca en
+    // workers. El refresco va por `WaitUntil(5 s)` en el propio loop.
+    let tray_handles: Option<crate::tray::TrayHandles> = match crate::tray::build_tray(&base_dir) {
+        Ok(h) => {
+            process_mgr.log("[LocalMind] OMNI en segundo plano: cerrar la ventana no detiene el motor (Salir desde la bandeja).");
+            Some(h)
+        }
+        Err(e) => {
+            crate::filelog::write_log_line(
+                &crate::filelog::log_file(&base_dir),
+                &format!("[LocalMind] [WARN] Sin bandeja (cierre clásico): {}", e),
+            );
+            None
+        }
+    };
+    let tray_ok = tray_handles.is_some();
+
     let mgr_cleanup = Arc::clone(&process_mgr);
     let base_cleanup = base_dir.clone();
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested | WindowEvent::Destroyed,
-            ..
-        } = event
-        {
-            mgr_cleanup.stop();
-            // Actualización lista: swap al salir (cmd desacoplado, el exe ya
-            // liberó su lock). Sin pendiente: salida normal.
-            if let Some(pending) = crate::update::pending_update() {
-                match crate::update::prepare_install_on_exit(&base_cleanup) {
-                    Ok(script) => {
-                        let _ = std::process::Command::new("cmd.exe")
-                            .args(["/C", &script.to_string_lossy().to_string()])
-                            .spawn();
-                    }
-                    Err(e) => {
-                        crate::filelog::write_log_line(
-                            &crate::filelog::log_file(&base_cleanup),
-                            &format!(
-                                "[LocalMind] No se pudo instalar la actualización {}: {}",
-                                pending.version, e
-                            ),
-                        );
-                    }
+    // Salida real compartida (X con `arm_quit`, `Salir` del tray, Destroyed):
+    // detiene el motor + aplica el update pendiente + sale.
+    let do_quit = move |mgr: &Arc<ProcessManager>, base: &std::path::PathBuf| {
+        mgr.stop();
+        if let Some(pending) = crate::update::pending_update() {
+            match crate::update::prepare_install_on_exit(base) {
+                Ok(script) => {
+                    let _ = std::process::Command::new("cmd.exe")
+                        .args(["/C", &script.to_string_lossy().to_string()])
+                        .spawn();
+                }
+                Err(e) => {
+                    crate::filelog::write_log_line(
+                        &crate::filelog::log_file(base),
+                        &format!(
+                            "[LocalMind] No se pudo instalar la actualización {}: {}",
+                            pending.version, e
+                        ),
+                    );
                 }
             }
-            *control_flow = ControlFlow::Exit;
+        }
+    };
+
+    event_loop.run(move |event, _, control_flow| {
+        // Tick cada 5 s para refrescar el tray (tooltip + Iniciar/Detener)
+        // aunque no haya eventos de ventana/ratón/teclado.
+        *control_flow =
+            ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        if let Some(h) = tray_handles.as_ref() {
+            let st = mgr_cleanup.get_status();
+            crate::tray::refresh_tray(h, &st.status, st.is_healthy, false);
+        }
+
+        // `try_recv` en bucle: pueden acumularse varios eventos por tick.
+        while let Ok(ev) = tray_icon::TrayIconEvent::receiver().try_recv() {
+            use tray_icon::TrayIconEvent;
+            let open = match ev {
+                TrayIconEvent::Click {
+                    button,
+                    button_state,
+                    ..
+                } => {
+                    use tray_icon::{MouseButton, MouseButtonState};
+                    button == MouseButton::Left && button_state == MouseButtonState::Up
+                }
+                TrayIconEvent::DoubleClick { .. } => true,
+                _ => false,
+            };
+            if open {
+                window.set_visible(true);
+                window.set_minimized(false);
+                window.set_focus();
+            }
+        }
+        // Menú del tray: Abrir / Iniciar / Detener / Salir.
+        while let Ok(mev) = muda::MenuEvent::receiver().try_recv() {
+            match crate::tray::action_for_menu_id(mev.id.0.as_str()) {
+                Some(crate::tray::TrayAction::Open) => {
+                    window.set_visible(true);
+                    window.set_minimized(false);
+                    window.set_focus();
+                }
+                Some(crate::tray::TrayAction::Start) => {
+                    // Arranque con la última config (igual que el botón de la
+                    // UI sin cuerpo): el `start()` resuelve modelo/perfil.
+                    let mgr = Arc::clone(&mgr_cleanup);
+                    std::thread::spawn(move || {
+                        let _ = mgr.start(crate::process::StartRequest {
+                            model: None,
+                            profile: None,
+                            context: None,
+                            threads: None,
+                            priority: None,
+                        });
+                    });
+                }
+                Some(crate::tray::TrayAction::Stop) => {
+                    mgr_cleanup.stop();
+                }
+                Some(crate::tray::TrayAction::Quit) => {
+                    crate::tray::arm_quit();
+                    do_quit(&mgr_cleanup, &base_cleanup);
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+                None => {}
+            }
+        }
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                if crate::tray::quit_armed() || !tray_ok {
+                    // Salida real: motor parado + update pendiente aplicado.
+                    do_quit(&mgr_cleanup, &base_cleanup);
+                    *control_flow = ControlFlow::Exit;
+                } else {
+                    // Segundo plano: ocultar, NO parar nada. El lock
+                    // single-instance sigue tomado (el proceso vive).
+                    window.set_visible(false);
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Destroyed,
+                ..
+            } => {
+                do_quit(&mgr_cleanup, &base_cleanup);
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
         }
     });
 }
