@@ -358,11 +358,25 @@ fn sampler_defaults(family: ModelFamily, thinking: bool) -> [(&'static str, serd
     }
 }
 
+/// ¿El effort pedido es incompatible con el modelo servido? (puro, testeable).
+/// Las familias con thinking conocido son Qwen/Bonsai (= `Qwen` en
+/// `model_family`); Llama/Mistral/Generic responden directo: pedirles
+/// low/medium/high/max no cambia nada en el motor. `off`/`none`/ausente =
+/// sin pedido = sin mismatch. El llamador lo loguea (visible en Logs), no lo
+/// rechaza: el motor responde igual, solo sin razonar.
+pub(crate) fn effort_mismatch(served: &str, effort: Option<&str>) -> bool {
+    let e = match effort {
+        Some(s) => s.trim().to_lowercase(),
+        None => return false,
+    };
+    if e.is_empty() || e == "off" || e == "none" {
+        return false;
+    }
+    !matches!(model_family(served), ModelFamily::Qwen)
+}
+
 /// Sampler oficial de Qwen3.8-27B (model card `Qwen/Qwen3.8-27B`) según el modo
 /// resuelto: thinking → temp 1.0 / top_p 0.95 / top_k 20 / min_p 0.0 /
-/// presence 0.0; instruct sin thinking → 0.7 / 0.80 / 20 / 0.0 / 1.5.
-/// Solo rellena claves AUSENTES: lo explícito (puerta con temp 0, benches,
-/// harnesses, clientes) siempre gana.
 fn qwen_sampler_defaults(thinking: bool) -> [(&'static str, serde_json::Value); 5] {
     if thinking {
         [
@@ -2929,7 +2943,19 @@ fn handle_chat_completions(
     // Un solo parseo/serializado (auditoría de rendimiento): equivale al chain
     // de 5 pasadas que había acá (2× from_slice + sanitize + rewrite + ensure).
     let (payload_bytes, req_model, stream_req) = prepare_chat_payload(&body_bytes, &served);
-
+    // Effort pedido a modelo sin thinking (portabilidad): se loguea una vez
+    // por request (visible en Logs), no se rechaza —el motor responde igual,
+    // solo sin razonar. La UI ya avisa antes de enviar.
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
+        let eff = v.get("reasoning_effort").and_then(|e| e.as_str());
+        if effort_mismatch(&served, eff) {
+            mgr.log(&format!(
+                "[LocalMind] El modelo «{}» no trae razonamiento: el nivel '{}' se ignora y responde directo.",
+                served,
+                eff.unwrap_or("?"),
+            ));
+        }
+    }
     let t0 = Instant::now();
     match ureq::post(&format!("http://127.0.0.1:{}/v1/chat/completions", st.port))
         .set("Content-Type", "application/json")
@@ -3804,6 +3830,25 @@ mod proxy {
             assert_eq!(v["top_k"], serde_json::json!(40));
         }
 
+        #[test]
+        fn effort_mismatch_solo_qwen_razona() {
+            use super::super::effort_mismatch;
+            // Qwen/Bonsai con effort = sin mismatch (razonan).
+            assert!(!effort_mismatch("Qwen3.8-27B", Some("max")));
+            assert!(!effort_mismatch(
+                "Ternary-Bonsai-2-27B-PTQ1_0",
+                Some("medium")
+            ));
+            // Llama/Mistral/desconocido con effort = mismatch (responden directo).
+            assert!(effort_mismatch("Llama-3.1-8B", Some("high")));
+            assert!(effort_mismatch("Mistral-7B", Some("medium")));
+            assert!(effort_mismatch("Phi-4-14B", Some("low")));
+            // off/none/ausente = sin pedido = sin mismatch en nadie.
+            assert!(!effort_mismatch("Llama-3.1-8B", Some("off")));
+            assert!(!effort_mismatch("Llama-3.1-8B", Some("none")));
+            assert!(!effort_mismatch("Llama-3.1-8B", None));
+            assert!(!effort_mismatch("Qwen3.8-27B", None));
+        }
         #[test]
         fn config_speculation_enabled_persiste_y_subclave_desconocida_se_rechaza() {
             // `POST /api/config {"engine":{"speculation":{"enabled":false}}}`:

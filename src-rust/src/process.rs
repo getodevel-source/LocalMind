@@ -100,6 +100,19 @@ pub struct HardwareInfo {
     pub cpu_cores: usize,
     pub cpu_name: String,
     pub gpus: Vec<GpuDevice>,
+    /// Núcleos FÍSICOS estimados (lógicos / 2 con SMT, best-effort): para
+    /// sugerir hilos sin copiar la config del dueño (6 = su Ryzen, no el
+    /// del usuario). `None` si no se puede estimar.
+    #[serde(default)]
+    pub cpu_physical: Option<usize>,
+    /// RAM total del sistema en MB (best-effort, WMI): para dimensionar KV
+    /// desbordado a RAM. `None` sin dato.
+    #[serde(default)]
+    pub ram_total_mb: Option<u64>,
+    /// VRAM total dedicada en MB (máximo entre GPUs dedicadas, best-effort):
+    /// número para el guard y la UI, no texto libre. `None` sin dato.
+    #[serde(default)]
+    pub vram_total_mb: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1319,6 +1332,9 @@ impl ProcessManager {
             cpu_cores,
             cpu_name,
             gpus,
+            cpu_physical: physical_cores(cpu_cores),
+            ram_total_mb: ram_total_mb(),
+            vram_total_mb: crate::engine_gate::vram_total_mb(),
         }
     }
 
@@ -1873,6 +1889,41 @@ fn num_cpus() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(6)
+}
+
+/// Núcleos físicos estimados (portabilidad): la mayoría x86 trae SMT×2, así
+/// que lógicos/2 con mínimo 1. Mejor que copiar el 6 del dueño: en un i3 de
+/// 4 hilos sugiere 2, en un 7950X de 32 sugiere 16. `None` si no hay dato.
+fn physical_cores(logical: usize) -> Option<usize> {
+    if logical == 0 {
+        return None;
+    }
+    Some((logical / 2).max(1))
+}
+
+/// RAM total del sistema en MB (Windows, best-effort): WMI
+/// `Win32_ComputerSystem.TotalPhysicalMemory`. `None` sin dato.
+fn ram_total_mb() -> Option<u64> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let out = std::process::Command::new("wmic")
+        .args(["computersystem", "get", "totalphysicalmemory", "/value"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let v = line.split('=').nth(1).unwrap_or("").trim();
+        let digits: String = v.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u64>() {
+            if n >= 512 * 1024 * 1024 {
+                return Some(n / (1024 * 1024));
+            }
+        }
+    }
+    None
 }
 // (extraídos a `engine_gate.rs`: `vram_used_mb`, `vram_total_mb`,
 // `parse_adapter_ram`. Se usan como `crate::engine_gate::`.)

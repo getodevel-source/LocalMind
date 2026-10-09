@@ -6,6 +6,21 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.6] - 2026-10-09
+
+### Añadido (adaptativo: la app se ajusta al usuario, no al revés)
+- Capacidades por modelo en `GET /api/models` (`capabilities: {family,
+  ctx_native, thinking}`, heurística honesta por nombre, sin parser GGUF).
+- Hardware completo en `GET /api/hardware` (`cpu_physical`, `ram_total_mb`,
+  `vram_total_mb` numéricos para la UI y el guard).
+- UI adaptativa: contexto acotado al nativo del modelo (opciones de más
+  desactivadas), aviso si el modelo no trae thinking, hilos reescritos con
+  los físicos reales (recomendado/mitad/todos), backend visible solo-lectura,
+  sugerencia de modelo pequeño en estado vacío. Claves es/en.
+- Puerta lenta relativa al tamaño (`slow_threshold`: 2B→25, 27B→20, 70B→12;
+  cfg como techo) y sampler por familia (Llama/Mistral propios).
+- Warning en Logs si se pide effort a modelo sin thinking (no se rechaza).
+
 ## [2.0.5] - 2026-10-09
 
 ### Corregido (canal auto-update: el drill v2.0.4 lo rompió en vivo)

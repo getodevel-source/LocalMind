@@ -895,7 +895,54 @@ pub fn import_pick_timed_out(elapsed_secs: u64) -> bool {
 }
 
 /// Enriquecer una ficha `ModelInfo` serializada con `size_bytes`, `sha256`,
-/// `verified` y `source` (sin tocar las claves existentes).
+/// `verified`, `source` y `capabilities` (sin tocar las claves existentes).
+/// `capabilities` es heurística HONESTA por nombre de archivo (NO se lee el
+/// header GGUF: decisión explícita, sin parser binario):
+/// `{family, ctx_native, thinking}` donde `ctx_native` es el contexto nativo
+/// conocido de la familia (`null` si se desconoce) y `thinking` si la familia
+/// suele traer plantilla con razonamiento. La UI lo usa para adaptar
+/// opciones; el motor confirma el `n_ctx` real por `/props` al arrancar.
+pub fn model_capabilities(filename: &str) -> serde_json::Value {
+    let low = filename.to_lowercase();
+    // Familia (mismo vocabulario que el sampler del gateway).
+    let family = if low.contains("qwen") || low.contains("qwq") || low.contains("bonsai") {
+        "qwen"
+    } else if low.contains("llama") {
+        "llama"
+    } else if low.contains("mistral") || low.contains("mixtral") {
+        "mistral"
+    } else if low.contains("phi") || low.contains("gemma") {
+        "generic"
+    } else {
+        "generic"
+    };
+    // Contexto nativo por familia/generación conocida (null = se desconoce,
+    // la UI no limita y el motor manda por /props).
+    let ctx_native: Option<usize> = if low.contains("qwen3") || low.contains("bonsai") {
+        Some(262144)
+    } else if low.contains("qwen2.5") {
+        Some(131072)
+    } else if low.contains("llama-3.1") || low.contains("llama-3.2") || low.contains("llama3.1") {
+        Some(131072)
+    } else if low.contains("llama-3") || low.contains("llama3") {
+        Some(8192)
+    } else if low.contains("mistral") && (low.contains("v0.3") || low.contains("0.3")) {
+        Some(131072)
+    } else if low.contains("mistral") || low.contains("mixtral") {
+        Some(32768)
+    } else if low.contains("phi-4") || low.contains("gemma-3") {
+        Some(131072)
+    } else {
+        None
+    };
+    // Thinking: familias con plantilla de razonamiento conocida.
+    let thinking = low.contains("qwen3") || low.contains("qwq") || low.contains("bonsai");
+    serde_json::json!({
+        "family": family,
+        "ctx_native": ctx_native,
+        "thinking": thinking,
+    })
+}
 pub fn enrich_model_entry(
     models_dir: &Path,
     mut v: serde_json::Value,
@@ -937,6 +984,7 @@ pub fn enrich_model_entry(
             })
             .unwrap_or_else(|| serde_json::Value::from("local".to_string())),
         );
+        obj.insert("capabilities".to_string(), model_capabilities(&filename));
     }
     v
 }
@@ -1014,6 +1062,25 @@ mod tests {
         assert_eq!(enriched["verified"], serde_json::json!(true));
         assert_eq!(enriched["source"], serde_json::json!("owner/name"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Capacidades por nombre: Qwen3→262K+thinking, Llama3.1→128K sin
+    /// thinking, desconocido→null sin thinking (la UI no limita, el motor
+    /// confirma por /props).
+    #[test]
+    fn capacidades_por_nombre_honestas() {
+        let q = model_capabilities("Qwen3.8-27B-IQ4_XS_4BPW.gguf");
+        assert_eq!(q["family"], serde_json::json!("qwen"));
+        assert_eq!(q["ctx_native"], serde_json::json!(262144));
+        assert_eq!(q["thinking"], serde_json::json!(true));
+        let l = model_capabilities("Llama-3.1-8B-Q4_K_M.gguf");
+        assert_eq!(l["family"], serde_json::json!("llama"));
+        assert_eq!(l["ctx_native"], serde_json::json!(131072));
+        assert_eq!(l["thinking"], serde_json::json!(false));
+        let g = model_capabilities("Algo-Raro-13B-Q5.gguf");
+        assert_eq!(g["family"], serde_json::json!("generic"));
+        assert!(g["ctx_native"].is_null());
+        assert_eq!(g["thinking"], serde_json::json!(false));
     }
 
     #[test]

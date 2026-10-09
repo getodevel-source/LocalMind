@@ -2399,6 +2399,11 @@
         'err.startFail': 'Error al iniciar: ',
         'common.copied': 'Copiado',
         'profile.dynHint': 'Perfil dinámico: ',
+        'profile.ctxNative': '(nativo del modelo: {n}K máx.)',
+        'chat.effortNoThinking': 'Este modelo no trae razonamiento: el nivel se ignora y responde directo.',
+        'threads.rec': '{n} hilos — recomendado para tu CPU',
+        'threads.quiet': '{n} hilos — silencioso',
+        'threads.all': '{n} hilos — todos los lógicos',
         'profile.fbVelLabel': 'Chat diario — el más rápido (32K, todo en GPU)',
         'profile.fbVelHint': 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).',
         'profile.fbMultiLabel': 'Multi-documento — varios PDFs y archivos (64K)',
@@ -2660,6 +2665,11 @@
         'err.engineOff': 'Start the engine from the Dashboard before sending messages.',
         'err.startFail': 'Failed to start: ',
         'profile.dynHint': 'Dynamic profile: ',
+        'profile.ctxNative': '(model native: {n}K max)',
+        'chat.effortNoThinking': 'This model has no reasoning: the level is ignored and it answers directly.',
+        'threads.rec': '{n} threads — recommended for your CPU',
+        'threads.quiet': '{n} threads — quiet',
+        'threads.all': '{n} threads — all logical',
         'profile.fbVelLabel': 'Daily chat — fastest (32K, all in GPU)',
         'profile.fbVelHint': 'Model and conversation memory 100% in VRAM (16 GB). Top speed (~17 t/s). For chat, questions and short code (<~30k words).',
         'profile.fbMultiLabel': 'Multi-document — several PDFs and files (64K)',
@@ -4231,6 +4241,68 @@
         box.appendChild(b);
       }
       box.style.display = box.childNodes.length ? '' : 'none';
+      try { adaptOptionsToModel(cur); } catch (e) {}
+    }
+
+    // Opciones adaptativas (portabilidad): el contexto se acota al nativo del
+    // modelo (si se conoce) y el effort avisa si el modelo no trae thinking.
+    // Nunca inventa: sin `capabilities`, todo queda como estaba.
+    function adaptOptionsToModel(m) {
+      const caps = (m && m.capabilities) || null;
+      adaptContextToCaps(caps);
+      adaptEffortToCaps(caps);
+    }
+    function adaptContextToCaps(caps) {
+      const ctxSel = document.getElementById('context-select');
+      if (!ctxSel) return;
+      const native = caps && typeof caps.ctx_native === 'number' ? caps.ctx_native : null;
+      let limited = false;
+      ctxSel.querySelectorAll('option').forEach(opt => {
+        const v = parseInt(opt.value, 10);
+        const over = native && isFinite(v) && v > native;
+        opt.disabled = !!over;
+        if (over) limited = true;
+        if (over && opt.selected) opt.selected = false;
+      });
+      // Si la selección quedó en una opción desactivada (o vacía), bajar a la
+      // mayor permitida.
+      const cur = parseInt(ctxSel.value, 10);
+      if (native && (!isFinite(cur) || cur > native)) {
+        let best = null;
+        ctxSel.querySelectorAll('option').forEach(opt => {
+          const v = parseInt(opt.value, 10);
+          if (!opt.disabled && isFinite(v) && (best === null || v > best)) best = v;
+        });
+        if (best !== null) ctxSel.value = String(best);
+      }
+      const hint = document.getElementById('profile-hint');
+      if (hint && native) {
+        const base = hint.textContent || '';
+        if (!base.includes('nativo')) {
+          hint.textContent = (base ? base + ' ' : '') + T('profile.ctxNative', { n: Math.round(native / 1024) });
+        }
+      }
+      void limited;
+    }
+    function adaptEffortToCaps(caps) {
+      const sel = document.getElementById('chat-effort-select');
+      if (!sel) return;
+      const thinking = !!(caps && caps.thinking === true);
+      const unknown = !caps;
+      let warn = document.getElementById('chat-effort-warn');
+      if (!thinking && !unknown) {
+        if (!warn) {
+          warn = document.createElement('div');
+          warn.id = 'chat-effort-warn';
+          warn.className = 'profile-hint warn';
+          warn.setAttribute('role', 'note');
+          sel.closest('.chat-opt-row').appendChild(warn);
+        }
+        warn.textContent = T('chat.effortNoThinking');
+        warn.style.display = '';
+      } else if (warn) {
+        warn.style.display = 'none';
+      }
     }
 
     // Models tab table (read-only view over the same models cache).
@@ -4879,7 +4951,36 @@
           if (gpuNameEl) gpuNameEl.textContent = T('specs.gpuFallback');
           if (gpuVramEl) gpuVramEl.textContent = T('specs.gpuMemFallback');
         }
+        try { adaptThreadsToHw(hw); } catch (e) {}
       } catch (e) {}
+    }
+
+    // Hilos del USUARIO, no del dueño (portabilidad): reescribe el select con
+    // los físicos reales (recomendado), mitad (silencioso) y todos los lógicos
+    // (solo si difieren). Sin dato, deja las opciones de fábrica (6/4/12).
+    function adaptThreadsToHw(hw) {
+      const sel = document.getElementById('threads-select');
+      if (!sel) return;
+      const phys = hw && typeof hw.cpu_physical === 'number' ? hw.cpu_physical : null;
+      const logical = hw && typeof hw.cpu_cores === 'number' ? hw.cpu_cores : null;
+      if (!phys || phys < 1) return;
+      const prev = sel.value;
+      sel.innerHTML = '';
+      const mk = (v, label, selected) => {
+        const opt = document.createElement('option');
+        opt.value = String(v);
+        opt.textContent = label;
+        if (selected) opt.selected = true;
+        sel.appendChild(opt);
+      };
+      mk(phys, T('threads.rec', { n: phys }), true);
+      const quiet = Math.max(1, Math.floor(phys / 2));
+      if (quiet !== phys) mk(quiet, T('threads.quiet', { n: quiet }), false);
+      if (logical && logical !== phys) mk(logical, T('threads.all', { n: logical }), false);
+      if (prev) {
+        const hit = sel.querySelector(`option[value="${prev}"]`);
+        if (hit) sel.value = prev;
+      }
     }
     async function refreshVersion() {
       const badge = document.getElementById('app-version');
