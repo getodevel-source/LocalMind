@@ -6,6 +6,12 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-10-09
+
+### Probado
+- Drill del canal auto-update: release mínima para verificar detección,
+  descarga verificada e instalación al reiniciar desde la propia app.
+
 ## [2.0.3] - 2026-10-09
 
 ### Añadido (portabilidad: pensado para otro hardware, no solo esta máquina)
