@@ -6,6 +6,18 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-10-09
+
+### Corregido (tu captura: tarjeta de update rota al buscar)
+- `renderUpdate` usaba `banner` sin declararlo → `ReferenceError` visible
+  como «banner is not defined» en el error-banner. Ahora resuelve
+  `#update-banner` como el resto.
+- Faltaba `settings.updateChecking` (y asimetrías `updateRestart`/
+  `updateError`/`logFailed` entre dicts): la tarjeta pintaba la clave cruda.
+  Dicts simétricos 300/300.
+- Barrido permanente en `tests/ui-render.mjs`: cada literal `T('…')` MUST
+  existir en ambos dicts (el bug no puede volver sin romper la suite).
+
 ## [2.0.8] - 2026-10-09
 
 ### Añadido (asesor canirun honesto: antes de descargar, no después de fallar)

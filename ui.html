@@ -2492,6 +2492,7 @@
         'settings.updateAvailable': 'Disponible OMNI {ver}: pulsa Descargar.',
         'settings.updateDownloading': 'Descargando OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} listo: reinicia la app para instalarlo.',
+        'settings.updateChecking': 'Comprobando…',
         'settings.updateRestart': 'Reiniciar e instalar',
         'settings.updateRestarting': 'Cerrando para instalar… la app se reabrirá sola.',
         'settings.updateError': 'No se pudo actualizar: {msg}',
@@ -2766,6 +2767,7 @@
         'settings.updateAvailable': 'OMNI {ver} available: press Download.',
         'settings.updateDownloading': 'Downloading OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} ready: restart the app to install it.',
+        'settings.updateChecking': 'Checking…',
         'settings.updateRestart': 'Restart & install',
         'settings.updateRestarting': 'Closing to install… the app will reopen itself.',
         'settings.updateError': 'Could not update: {msg}',
@@ -4049,6 +4051,7 @@
       if (cancelBtn) cancelBtn.disabled = !(st.state === 'downloading' || st.state === 'checking');
       const restartBtn = document.getElementById('cfg-update-restart');
       if (restartBtn) restartBtn.style.display = (st.state === 'ready') ? '' : 'none';
+      const banner = document.getElementById('update-banner');
       if (banner) {
         const show = (st.state === 'available' || st.state === 'ready');
         banner.style.display = show ? '' : 'none';

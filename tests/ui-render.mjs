@@ -147,6 +147,17 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   const aEn = load(script, dEn, (() => { const s = mkStorage(); s.setItem('localmind_lang', 'en'); return s; })());
   ok('I18N has es+en with same key sets',
     JSON.stringify(Object.keys(aEn.I18N.es).sort()) === JSON.stringify(Object.keys(aEn.I18N.en).sort()));
+  // Barrido P0 (2026-10-09, `settings.updateChecking` faltaba y `renderUpdate`
+  // pintaba la clave cruda): cada literal T('...') del script MUST existir en
+  // AMBOS dicts. Solo literales simples (los dinámicos 'a'+v no aplican).
+  {
+    const used = new Set([...script.matchAll(/\bT\(\s*'([^']+)'/g)].map(m => m[1]));
+    const esKeys = new Set(Object.keys(aEn.I18N.es));
+    const enKeys = new Set(Object.keys(aEn.I18N.en));
+    const missingEs = [...used].filter(k => !esKeys.has(k)).sort();
+    const missingEn = [...used].filter(k => !enKeys.has(k)).sort();
+    ok('every T() literal exists in en', missingEn.length === 0, JSON.stringify(missingEn.slice(0, 10)));
+  }
 }
 
 // ---- redesign: toast path instead of alert ----
