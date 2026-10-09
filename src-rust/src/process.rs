@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::ConfigStore;
 use crate::config::HardwareProfile;
+use crate::engine_gate::{engine_lost, eta_secs, gate_is_slow, load_key, should_auto_stop, vram_total_mb, vram_used_mb};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -560,6 +561,37 @@ impl ProcessManager {
                                     st.is_healthy = false;
                                     st.pid = None;
                                     auto_stop = true;
+                                } else {
+                                    // Pre-aviso único 5 min antes: cualquier request
+                                    // proxyeado refresca `last_activity` y lo cancela.
+                                    let elapsed = now.saturating_sub(last_activity_poll.load(Ordering::Relaxed));
+                                    let left = timeout.saturating_sub(elapsed);
+                                    if left <= 300 && left > 0 {
+                                        static WARNED_ONCE: std::sync::atomic::AtomicU64 =
+                                            std::sync::atomic::AtomicU64::new(0);
+                                        // Marcar por ventana de 5 min (evita spam
+                                        // del poller cada 500 ms).
+                                        let mark = now / 300;
+                                        if WARNED_ONCE.swap(mark, std::sync::atomic::Ordering::Relaxed) != mark {
+                                            let ncfg = cfg_poll.get().notifications;
+                                            if crate::notify::should_notify(ncfg.enabled, ncfg.on_autostop) {
+                                                let logf = log_file_poll.clone();
+                                                let mins = left / 60;
+                                                let secs = left % 60;
+                                                std::thread::spawn(move || {
+                                                    crate::notify::notify(
+                                                        "El motor se apagará pronto",
+                                                        &format!(
+                                                            "Sin actividad {}m {}s: se apagará solo y liberará la VRAM. Usa el chat o un agente para mantenerlo vivo.",
+                                                            mins, secs
+                                                        ),
+                                                        "engine-autostop-soon",
+                                                        |err| crate::filelog::write_log_line(&logf, err),
+                                                    );
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1240,6 +1272,33 @@ impl ProcessManager {
                 }
             }
         }
+        // D-21: consumo REAL de VRAM (Windows): `nvidia-smi` si hay NVIDIA.
+        // Sin NVIDIA (AMD/Intel) no hay contador de USO barato y estable desde
+        // aquí: se informa el TOTAL instalado vía WMI `AdapterRAM` (el texto
+        // del motor queda como base y se anota el total; el uso sigue sin
+        // dato y no se inventa). Best-effort: sin dato se deja el texto.
+        if let Some(used) = vram_used_mb() {
+            for (i, g) in gpus.iter_mut().enumerate() {
+                if i == 0 {
+                    g.vram = format!("{} (en uso ~{} MB)", g.vram, used);
+                }
+            }
+        } else if gpus.is_empty() {
+            // Sin --list-devices (motor ausente): al menos el total WMI.
+            if let Some(total) = vram_total_mb() {
+                gpus.push(GpuDevice {
+                    id: "gpu0".to_string(),
+                    name: "GPU (WMI)".to_string(),
+                    vram: format!("{} MB instalados (uso no disponible en AMD/Intel)", total),
+                });
+            }
+        } else if let Some(total) = vram_total_mb() {
+            for (i, g) in gpus.iter_mut().enumerate() {
+                if i == 0 && !g.vram.to_lowercase().contains("instalados") {
+                    g.vram = format!("{} · {} MB instalados", g.vram, total);
+                }
+            }
+        }
         HardwareInfo {
             cpu_cores,
             cpu_name,
@@ -1267,6 +1326,16 @@ impl ProcessManager {
 
     pub fn models_dir(&self) -> &std::path::Path {
         &self.models_dir
+    }
+
+    /// Foto de la config viva (para avisos fuera del poller, p. ej. bandeja).
+    pub fn config_snapshot(&self) -> crate::config::AppConfig {
+        self.config.get()
+    }
+
+    /// Ruta del log con rotación (para el `log_on_fail` de los avisos).
+    pub fn log_file_path(&self) -> std::path::PathBuf {
+        self.log_file.clone()
     }
 
     pub fn list_models(&self) -> Vec<ModelInfo> {
@@ -1758,6 +1827,8 @@ fn num_cpus() -> usize {
         .map(|n| n.get())
         .unwrap_or(6)
 }
+// (extraídos a `engine_gate.rs`: `vram_used_mb`, `vram_total_mb`,
+// `parse_adapter_ram`. Se usan como `crate::engine_gate::`.)
 
 /// Resultado del guardarraíl de arranque (LM-NF-3): cuánto falta de cooldown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1930,11 +2001,9 @@ fn validate_req_model(
     }
 }
 
-/// `engine_slow` (puro): true si la mediana queda bajo el umbral configurable.
-/// Solo informativo — el llamador nunca reintenta por esto (LM-NF-3).
-fn gate_is_slow(median_tps: f64, slow_at: f64) -> bool {
-    median_tps < slow_at
-}
+/// `engine_slow`, auto-stop, motor perdido, ETA, clave de duraciones y VRAM:
+/// viven en `engine_gate.rs` (extraído de este fichero). Uso cualificado
+/// `crate::engine_gate::`.
 
 /// Firma MTP-no-soportado (pura y testeable): el motor murió en el arranque
 /// porque el modelo no trae capas MTP (`creating MTP draft context` →
@@ -1979,39 +2048,8 @@ fn props_n_ctx(body: &str) -> Option<usize> {
     None
 }
 
-/// ETA en segundos: duración guardada para la misma clave; en frío,
-/// `6 s × tamaño del modelo en GB` (0 si se desconoce el tamaño).
-fn eta_secs(stored: Option<u64>, size_gb: f64) -> u64 {
-    if let Some(s) = stored {
-        return s;
-    }
-    if size_gb > 0.0 {
-        (size_gb * 6.0).round() as u64
-    } else {
-        0
-    }
-}
-
-/// Clave del registro de duraciones: nombre del modelo + contexto pedido (D2:
-/// nunca se reduce el contexto a espaldas del usuario, así que la clave es exacta).
-fn load_key(model: &str, context: usize) -> String {
-    format!("{}|{}", model, context)
-}
-
-/// Decisión de auto-stop por inactividad (pura y testeable, Fase A5): el
-/// llamador ya filtró `status == "running"`, timeout > 0 y motor no ocupado
-/// (ocupado refresca la marca, nunca apaga). Sin marca previa (`last == 0`)
-/// no se apaga: solo el paso del tiempo real dispara.
-fn should_auto_stop(timeout_secs: u64, last_activity: u64, now_secs: u64) -> bool {
-    timeout_secs > 0 && last_activity > 0 && now_secs.saturating_sub(last_activity) >= timeout_secs
-}
-
-/// Decisión de "motor perdido" (pura y testeable, Fase A5): 10 fallos seguidos
-/// de `/health` (~10 s) con status `running` → el hijo murió sin exit visible.
-/// Fuera de `running` no aplica (el arranque/cierre tienen su propio ciclo).
-fn engine_lost(consecutive_failures: u32, status_running: bool) -> bool {
-    consecutive_failures >= 10 && status_running
-}
+// (extraídos a `engine_gate.rs`: `eta_secs`, `load_key`, `should_auto_stop`,
+// `engine_lost`. Se usan como `crate::engine_gate::`.)
 
 /// Despacho único de avisos P20 (Fase A5): los dos puntos del poller
 /// (fallo de arranque y eventos en curso) hacían el mismo
@@ -2795,6 +2833,8 @@ mod tests {
         assert!(b.contains("Puerto: 8080"), "{:?}", b);
     }
 
+    // (movido a `engine_gate.rs`: `adapter_ram_da_techo_maximo_y_filtra_basura`.)
+
     /// La cabecera que los clientes internos mandan al motor tiene que ser la
     /// que el motor acepta: `Authorization: Bearer <clave>`. El build 10743
     /// acepta `Authorization` y `X-Api-Key`; se usa `Authorization` para no
@@ -2838,13 +2878,7 @@ mod tests {
         assert_eq!(acceptance_verdict(20, 7000), Err("tps".to_string()));
     }
 
-    #[test]
-    fn eta_stored_and_cold() {
-        assert_eq!(eta_secs(Some(95), 13.0), 95);
-        // Frío: 6 s × 13 GB = 78 s.
-        assert_eq!(eta_secs(None, 13.0), 78);
-        assert_eq!(eta_secs(None, 0.0), 0);
-    }
+    // (movido a `engine_gate.rs`: `eta_stored_and_cold`.)
 
     #[test]
     fn crash_summary_prefers_errors_and_trims() {
@@ -3098,35 +3132,8 @@ mod tests {
         assert_eq!(gate_median(&[]), None);
     }
 
-    #[test]
-    fn gate_slow_flag_at_threshold() {
-        // Umbral default 20: bajo → true; igual o más → false.
-        assert!(gate_is_slow(19.9, 20.0));
-        assert!(!gate_is_slow(20.0, 20.0));
-        assert!(!gate_is_slow(34.0, 20.0));
-    }
-
-    #[test]
-    fn auto_stop_solo_con_tiempo_real_transcurrido() {
-        // timeout 5400, última actividad hace 5400 → apaga (borde incluido).
-        assert!(should_auto_stop(5400, 1000, 6400));
-        assert!(should_auto_stop(5400, 1000, 9999));
-        // Un segundo antes → no apaga.
-        assert!(!should_auto_stop(5400, 1000, 6399));
-        // Sin timeout o sin marca previa → nunca apaga.
-        assert!(!should_auto_stop(0, 1000, 99999));
-        assert!(!should_auto_stop(5400, 0, 99999));
-    }
-
-    #[test]
-    fn motor_perdido_a_los_10_fallos_en_running() {
-        assert!(!engine_lost(9, true));
-        assert!(engine_lost(10, true));
-        assert!(engine_lost(25, true));
-        // Fuera de running no aplica (arranque/cierre tienen su ciclo).
-        assert!(!engine_lost(10, false));
-        assert!(!engine_lost(99, false));
-    }
+    // (movidos a `engine_gate.rs`: `gate_lento_bajo_umbral`,
+    // `auto_stop_borde_y_guardas`, `motor_perdido_a_los_10_fallos_en_running`.)
 
     fn val_ids() -> Vec<String> {
         vec!["velocidad".to_string(), "libros".to_string()]

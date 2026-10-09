@@ -278,9 +278,16 @@ pub fn deepseek_cmdline(cd_prefix: &str, inner: &str, key_file: &str) -> String 
 /// al GATEWAY que atiende (`base_url` local o remoto, nunca al motor) con el
 /// contexto conocido. La clave viaja por `apiKeyEnv` (nombre de env, nunca cruda).
 /// `model_id` es el alias estable (`localmind`); `maxTokens` fijo 4096 (doc).
+///
+/// D-28: el formato Cordis es ajeno y puede cambiar. El template lleva versión
+/// (`PATCH_FORMAT_VERSION` en la primera línea): si un `dsh` futuro lo ignora,
+/// el log muestra qué versión se templó y el desajuste se diagnostica sin
+/// adivinar. Subir la versión = cambiar el template + este test.
+pub const DEEPSEEK_PATCH_FORMAT_VERSION: u32 = 1;
 pub fn deepseek_profile_patch(base_url: &str, context: usize, model_id: &str) -> String {
     format!(
-        "# LocalMind: punto del harness dsh contra el modelo local (generado).\n# - Proveedor OpenAI-compatible en {base}/v1 (protocolo openai-completions).\n# - Clave via env LOCALMIND_API_KEY (el lanzador la lee del fichero de claves).\n# - Compat: el gateway/proxy LocalMind solo habla chat/completions clasico:\n#   sin rol \"developer\" (usa \"system\") y cap de salida como \"max_tokens\".\n- id: agent-default-model\n  config:\n    provider: localmind\n    model: {model}\n- id: llm-pi-ai\n  config:\n    providers:\n      localmind:\n        displayName: LocalMind\n        apiKeyEnv: LOCALMIND_API_KEY\n        api: openai-completions\n        baseURL: {base}/v1\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n          supportsReasoningEffort: false\n        models:\n          - id: {model}\n            name: LocalMind local model\n            contextWindow: {context}\n            maxTokens: 4096\n",
+        "# LocalMind cordis.patch.yml — formato v{ver} (generado).\n# - Proveedor OpenAI-compatible en {base}/v1 (protocolo openai-completions).\n# - Clave via env LOCALMIND_API_KEY (el lanzador la lee del fichero de claves).\n# - Compat: el gateway/proxy LocalMind solo habla chat/completions clasico:\n#   sin rol \"developer\" (usa \"system\") y cap de salida como \"max_tokens\".\n- id: agent-default-model\n  config:\n    provider: localmind\n    model: {model}\n- id: llm-pi-ai\n  config:\n    providers:\n      localmind:\n        displayName: LocalMind\n        apiKeyEnv: LOCALMIND_API_KEY\n        api: openai-completions\n        baseURL: {base}/v1\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n          supportsReasoningEffort: false\n        models:\n          - id: {model}\n            name: LocalMind local model\n            contextWindow: {context}\n            maxTokens: 4096\n",
+        ver = DEEPSEEK_PATCH_FORMAT_VERSION,
         base = base_url.trim_end_matches("/v1"),
         model = model_id,
         context = context,
@@ -1001,6 +1008,7 @@ mod tests {
         // El patch apunta al GATEWAY ligado (no al motor) con contexto vivo;
         // la clave viaja por `apiKeyEnv` (nombre), jamás cruda.
         let a = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "localmind");
+        assert!(a.contains("formato v1"), "el patch debe declarar su versión");
         assert!(a.contains("baseURL: http://127.0.0.1:17861/v1"));
         assert!(a.contains("contextWindow: 32768"));
         assert!(a.contains("model: localmind"));

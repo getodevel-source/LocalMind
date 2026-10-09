@@ -13,12 +13,19 @@
 .PARAMETER SkipBuild
   Skip `cargo build --release` and package the existing release binary.
 
+.PARAMETER Sign
+  Firmar `OMNI.exe` con Authenticode tras el staging (D-24, opcional).
+  Usa `$env:WINDOWS_PFX_PATH` + `$env:WINDOWS_PFX_PASSWORD` (fichero .pfx)
+  o `$env:CERT_THUMBPRINT` (cert en el almacén). Sin ninguno: avisa y sigue
+  sin firmar (builds locales/CI sin secreto no fallan por esto).
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1
 #>
 [CmdletBinding()]
 param(
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +73,38 @@ $null = New-Item -ItemType Directory -Path $Stage -Force
 try {
   # Renamed release binary: cargo emits localmind.exe, the product is OMNI.exe.
   Copy-Item $BuiltExe (Join-Path $Stage 'OMNI.exe')
+  # Firma opcional Authenticode (D-24): solo con -Sign y secreto disponible.
+  # Sin secreto: aviso y se sigue sin firmar (el ZIP sigue válido; SmartScreen
+  # avisará en la primera ejecución, como hoy).
+  if ($Sign) {
+    $ExeToSign = Join-Path $Stage 'OMNI.exe'
+    $Signed = $false
+    $Pfx = $env:WINDOWS_PFX_PATH
+    $PfxPass = $env:WINDOWS_PFX_PASSWORD
+    $Thumb = $env:CERT_THUMBPRINT
+    if ($Pfx -and (Test-Path $Pfx) -and $PfxPass) {
+      $Secure = ConvertTo-SecureString $PfxPass -AsPlainText -Force
+      $Cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $Secure)
+      $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'http://timestamp.digicert.com'
+      $Signed = $true
+    } elseif ($Thumb) {
+      $Cert = Get-ChildItem Cert:\CurrentUser\My |
+        Where-Object { $_.Thumbprint -eq $Thumb } | Select-Object -First 1
+      if (-not $Cert) {
+        $Cert = Get-ChildItem Cert:\LocalMachine\My |
+          Where-Object { $_.Thumbprint -eq $Thumb } | Select-Object -First 1
+      }
+      if ($Cert) {
+        $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'http://timestamp.digicert.com'
+        $Signed = $true
+      } else {
+        Write-Warning "CERT_THUMBPRINT no encontrado en el almacén: se sigue sin firmar."
+      }
+    } else {
+      Write-Warning "Sin secreto de firma (WINDOWS_PFX_PATH+PASSWORD o CERT_THUMBPRINT): se sigue sin firmar."
+    }
+    if ($Signed) { Write-Host "Firmado: $ExeToSign" }
+  }
   foreach ($f in @('ui.html', 'omni.ico', 'omni.png')) {
     $src = Join-Path $RepoRoot $f
     if (-not (Test-Path $src)) { throw "Missing runtime file: $src" }
@@ -120,10 +159,14 @@ try {
   Set-Content -Path (Join-Path $Stage 'LEEME.txt') -Encoding UTF8 -Value $Leeme
 
   # --- Safety: refuse to zip forbidden content ---
+  # bin-hip/ (variante ROCm, ~1 GB) y bin.prev*/ (respaldos locales) nunca
+  # viajan: el canal es un solo runtime Vulkan en bin/.
   $Bad = Get-ChildItem $Stage -Recurse | Where-Object {
     $_.FullName -match '\\models\\[^.][^/\\]*\.gguf$' -or
     $_.FullName -match '\\target\\' -or
     $_.FullName -match '\\\.git\\' -or
+    $_.FullName -match '\\bin-hip(\\|$)' -or
+    $_.FullName -match '\\bin\.prev[^\\]*' -or
     $_.Name -like '*.bak*'
   }
   if ($Bad) { throw ("Forbidden content staged: " + (($Bad | Select-Object -First 5 FullName) -join '; ')) }
@@ -142,7 +185,7 @@ try {
     $Entries = $Archive.Entries
     Write-Host "ZIP: $($Zip.FullName)"
     Write-Host ("Entries: {0}   Size: {1:N2} MB" -f $Entries.Count, ($Zip.Length / 1MB))
-    $Suspicious = $Entries | Where-Object { $_.FullName -match '(^|/)(models/|target/|\.git/)' -or $_.FullName -like '*.bak*' -or $_.FullName -match '\.gguf$' }
+    $Suspicious = $Entries | Where-Object { $_.FullName -match '(^|/)(models/|target/|\.git/|bin-hip/|bin\.prev[^/]*)(/|$)' -or $_.FullName -like '*.bak*' -or $_.FullName -match '\.gguf$' }
     if ($Suspicious) { throw ("ZIP contains forbidden entries: " + (($Suspicious | Select-Object -First 5 FullName) -join '; ')) }
     # OMNI.exe + ui.html obligatorios (el updater los exige en el staging).
     $Names = @($Entries | ForEach-Object { $_.FullName })

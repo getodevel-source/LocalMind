@@ -99,8 +99,8 @@ fn unauthorized_json_for_origin(origin: Option<&str>) -> Response<Cursor<Vec<u8>
 // Parseo y validación de cuerpos POST (puros, testeables sin socket)
 // ---------------------------------------------------------------------------
 // conventions: `Result<_, String>` con mensajes en español, sin I/O y sin
-// `unwrap`, igual que `translate.rs`: todo fallo del cliente es un 4xx que el
-// handler convierte en respuesta.
+// `unwrap`: todo fallo del cliente es un 4xx que el handler convierte en
+// respuesta.
 
 /// `POST /api/start`: un cuerpo MAL FORMADO no puede degradarse a un arranque
 /// con defaults. Antes, `serde_json::from_str(...).unwrap_or(default)` hacía
@@ -285,9 +285,13 @@ fn load_asset(base_dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
 }
 
 /// Mapea un `reasoning_effort` al vocabulario de la plantilla Qwen
-/// (`low`/`medium`/`xhigh`); `None` = desconocido → el llamador elimina el campo.
+/// (`low`/`medium`/`xhigh`) más `none` (valor documentado del servidor para
+/// desactivar el thinking; `off` se acepta como alias). `None` = desconocido
+/// → el llamador elimina el campo.
 fn normalize_reasoning_effort(v: &str) -> Option<String> {
-    if v.eq_ignore_ascii_case("minimal") || v.eq_ignore_ascii_case("low") {
+    if v.eq_ignore_ascii_case("none") || v.eq_ignore_ascii_case("off") {
+        Some("none".to_string())
+    } else if v.eq_ignore_ascii_case("minimal") || v.eq_ignore_ascii_case("low") {
         Some("low".to_string())
     } else if v.eq_ignore_ascii_case("high")
         || v.eq_ignore_ascii_case("max")
@@ -301,11 +305,40 @@ fn normalize_reasoning_effort(v: &str) -> Option<String> {
     }
 }
 
+/// Sampler oficial de Qwen3.8-27B (model card `Qwen/Qwen3.8-27B`) según el modo
+/// resuelto: thinking → temp 1.0 / top_p 0.95 / top_k 20 / min_p 0.0 /
+/// presence 0.0; instruct sin thinking → 0.7 / 0.80 / 20 / 0.0 / 1.5.
+/// Solo rellena claves AUSENTES: lo explícito (puerta con temp 0, benches,
+/// harnesses, clientes) siempre gana.
+fn qwen_sampler_defaults(thinking: bool) -> [(&'static str, serde_json::Value); 5] {
+    if thinking {
+        [
+            ("temperature", serde_json::json!(1.0)),
+            ("top_k", serde_json::json!(20)),
+            ("top_p", serde_json::json!(0.95)),
+            ("min_p", serde_json::json!(0.0)),
+            ("presence_penalty", serde_json::json!(0.0)),
+        ]
+    } else {
+        [
+            ("temperature", serde_json::json!(0.7)),
+            ("top_k", serde_json::json!(20)),
+            ("top_p", serde_json::json!(0.80)),
+            ("min_p", serde_json::json!(0.0)),
+            ("presence_penalty", serde_json::json!(1.5)),
+        ]
+    }
+}
+
 /// Preparar el payload de `POST /v1/chat/completions` en UN solo parseo
-/// (auditoría de rendimiento): equivale byte por byte al chain
-/// `sanitize_payload → rewrite_model_to_served → ensure_stream_usage`, que
-/// parseaba/serializaba el cuerpo 5 veces por request. Devuelve
-/// `(bytes_a_enviar, modelo_pedido, stream_pedido)`.
+/// (auditoría de rendimiento: antes parseaba/serializaba el cuerpo 5 veces
+/// por request). Devuelve `(bytes_a_enviar, modelo_pedido, stream_pedido)`.
+///
+/// Además alinea con Qwen3.8: `reasoning_effort` ausente → `"medium"` (el
+/// default `xhigh` de la plantilla sobre-piensa: medido en esta máquina,
+/// 7687 chars de thinking y respuesta VACÍA con `max_tokens` 2000, frente a
+/// 209 + respuesta correcta en `medium`), y el sampler oficial del modo
+/// resuelto en las claves que el cliente no fijó.
 fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
     let mut v: Option<serde_json::Value> = serde_json::from_slice(body).ok();
     let req_model = v
@@ -320,7 +353,17 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
         .and_then(|s| s.as_bool())
         .unwrap_or(false);
     if let Some(obj) = v.as_mut().and_then(|v| v.as_object_mut()) {
-        if obj.contains_key("reasoning_effort") {
+        // Ausente → `medium`. Presente se normaliza como antes (`off` es alias
+        // de `none`; desconocido o no-string se elimina y la plantilla usa su
+        // default, como siempre: así `reasoning_effort:null` de pi `--thinking
+        // max` sigue cayendo al default thinking de la plantilla).
+        let effort = if !obj.contains_key("reasoning_effort") {
+            obj.insert(
+                "reasoning_effort".to_string(),
+                serde_json::Value::String("medium".to_string()),
+            );
+            "medium".to_string()
+        } else {
             match obj
                 .get("reasoning_effort")
                 .and_then(|x| x.as_str())
@@ -329,12 +372,27 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
                 Some(mapped) => {
                     obj.insert(
                         "reasoning_effort".to_string(),
-                        serde_json::Value::String(mapped),
+                        serde_json::Value::String(mapped.clone()),
                     );
+                    mapped
                 }
                 None => {
                     obj.remove("reasoning_effort");
+                    String::new()
                 }
+            }
+        };
+        // Sin thinking (effort `none` o `enable_thinking:false` explícito) rige
+        // el sampler instruct; en cualquier otro caso el thinking.
+        let kwargs_off = obj
+            .get("chat_template_kwargs")
+            .and_then(|k| k.get("enable_thinking"))
+            .and_then(|b| b.as_bool())
+            == Some(false);
+        let thinking = effort != "none" && !kwargs_off;
+        for (k, val) in qwen_sampler_defaults(thinking) {
+            if !obj.contains_key(k) {
+                obj.insert(k.to_string(), val);
             }
         }
         if !served.is_empty() && obj.get("model").and_then(|m| m.as_str()).is_some() {
@@ -872,6 +930,17 @@ fn handle_request(
             ));
             return;
         };
+        // Espacio: el ZIP (~cientos de MB) + staging duplican en %TEMP%. Sin
+        // dato medido no se bloquea; con dato y sin 2× se responde 507.
+        let work = crate::update::update_work_dir(&snap.latest);
+        if crate::update::fits_download(asize, crate::update::free_bytes_for(&work)) == Some(false) {
+            let _ = req.respond(json_response_for_origin(
+                507,
+                r#"{"error":"Sin espacio en el disco temporal para la actualización"}"#.to_string(),
+                origin_ref,
+            ));
+            return;
+        }
         let notes = v
             .get("body")
             .and_then(|b| b.as_str())
@@ -1444,6 +1513,9 @@ fn handle_request(
             "ips": ips,
             "port": http_port,
             "pairings": pairings,
+            // El gateway no termina TLS en v1 (tiny_http plano): la LAN va en
+            // HTTP sin cifrar. La UI lo avisa; la API lo declara.
+            "plaintext_http": true,
         });
         let _ = req.respond(json_response_for_origin(
             200,
@@ -1620,7 +1692,7 @@ fn handle_request(
     if method == "GET" && url == "/api/events" {
         let rx = mgr.subscribe_logs();
         let initial: Vec<LogEvent> = mgr.get_log_events();
-        let reader: Box<dyn Read + Send + Sync> = Box::new(sse::EventReader::new(rx, initial));
+        let reader: Box<dyn Read + Send + Sync> = Box::new(crate::sse::EventReader::new(rx, initial));
         let mut resp = Response::new(StatusCode(200), Vec::new(), reader, None, None);
         for h in sse_headers() {
             resp.add_header(h);
@@ -2107,8 +2179,7 @@ fn handle_launch_generic(
     );
 }
 
-/// Reenvíos finos de `/api/launch_omp` y `/api/launch_pi` (UI actual).
-/// Se eliminarán cuando la nueva UI con selector único esté en producción.
+/// Reenvíos finos de `/api/launch_omp` y `/api/launch_pi` (los usa la UI).
 fn handle_launch_compat(
     mut req: tiny_http::Request,
     mgr: &Arc<ProcessManager>,
@@ -2873,8 +2944,7 @@ fn handle_chat_completions(
     }
 }
 
-/// Error forma Anthropic (era `translate::anthropic_error`; el traductor murió,
-/// el formato de error se queda: lo exigen los clientes).
+/// Error forma Anthropic (lo exigen los clientes).
 fn anthropic_error(status: u16, err_type: &str, message: &str) -> (u16, String) {
     (
         status,
@@ -2883,7 +2953,7 @@ fn anthropic_error(status: u16, err_type: &str, message: &str) -> (u16, String) 
     )
 }
 
-/// Error forma Responses/Codex (era `translate::responses_error`).
+/// Error forma Responses/Codex.
 fn responses_error(status: u16, message: &str) -> (u16, String) {
     (
         status,
@@ -3522,6 +3592,15 @@ mod proxy {
                 get(r#"{"model":"m","reasoning_effort":"MAX"}"#),
                 Some(serde_json::json!("xhigh"))
             );
+            // `off`/`none` desactivan el thinking (soportado por el servidor).
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"off"}"#),
+                Some(serde_json::json!("none"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"none"}"#),
+                Some(serde_json::json!("none"))
+            );
             // Comportamiento previo intacto.
             assert_eq!(
                 get(r#"{"model":"m","reasoning_effort":"minimal"}"#),
@@ -3548,8 +3627,8 @@ mod proxy {
                 get(r#"{"model":"m","reasoning_effort":"Medium"}"#),
                 Some(serde_json::json!("medium"))
             );
-            // Desconocidos (incluido `off`, que la plantilla también rechaza)
-            // y no-strings: campo eliminado, el motor usa su default.
+            // Desconocidos y no-strings: campo eliminado, el motor usa su
+            // default (el caso `reasoning_effort:null` de pi `--thinking max`).
             let dropped = |body: &str| {
                 let (out, _, _) = super::super::prepare_chat_payload(body.as_bytes(), "m");
                 let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
@@ -3560,21 +3639,54 @@ mod proxy {
                 );
             };
             dropped(r#"{"model":"m","reasoning_effort":"ultra"}"#);
-            dropped(r#"{"model":"m","reasoning_effort":"off"}"#);
             dropped(r#"{"model":"m","reasoning_effort":""}"#);
             dropped(r#"{"model":"m","reasoning_effort":42}"#);
             dropped(r#"{"model":"m","reasoning_effort":null}"#);
-            // Sin campo → sin campo; resto del body intacto.
+            // Sin campo → `medium` (default Qwen alineado), resto intacto.
             let (out, _, _) =
                 super::super::prepare_chat_payload(br#"{"model":"m","temperature":0.7}"#, "m");
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-            assert!(v.get("reasoning_effort").is_none());
+            assert_eq!(v["reasoning_effort"], serde_json::json!("medium"));
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             // No-JSON pasa intacto.
             assert_eq!(
                 super::super::prepare_chat_payload(b"no-json", "m").0,
                 b"no-json".to_vec()
             );
+        }
+
+        #[test]
+        fn qwen_sampler_se_rellena_solo_en_claves_ausentes() {
+            // Sampler oficial Qwen3.8 según modo; lo explícito siempre gana.
+            let get = |body: &[u8]| {
+                let (out, _, _) = super::super::prepare_chat_payload(body, "m");
+                serde_json::from_slice::<serde_json::Value>(&out).unwrap()
+            };
+            // Thinking (`medium` inyectado): temp 1.0 / top_k 20 / top_p 0.95 /
+            // min_p 0.0 / presence 0.0.
+            let v = get(br#"{"model":"m","messages":[]}"#);
+            assert_eq!(v["reasoning_effort"], serde_json::json!("medium"));
+            assert_eq!(v["temperature"], serde_json::json!(1.0));
+            assert_eq!(v["top_k"], serde_json::json!(20));
+            assert_eq!(v["top_p"], serde_json::json!(0.95));
+            assert_eq!(v["min_p"], serde_json::json!(0.0));
+            assert_eq!(v["presence_penalty"], serde_json::json!(0.0));
+            // Explícito intacto: la puerta de aceptación (temp 0) y los benches
+            // no se tocan.
+            let v = get(br#"{"model":"m","temperature":0,"top_k":40,"messages":[]}"#);
+            assert_eq!(v["temperature"], serde_json::json!(0));
+            assert_eq!(v["top_k"], serde_json::json!(40));
+            assert_eq!(v["top_p"], serde_json::json!(0.95));
+            // Sin thinking (`none`): sampler instruct 0.7 / 20 / 0.80 / 0.0 / 1.5.
+            let v = get(br#"{"model":"m","reasoning_effort":"off","messages":[]}"#);
+            assert_eq!(v["reasoning_effort"], serde_json::json!("none"));
+            assert_eq!(v["temperature"], serde_json::json!(0.7));
+            assert_eq!(v["top_p"], serde_json::json!(0.80));
+            assert_eq!(v["presence_penalty"], serde_json::json!(1.5));
+            // `enable_thinking:false` explícito también rige instruct.
+            let v = get(br#"{"model":"m","chat_template_kwargs":{"enable_thinking":false},"messages":[]}"#);
+            assert_eq!(v["temperature"], serde_json::json!(0.7));
+            assert_eq!(v["presence_penalty"], serde_json::json!(1.5));
         }
 
         #[test]
@@ -3782,13 +3894,18 @@ mod proxy {
             // Un nombre inventado tampoco se rechaza (nunca se rechaza).
             let v = get(br#"{"model":"modelo-que-no-existe","messages":[]}"#);
             assert_eq!(v["model"], serde_json::json!("Ternary-Bonsai-2-27B-PTQ1_0"));
-            // El resto del payload no se toca.
+            // Lo explícito no se toca (temp 0 intacta); el proxy solo rellena
+            // el sampler Qwen en claves ausentes + `reasoning_effort:medium`.
             let v = get(br#"{"model":"localmind","temperature":0,"stream":true}"#);
             assert_eq!(v["temperature"], serde_json::json!(0));
             assert_eq!(v["stream"], serde_json::json!(true));
-            // Un body sin `model` se devuelve intacto (no se inventa un campo).
+            // Un body sin `model` NO inventa el campo `model`, pero sí recibe
+            // los defaults Qwen (medium + sampler thinking) como cualquier otro.
             let (out, _, _) = super::super::prepare_chat_payload(br#"{"messages":[]}"#, &served);
-            assert_eq!(out, br#"{"messages":[]}"#.to_vec());
+            let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert!(v.get("model").is_none());
+            assert_eq!(v["reasoning_effort"], serde_json::json!("medium"));
+            assert_eq!(v["temperature"], serde_json::json!(1.0));
             let _ = std::fs::remove_dir_all(&dir);
         }
 
@@ -3981,81 +4098,4 @@ mod proxy {
         assert!(err.contains("motor_apagado"), "{}", err);
     }
 }
-
-mod sse {
-    use super::*;
-    use std::sync::mpsc;
-
-    /// SSE EventReader: primero history, luego live por mpsc.
-    pub struct EventReader {
-        rx: std::sync::Mutex<mpsc::Receiver<String>>,
-        initial: Vec<LogEvent>,
-        next_live_seq: u64,
-        done: bool,
-        chunk: Vec<u8>,
-    }
-
-    impl EventReader {
-        pub fn new(rx: mpsc::Receiver<String>, initial: Vec<LogEvent>) -> Self {
-            let next_live_seq = initial.last().map(|l| l.seq + 1).unwrap_or(0);
-            Self {
-                rx: std::sync::Mutex::new(rx),
-                initial,
-                next_live_seq,
-                done: false,
-                chunk: Vec::new(),
-            }
-        }
-
-        fn encode(&self, seq: u64, line: &str) -> Vec<u8> {
-            let data = serde_json::json!({ "type":"log","seq": seq, "line": line });
-            // Pad to force tiny_http BufWriter (1KB) flush — SSE events must hit the client live.
-            let mut s = format!("data: {}\n: pad\n\n", data);
-            let min = 1100;
-            if s.len() < min {
-                let pad = min - s.len() - 3;
-                s.push_str(": ");
-                s.push_str(&" ".repeat(pad));
-                s.push_str("\n");
-            }
-            s.into_bytes()
-        }
-    }
-
-    impl Read for EventReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            if self.chunk.is_empty() {
-                if self.done {
-                    return Ok(0);
-                }
-                if let Some(ev) = if self.initial.is_empty() {
-                    None
-                } else {
-                    Some(self.initial.remove(0))
-                } {
-                    self.chunk = self.encode(ev.seq, &ev.line);
-                } else {
-                    let g = match self.rx.lock() {
-                        Ok(g) => g,
-                        Err(po) => po.into_inner(),
-                    };
-                    match g.recv() {
-                        Ok(line) => {
-                            let seq = self.next_live_seq;
-                            self.next_live_seq += 1;
-                            self.chunk = self.encode(seq, &line);
-                        }
-                        Err(_) => {
-                            self.done = true;
-                            return Ok(0);
-                        }
-                    }
-                }
-            }
-            let n = self.chunk.len().min(buf.len());
-            buf[..n].copy_from_slice(&self.chunk[..n]);
-            self.chunk.drain(..n);
-            Ok(n)
-        }
-    }
-}
+// (módulo `crate::sse`; el `mod sse` interno se extrajo a `sse.rs`).

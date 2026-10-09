@@ -1203,6 +1203,19 @@
       flex-direction: column;
       gap: var(--sp-2);
     }
+    .chat-opt-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+    }
+    .chat-opt-label {
+      font-size: var(--fs-s);
+      font-weight: var(--fw-medium);
+      color: var(--text-subtle);
+      white-space: nowrap;
+    }
+    .chat-effort-wrap { width: auto; max-width: 220px; }
+    .chat-effort-select { padding: 4px 8px; font-size: var(--fs-s); }
     .input-row {
       display: flex;
       gap: var(--sp-2);
@@ -1218,7 +1231,6 @@
       border: none;
       color: var(--text);
       font-family: inherit;
-      font-size: var(--fs-m);
       resize: none;
       height: 22px;
       max-height: 120px;
@@ -1728,6 +1740,7 @@
               <div class="metric-box warn" id="tel-slow-box" role="status" style="display: none;">
                 <span class="metric-label" data-i18n="telemetry.slowTitle">Motor lento</span>
                 <span id="tel-slow-text" class="metric-value">—</span>
+                <button id="tel-slow-restart" class="tool-btn" type="button" onclick="restartEngineOnce()" data-i18n="telemetry.slowRestart">Reiniciar motor</button>
               </div>
             </div>
           </div>
@@ -1815,6 +1828,18 @@
         </div>
 
         <div class="chat-dock">
+          <div class="chat-opt-row">
+            <label class="chat-opt-label" for="chat-effort-select"><span data-i18n="chat.effort">Razonamiento</span></label>
+            <div class="select-wrapper chat-effort-wrap">
+              <select id="chat-effort-select" class="chat-effort-select" data-i18n-aria="chat.effort" aria-label="Razonamiento">
+                <option value="medium" selected data-i18n="opt.effMed">Medio (Medium)</option>
+                <option value="low" data-i18n="opt.effLow">Bajo (Rápido)</option>
+                <option value="high" data-i18n="opt.effHigh">Alto (High)</option>
+                <option value="max" data-i18n="opt.effMax">Max (Profundo)</option>
+                <option value="off" data-i18n="opt.effOff">Desactivado (Off)</option>
+              </select>
+            </div>
+          </div>
           <div class="input-row">
             <textarea id="chat-input" class="chat-textarea" data-i18n-placeholder="chat.placeholder" data-i18n-aria="chat.placeholder" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" aria-label="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
             <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" data-i18n-aria="chat.send" aria-label="Enviar mensaje">
@@ -1863,6 +1888,7 @@
             <!-- Oracle panel = servidor: LAN + pairing -->
             <div id="cfg-server-panel" style="display: none; margin-top: 8px;">
               <label class="cfg-check"><input type="checkbox" id="cfg-lan-enabled" onchange="setLanExposed(this.checked)"> <span data-i18n="settings.lanExposed">Exponer en la LAN</span></label>
+              <div class="profile-hint warn" role="note"><span data-i18n="settings.lanPlainWarn">La LAN va en HTTP sin cifrar: clave y prompts visibles en tu red. Solo en redes de confianza.</span></div>
               <div class="field-label"><span data-i18n="settings.serverIps">Esta PC en la LAN</span></div>
               <div class="telemetry-meta" role="status"><span id="cfg-server-ips">–</span></div>
               <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.serverPairing">Emparejar (QR o copiar)</span></div>
@@ -1877,7 +1903,6 @@
                 <button class="tool-btn" type="button" id="cfg-server-rotate" onclick="rotateKey()"><span data-i18n="settings.serverRotate">Regenerar clave</span></button>
               </div>
             </div>
-            <!-- Client panel -->
             <div id="cfg-client-panel" style="display: none; margin-top: 8px;">
               <label class="field-label" for="cfg-remote-url"><span data-i18n="settings.clientUrl">URL del Servidor</span></label>
               <input type="text" id="cfg-remote-url" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="http://192.168.1.10:17860" aria-label="URL del Servidor">
@@ -2253,7 +2278,7 @@
         'telemetry.samples': 'muestras: {list} t/s',
         'telemetry.slowTitle': 'Motor lento',
         'telemetry.slowText': 'El motor cargó lento ({median} t/s); puede mejorarse reiniciándolo una vez',
-        'telemetry.gpuCheck': 'Verificación GPU',
+        'telemetry.slowRestart': 'Reiniciar motor',
         'launch.title': 'Accesos',
         'launch.folder': 'Carpeta de Trabajo (Proyecto)',
         'launch.folderTitle': 'Elegir directorio donde abrirán OMP y Pi',
@@ -2277,7 +2302,7 @@
         'chat.welcome': 'Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con OMNI.',
         'chat.reset': 'Chat reiniciado. Escribe una pregunta para consultar con OMNI.',
         'chat.placeholder': 'Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)',
-        'chat.send': 'Enviar mensaje', 'chat.stop': 'Detener generación',
+        'chat.effort': 'Razonamiento',
         'chat.hint': 'Presiona Shift + Enter para saltos de línea',
         'chat.hintReady': 'Listo para consultar',
         'chat.hintLoading': 'Cargando tensores en GPU...',
@@ -2369,6 +2394,14 @@
         'err.startFail': 'Error al iniciar: ',
         'common.copied': 'Copiado',
         'profile.dynHint': 'Perfil dinámico: ',
+        'profile.fbVelLabel': 'Chat diario — el más rápido (32K, todo en GPU)',
+        'profile.fbVelHint': 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).',
+        'profile.fbMultiLabel': 'Multi-documento — varios PDFs y archivos (64K)',
+        'profile.fbMultiHint': 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.',
+        'profile.fbLibrosLabel': 'Libros y repos largos — 128K de contexto',
+        'profile.fbLibrosHint': 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.',
+        'profile.fbMaxLabel': 'Máximo contexto físico — 262K (el límite del modelo)',
+        'profile.fbMaxHint': 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.',
         'settings.title': 'Ajustes',
         'settings.sub': 'Perfiles, generación, motor y avisos. Los cambios que afectan al motor se aplican al próximo arranque.',
         'settings.needsNew': 'Requiere la versión nueva del motor',
@@ -2413,6 +2446,7 @@
         'settings.roleGuestDesc': 'Sin modelo: chatea y lanza CLIs contra el Oráculo.',
         'settings.roleRestart': 'Exponer en LAN rige al reiniciar la app.',
         'settings.lanExposed': 'Exponer en la LAN',
+        'settings.lanPlainWarn': 'La LAN va en HTTP sin cifrar: clave y prompts visibles en tu red. Solo en redes de confianza.',
         'onboard.title': 'Elige el rol de esta PC',
         'onboard.sub': 'Puedes cambiarlo cuando quieras desde el encabezado o Conexión.',
         'onboard.later': 'Decidir después',
@@ -2503,7 +2537,7 @@
         'telemetry.samples': 'samples: {list} t/s',
         'telemetry.slowTitle': 'Slow engine',
         'telemetry.slowText': 'The engine loaded slowly ({median} t/s); a single restart may improve it',
-        'telemetry.gpuCheck': 'GPU check',
+        'telemetry.slowRestart': 'Restart engine',
         'launch.title': 'Shortcuts',
         'launch.folder': 'Work Folder (Project)',
         'launch.folderTitle': 'Choose the directory where OMP and Pi will open',
@@ -2527,7 +2561,7 @@
         'chat.welcome': 'Start the model from the <b>Dashboard</b> tab to begin a direct conversation with OMNI.',
         'chat.reset': 'Chat restarted. Type a question to ask OMNI.',
         'chat.placeholder': 'Type your message... (Enter to send, Shift+Enter for a new line)',
-        'chat.send': 'Send message', 'chat.stop': 'Stop generation',
+        'chat.effort': 'Reasoning',
         'chat.hint': 'Press Shift + Enter for line breaks',
         'chat.hintReady': 'Ready for queries',
         'chat.hintLoading': 'Loading tensors onto GPU...',
@@ -2618,6 +2652,14 @@
         'err.engineOff': 'Start the engine from the Dashboard before sending messages.',
         'err.startFail': 'Failed to start: ',
         'profile.dynHint': 'Dynamic profile: ',
+        'profile.fbVelLabel': 'Daily chat — fastest (32K, all in GPU)',
+        'profile.fbVelHint': 'Model and conversation memory 100% in VRAM (16 GB). Top speed (~17 t/s). For chat, questions and short code (<~30k words).',
+        'profile.fbMultiLabel': 'Multi-document — several PDFs and files (64K)',
+        'profile.fbMultiHint': 'Model in VRAM + part of the KV cache in DDR5 RAM. Trades ~5% speed for ~60k words: several documents or a medium repo.',
+        'profile.fbLibrosLabel': 'Long books and repos — 128K context',
+        'profile.fbLibrosHint': 'Extended memory in DDR5 RAM. ~120k words (a whole book). Speed drops ~15-20% as part of the prompt travels over DDR5.',
+        'profile.fbMaxLabel': 'Max physical context — 262K (model limit)',
+        'profile.fbMaxHint': 'The native 262,144 tokens (~200k words). Slowest and hardest on PSU/CPU: extreme cases only.',
         'settings.title': 'Settings',
         'settings.sub': 'Profiles, generation, engine and notices. Engine-affecting changes apply on the next start.',
         'settings.needsNew': 'Requires the new engine version',
@@ -2661,6 +2703,7 @@
         'settings.roleGuestDesc': 'No model: chats and launches CLIs against the Oráculo.',
         'settings.roleRestart': 'LAN exposure applies after restarting the app.',
         'settings.lanExposed': 'Expose on LAN',
+        'settings.lanPlainWarn': 'LAN is plain HTTP: key and prompts are visible on your network. Trusted networks only.',
         'onboard.title': 'Choose this PC role',
         'onboard.sub': 'You can change it anytime from the header or Connection.',
         'onboard.later': 'Decide later',
@@ -3090,21 +3133,22 @@
 
 
 
-    // Known static fallback profiles (used if /api/profiles is unavailable/empty)
+    // Known static fallback profiles (used if /api/profiles is unavailable/empty).
+    // D-48: labels/hints van por T() (antes solo español hardcodeado).
     function getProfileFallback() {
       return [
         { id: 'velocidad', context: 32768,
-          label: 'Chat diario — el más rápido (32K, todo en GPU)',
-          hint: 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).' },
+          label: T('profile.fbVelLabel'),
+          hint: T('profile.fbVelHint') },
         { id: 'multi_doc', context: 65536,
-          label: 'Multi-documento — varios PDFs y archivos (64K)',
-          hint: 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.' },
+          label: T('profile.fbMultiLabel'),
+          hint: T('profile.fbMultiHint') },
         { id: 'libros', context: 131072,
-          label: 'Libros y repos largos — 128K de contexto',
-          hint: 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.' },
+          label: T('profile.fbLibrosLabel'),
+          hint: T('profile.fbLibrosHint') },
         { id: 'max_contexto', context: 262144,
-          label: 'Máximo contexto físico — 262K (el límite del modelo)',
-          hint: 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.' }
+          label: T('profile.fbMaxLabel'),
+          hint: T('profile.fbMaxHint') }
       ];
     }
     let profilesIndex = {};
@@ -4312,6 +4356,21 @@
       await api.stopServer();
     }
 
+    // Reinicio único tras carga lenta (D-31): el backend ya marcó
+    // `engine_slow` (informativo, sin reintentos automáticos por LM-NF-3);
+    // este botón es el gesto manual: parar + arrancar con la misma config.
+    // Respeta el cooldown del servidor (responde 429/400 si toca esperar).
+    async function restartEngineOnce() {
+      const btn = document.getElementById('tel-slow-restart');
+      if (btn) btn.disabled = true;
+      try {
+        await api.stopServer();
+        await startEngine();
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     let selectedProjectCwd = '';
 
     async function selectProjectFolder() {
@@ -4370,6 +4429,35 @@
     function persistCliEffort(val) {
       try {
         if (val && EFFORT_VALUES.indexOf(val) >= 0) localStorage.setItem(EFFORT_KEY, val);
+      } catch (e) {}
+    }
+    // Chat effort: mismo vocabulario que el launcher CLI (`max/high/medium/low/off`),
+    // pero default `medium` (punto medido más rápido con calidad: Kodesage 8.18
+    // a 76s mediana vs xhigh 8.61 a 143s; en esta máquina xhigh devolvió vacío).
+    const CHAT_EFFORT_KEY = 'localmind_chat_effort';
+    const CHAT_EFFORT_DEFAULT = 'medium';
+    function getSelectedChatEffort() {
+      const sel = document.getElementById('chat-effort-select');
+      if (sel && sel.value && EFFORT_VALUES.indexOf(sel.value) >= 0) return sel.value;
+      try {
+        const saved = localStorage.getItem(CHAT_EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) return saved;
+      } catch (e) {}
+      return CHAT_EFFORT_DEFAULT;
+    }
+    function initChatEffort() {
+      const sel = document.getElementById('chat-effort-select');
+      if (!sel) return;
+      let val = CHAT_EFFORT_DEFAULT;
+      try {
+        const saved = localStorage.getItem(CHAT_EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) val = saved;
+      } catch (e) {}
+      try { sel.value = val; } catch (e) {}
+    }
+    function persistChatEffort(val) {
+      try {
+        if (val && EFFORT_VALUES.indexOf(val) >= 0) localStorage.setItem(CHAT_EFFORT_KEY, val);
       } catch (e) {}
     }
     /* ---------- Unified launcher: ONE selector + ONE "Abrir" button.
@@ -5258,17 +5346,41 @@
         if (stopBtn) stopBtn.style.display = 'flex';
 
         const startedAt = performance.now();
+        // Sampler: lo que el usuario fijó en Ajustes → Generación; vacío =
+        // el gateway aplica el oficial Qwen3.8 del modo (thinking/instruct).
+        // El effort sale del selector del chat (default `medium`, no el
+        // `xhigh` de la plantilla que sobre-piensa).
+        const chatBody = {
+          model: 'localmind',
+          messages: chatHistory,
+          stream: true,
+          stream_options: { include_usage: true }
+        };
+        const gTemp = document.getElementById('cfg-temperature');
+        const gTopP = document.getElementById('cfg-top-p');
+        const gMax = document.getElementById('cfg-max-tokens');
+        const gSeed = document.getElementById('cfg-seed');
+        const numOrUndef = (el) => {
+          if (!el || typeof el.value !== 'string') return undefined;
+          const s = el.value.trim();
+          if (!s) return undefined;
+          const n = Number(s);
+          return isFinite(n) ? n : undefined;
+        };
+        const tVal = numOrUndef(gTemp);
+        const pVal = numOrUndef(gTopP);
+        const mVal = numOrUndef(gMax);
+        const sVal = numOrUndef(gSeed);
+        if (tVal !== undefined) chatBody.temperature = tVal;
+        if (pVal !== undefined) chatBody.top_p = pVal;
+        if (mVal !== undefined) chatBody.max_tokens = Math.round(mVal);
+        if (sVal !== undefined) chatBody.seed = Math.round(sVal);
+        chatBody.reasoning_effort = getSelectedChatEffort();
         const res = await fetch('/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: activeAbort.signal,
-          body: JSON.stringify({
-            model: 'localmind',
-            messages: chatHistory,
-            temperature: 0.7,
-            stream: true,
-            stream_options: { include_usage: true }
-          })
+          body: JSON.stringify(chatBody)
         });
 
         if (!res.ok || !res.body) {
@@ -5464,6 +5576,9 @@
       initCliEffort();
       const effortSel = document.getElementById('cli-effort-select');
       if (effortSel) effortSel.addEventListener('change', () => persistCliEffort(effortSel.value));
+      initChatEffort();
+      const chatEffortSel = document.getElementById('chat-effort-select');
+      if (chatEffortSel) chatEffortSel.addEventListener('change', () => persistChatEffort(chatEffortSel.value));
     }
 
     document.addEventListener('DOMContentLoaded', initApp);

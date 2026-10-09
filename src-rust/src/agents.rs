@@ -234,6 +234,10 @@ pub fn omp_config_yml() -> String {
 /// (archivo ajeno) se declara `[text]` honesto. Cuando la visión aterrice,
 /// leer aquí el estado vivo (p. ej. flag mmproj del `ServerStatus`/config) y
 /// devolver true solo entonces.
+///
+/// Decisión del dueño 2026-10-09 (D-29 cerrada): P7 manda, P19 aparcada. Este
+/// `false` es el contrato, no un stub: el test `vision_sigue_solo_texto_por_p7`
+/// lo fija y cualquier activación futura pasa por revisar P7 primero.
 pub fn vision_enabled() -> bool {
     false
 }
@@ -441,6 +445,14 @@ mod tests {
             omp_v.contains("[text, image]"),
             "omp con visión debe anunciar image"
         );
+    }
+
+    /// D-29 (decisión 2026-10-09): P7 manda, P19 aparcada. El `false` de
+    /// `vision_enabled` es contrato: si alguien lo activa sin revisar P7,
+    /// este test lo delata.
+    #[test]
+    fn vision_sigue_solo_texto_por_p7() {
+        assert!(!vision_enabled(), "P7 manda: sin visión hasta revisar P7");
     }
 
     // ---- LM-MOD-3: la config del agente nombra el modelo REALMENTE servido ----

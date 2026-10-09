@@ -299,10 +299,99 @@ pub fn mins_since_check() -> u64 {
     }
     now_secs().saturating_sub(last) / 60
 }
-
 // ---------------------------------------------------------------------------
 // Red: `latest` + descarga con resume
 // ---------------------------------------------------------------------------
+
+/// Espacio libre en bytes del volumen que contiene `path` (Windows, best-effort).
+/// Sin APIs nuevas: `fsutil volume diskfree` y parseo de `Byte libres`. `None`
+/// si no se pudo medir (el llamador NO bloquea: sin dato no hay chequeo).
+pub fn free_bytes_for(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let anchor = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let vol = anchor
+        .components()
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .unwrap_or_else(|| "\\".to_string());
+    let out = std::process::Command::new("fsutil")
+        .args(["volume", "diskfree", vol.as_str()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Forma: "Byte libres             : 123456789". Tomar la primera línea con
+    // dígitos tras los dos puntos que mencione libres/free.
+    for line in text.lines() {
+        let low = line.to_lowercase();
+        if !(low.contains("libr") || low.contains("free")) {
+            continue;
+        }
+        if let Some(after) = line.split(':').nth(1) {
+            let digits: String = after.chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<u64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// ¿Cabe una descarga de `need` bytes con margen 2×? `None` en tamaño o en
+/// espacio = sin veredicto (`None`): el llamador sigue sin bloquear.
+pub fn fits_download(need: Option<u64>, free: Option<u64>) -> Option<bool> {
+    match (need, free) {
+        (Some(n), Some(f)) => Some(f >= n.saturating_mul(2)),
+        _ => None,
+    }
+}
+
+/// Barrer stagings huérfanos de arranques previos (apagón duro entre la
+/// descarga y el swap): todo `%TEMP%\omni-update\<tag>\staging` con
+/// `OMNI.exe` + `ui.html` se registra como `pending` para que el próximo
+/// reinicio normal lo instale. Devuelve las versiones recuperadas.
+/// Puro en efectos salvo el `set_pending`: sin red, sin borrados.
+pub fn recover_stale_stagings() -> Vec<String> {
+    let mut found = Vec::new();
+    let mut base = std::env::temp_dir();
+    base.push("omni-update");
+    let dirs = std::fs::read_dir(&base)
+        .map(|r| r.filter_map(|e| e.ok()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for d in dirs {
+        let staging = d.path().join("staging");
+        let ok = staging.join("OMNI.exe").is_file() && staging.join("ui.html").is_file();
+        if !ok {
+            continue;
+        }
+        let tag = d.file_name().to_string_lossy().to_string();
+        let ver = tag.trim_start_matches('v').to_string();
+        if parse_version(&ver).is_none() {
+            continue;
+        }
+        set_pending(Some(PendingUpdate {
+            version: ver.clone(),
+            zip_path: String::new(),
+            staging_dir: staging.to_string_lossy().to_string(),
+            notes: "recuperado de un staging previo".to_string(),
+        }));
+        update_set(|s| {
+            s.state = "ready".to_string();
+            s.latest = ver.clone();
+            s.percent = 100;
+        });
+        found.push(ver);
+    }
+    found
+}
 
 fn get_text(url: &str, timeout_secs: u64) -> Result<String, String> {
     ureq::get(url)
@@ -837,5 +926,31 @@ mod tests {
         let out = stage_zip(&zp, &dir.join("staging"));
         assert!(out.is_err(), "el zip con .. debe rechazarse");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn fits_exige_doble_y_sin_dato_no_bloquea() {
+        assert_eq!(fits_download(Some(100), Some(200)), Some(true));
+        assert_eq!(fits_download(Some(100), Some(199)), Some(false));
+        assert_eq!(fits_download(None, Some(1)), None);
+        assert_eq!(fits_download(Some(1), None), None);
+        assert_eq!(fits_download(None, None), None);
+    }
+
+    #[test]
+    fn free_bytes_no_aborta_y_recover_ignora_basura() {
+        // Best-effort: puede dar Some o None según la máquina, pero nunca pánico.
+        let _ = free_bytes_for(&std::env::temp_dir());
+        // Un dir omni-update con staging incompleto no se recupera.
+        let base = std::env::temp_dir().join("omni-update");
+        let tag = format!("v9.9.9-test{}", std::process::id());
+        let staging = base.join(&tag).join("staging");
+        let _ = std::fs::create_dir_all(&staging);
+        let _ = std::fs::write(staging.join("OMNI.exe"), b"x");
+        // Falta ui.html → no se registra como pending.
+        set_pending(None);
+        let found = recover_stale_stagings();
+        assert!(!found.iter().any(|v| v.contains("9.9.9")), "{:?}", found);
+        assert!(pending_update().is_none());
+        let _ = std::fs::remove_dir_all(base.join(&tag));
     }
 }

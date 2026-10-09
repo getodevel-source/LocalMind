@@ -68,7 +68,8 @@
 - Default: solo `127.0.0.1` (esta PC). Con `[lan].enabled = true` (Ajustes
   → Rol → Oráculo → Exponer, **rige al reiniciar**) el gateway escucha en
   `0.0.0.0` **en HTTP plano**: la clave y los prompts viajan sin TLS en tu
-  LAN. Úsalo solo en redes de confianza.
+  LAN. Úsalo solo en redes de confianza (la tarjeta lo avisa; `GET /api/lan`
+  declara `plaintext_http: true`).
 - Empareja el Guest con el QR o copiando `omni://<ip>:<puerto>#k=<clave>`
   (Conexión). Tras **Regenerar clave**, reinicia para que tome efecto.
 
@@ -83,3 +84,4 @@
 | Update dice «sin paquete verificado» | la release no publica `SHA256 <asset> <hex>`: espera a la release corregida |
 | Update «tamaño inesperado / SHA no coincide» | descarga corrupta: reintenta Descargar |
 | Reinstalar encima falla | cierra OMNI; si hay update pendiente (`%TEMP%\omni-update`), reinicia la app para aplicarlo primero |
+| Importar modelo no responde | el diálogo es nativo: si lo cancelas, la UI dice «cancelado»; si lo dejas 120 s abierto, expira solo con el mismo aviso |

@@ -1,9 +1,9 @@
 //! Clave local del gateway (D-7 / LM-NF-6).
 //!
 //! - Se genera una clave aleatoria de 32 bytes en hex en el primer arranque y se
-//!   persiste en `%APPDATA%\LocalMind\gateway.key`.
-//! - Intento de modo 0600: en Windows las ACLs no se tocan (se documenta y se deja
-//!   el archivo con los permisos por defecto del perfil del usuario).
+//!   persiste en `%APPDATA%\LocalMind\gateway.key` con ACL solo para el usuario
+//!   actual (`restrict_key_file`: quita herencia + concede acceso total solo al
+//!   SID del dueño; best-effort vía `icacls`, el arranque nunca falla por esto).
 //! - Se acepta por `Authorization: Bearer <key>`, `x-api-key: <key>` (clientes
 //!   Anthropic) o cookie `lm_key=<key>`.
 
@@ -42,11 +42,13 @@ pub fn generate_key() -> String {
     out
 }
 /// Cargar la clave existente o crearla en el primer arranque (best-effort).
+/// Tras escribir/rotar, la ACL se restringe al usuario actual (best-effort).
 pub fn load_or_create_key() -> String {
     let path = gateway_key_path();
     if let Ok(raw) = std::fs::read_to_string(&path) {
         let k = raw.trim().to_string();
         if k.len() >= 32 {
+            restrict_key_file(&path);
             return k;
         }
     }
@@ -54,9 +56,30 @@ pub fn load_or_create_key() -> String {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // Intento 0600: en Windows no se tocan ACLs; queda con permisos del usuario.
     let _ = std::fs::write(&path, format!("{}\n", key));
+    restrict_key_file(&path);
     key
+}
+
+/// Restringir `gateway.key` al usuario actual (Windows, best-effort).
+/// Quita la herencia y concede acceso total solo al SID del dueño. Si `icacls`
+/// falla (o no existe), no pasa nada: la clave sigue válida, solo sin
+/// endurecer. Pura en el sentido de efectos: sin pánicos, sin `Result`.
+pub fn restrict_key_file(path: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let arg = path.to_string_lossy().to_string();
+    // Usuario actual: USERNAME basta para `icacls "<f>" /inheritance:r
+    // /grant:r "<user>:(R,W)". Sin USERNAME no hay a quién conceder: salir.
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    if user.trim().is_empty() {
+        return;
+    }
+    let grant = format!("{}:(R,W)", user.trim());
+    let _ = std::process::Command::new("icacls")
+        .args([arg.as_str(), "/inheritance:r", "/grant:r", grant.as_str()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 }
 
 /// Rotar la clave del gateway (Fase B3, pairing): genera una nueva, la persiste
@@ -74,6 +97,7 @@ pub fn rotate_key_at(path: &std::path::Path) -> Result<String, String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, format!("{}\n", key)).map_err(|e| e.to_string())?;
+    restrict_key_file(path);
     Ok(key)
 }
 

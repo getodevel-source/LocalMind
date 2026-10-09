@@ -3,7 +3,7 @@
 Scripts to ship the app as a portable ZIP and to install/uninstall it on
 Windows. Releases go out through GitHub Releases (workflow `release.yml`
 on tag `vX.Y.Z`); the in-app updater (Ajustes → Actualización) polls that
-channel. No code signing yet (known limit, see below).
+channel. Code signing is opt-in (`-Sign`, needs a cert: known limit, see below).
 
 Product name is OMNI. The crate/dir names keep `localmind` for compat
 (cargo emits `localmind.exe`; user data stays in `%APPDATA%\LocalMind`).
@@ -11,11 +11,15 @@ Product name is OMNI. The crate/dir names keep `localmind` for compat
 
 - `packaging/build-portable.ps1` — `cargo build --release`, then assembles
   `dist/OMNI-portable-<version>-<YYYYMMDD>.zip` (`-SkipBuild` reuses the
-  existing `src-rust/target/release/localmind.exe`). Prints the ZIP path,
+  existing `src-rust/target/release/localmind.exe`; `-Sign` signs `OMNI.exe`
+  with Authenticode via `WINDOWS_PFX_PATH`+`WINDOWS_PFX_PASSWORD` or
+  `CERT_THUMBPRINT`, timestamped; without a secret it warns and ships
+  unsigned). Prints the ZIP path,
   entry count and size, writes `<zip>.sha256.txt`, and refuses a ZIP without
   `OMNI.exe` + `ui.html` (the updater requires both). Never packs
-  `models/**`, `tests/**`, `.git/**`, `target/**` or `*.bak*`.
-  `version.txt` carries version + git commit + engine build (traceable).
+  `models/**`, `tests/**`, `.git/**`, `target/**`, `bin-hip/**`,
+  `bin.prev*/**` or `*.bak*`: the channel ships a single Vulkan runtime
+  in `bin/` (~106 MB).
 - `packaging/install.ps1` — copies the runtime files from the repo tree (or
   `-SourceDir`, e.g. an extracted portable dir) into
   `%LOCALAPPDATA%\Programs\OMNI` (overridable via `-TargetDir` for
@@ -70,7 +74,8 @@ touched by an update.
 
 ## Known limits
 
-- No code signing: Windows SmartScreen will warn on first run.
+- Code signing: `build-portable.ps1 -Sign` needs a cert (pfx or store); without
+  one Windows SmartScreen warns on first run (no history yet).
 - Single instance is enforced via `%TEMP%\localmind.lock` (name unchanged:
   an old and a new build still exclude each other).
 - The app binds `127.0.0.1:17860` (+10 fallbacks) unless `[lan].enabled`

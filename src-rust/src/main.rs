@@ -10,9 +10,11 @@ mod models;
 mod notify;
 mod process;
 mod server;
+mod sse;
 mod tray;
 mod update;
 mod usage;
+mod engine_gate;
 
 use std::env;
 use std::path::PathBuf;
@@ -122,13 +124,37 @@ fn install_panic_hook(log_file: PathBuf) {
 
 /// Single-instance: intento crear un lock file exclusivo en %TEMP%; si ya existe,
 /// enfocar la ventana existente (trae al frente vía PowerShell) y salir.
+///
+/// Sin carrera D-14: primero se intenta abrir con `create_new` SIN borrar. Solo
+/// si el archivo ya existe se sondea si el dueño sigue vivo (abrir en lectura:
+/// con `share_mode(0)` del dueño, falla si vive y pasa si es huérfano de un
+/// crash). Solo el huérfano confirmado se borra antes de reintentar.
 fn acquire_single_instance() -> Option<std::fs::File> {
-    let lock_path = env::temp_dir().join("localmind.lock");
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
-    // share_mode(0) → lock exclusivo mientras el proceso viva; el handle se libera al morir,
-    // pero el archivo remanente necesita limpieza con create_new.
-    let _ = std::fs::remove_file(&lock_path); // lock huérfano de un crash previo
+    let lock_path = env::temp_dir().join("localmind.lock");
+    // Intento 1: crear sin tocar nada (caso feliz, sin carrera).
+    if let Ok(f) = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .share_mode(0)
+        .open(&lock_path)
+    {
+        return Some(f);
+    }
+    // El archivo existe: ¿hay dueño vivo? Abrir en lectura: con el `share_mode(0)`
+    // del dueño, falla si vive → enfocar+salir; pasa si es huérfano de un crash
+    // → borrar y crear de nuevo.
+    let live = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&lock_path)
+        .is_err();
+    if live {
+        focus_existing_instance();
+        return None;
+    }
+    let _ = std::fs::remove_file(&lock_path); // huérfano confirmado de un crash previo
     match OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -137,21 +163,26 @@ fn acquire_single_instance() -> Option<std::fs::File> {
     {
         Ok(f) => Some(f),
         Err(_) => {
-            // Ya vive otra instancia: enfocar ventana existente y salir.
-            // Fase C (OMNI): el exe instalado se llama OMNI.exe; se acepta el
-            // nombre histórico para no romper el foco durante la transición.
-            let _ = std::process::Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "$h = Get-Process OMNI,LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
-                     Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);' -Name U32 -Namespace W; \
-                     [W.U32]::SetForegroundWindow($h.MainWindowHandle)",
-                ])
-                .spawn();
+            // Otro proceso ganó la carrera entre la sonda y el create: enfocar y salir.
+            focus_existing_instance();
             None
         }
     }
+}
+
+/// Traer al frente la ventana de la instancia viva (best-effort).
+fn focus_existing_instance() {
+    // Fase C (OMNI): el exe instalado se llama OMNI.exe; se acepta el
+    // nombre histórico para no romper el foco durante la transición.
+    let _ = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "$h = Get-Process OMNI,LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
+             Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);' -Name U32 -Namespace W; \
+             [W.U32]::SetForegroundWindow($h.MainWindowHandle)",
+        ])
+        .spawn();
 }
 
 fn main() {
@@ -173,7 +204,14 @@ fn main() {
     if let Some(note) = config.take_migration_note() {
         process_mgr.log(&note);
     }
-
+    // Update interrumpido (apagón entre descarga y swap): si quedó un staging
+    // válido en %TEMP%, registrarlo como pendiente para instalar al salir.
+    for ver in crate::update::recover_stale_stagings() {
+        process_mgr.log(&format!(
+            "[LocalMind] Actualización {} recuperada de un staging previo: se instalará al reiniciar la app.",
+            ver
+        ));
+    }
     // Start embedded HTTP server
     let server = match HttpServer::start(
         Arc::clone(&process_mgr),
@@ -389,6 +427,24 @@ fn main() {
                     // Segundo plano: ocultar, NO parar nada. El lock
                     // single-instance sigue tomado (el proceso vive).
                     window.set_visible(false);
+                    // Aviso único: la X no cierra (gateway+motor vivos, VRAM
+                    // retenida). Salir de verdad = `Salir` en la bandeja.
+                    static TRAY_HINT_ONCE: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !TRAY_HINT_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let ncfg = mgr_cleanup.config_snapshot().notifications.clone();
+                        if crate::notify::should_notify(ncfg.enabled, true) {
+                            let logf = mgr_cleanup.log_file_path();
+                            std::thread::spawn(move || {
+                                crate::notify::notify(
+                                    "OMNI sigue en segundo plano",
+                                    "La ventana se ocultó; el motor sigue en marcha. Salir de verdad: botón derecho en la bandeja → Salir.",
+                                    "tray-background",
+                                    |err| crate::filelog::write_log_line(&logf, err),
+                                );
+                            });
+                        }
+                    }
                 }
             }
             Event::WindowEvent {
@@ -448,6 +504,38 @@ mod tests {
         );
         assert_eq!(text.matches('\n').count(), 1, "una sola linea: {:?}", text);
         assert!(!text.contains('\0'), "{:?}", text);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// D-14: el lock NO se borra a ciegas. Con dueño vivo (handle abierto con
+    /// `share_mode(0)`), la sonda de lectura falla → hay instancia viva.
+    /// Sin dueño (huérfano de crash), la sonda abre bien → se puede reclamar.
+    #[test]
+    fn lock_con_dueno_vivo_rechaza_y_huerfano_pasa() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("lm-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("localmind.lock");
+        let probe_live = || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&p)
+                .is_err()
+        };
+        // Huérfano (archivo cerrado): la sonda pasa → reclamable.
+        std::fs::write(&p, b"x").unwrap();
+        assert!(!probe_live(), "huérfano debe sondar libre");
+        // Dueño vivo: la sonda falla → hay que enfocar+salir, no borrar.
+        let owner = std::fs::OpenOptions::new()
+            .create_new(false)
+            .write(true)
+            .share_mode(0)
+            .open(&p)
+            .unwrap();
+        assert!(probe_live(), "con dueño vivo la sonda debe fallar");
+        drop(owner);
+        assert!(!probe_live(), "tras soltar, vuelve a sondar libre");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
