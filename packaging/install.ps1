@@ -34,7 +34,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Files = @('OMNI.exe', 'ui.html', 'ui_fallback.html', 'omni.ico', 'omni.png')
+$Files = @('OMNI.exe', 'ui.html', 'ui_fallback.html', 'omni.ico', 'omni.png', 'version.txt', 'LEEME.txt')
 foreach ($f in $Files) {
   # ui_fallback.html lives in src-rust/ in the repo tree; in a portable dir it sits next to the exe.
   $candidates = @((Join-Path $SourceDir $f), (Join-Path $SourceDir "src-rust/$f"))
