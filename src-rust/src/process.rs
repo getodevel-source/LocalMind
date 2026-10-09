@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::ConfigStore;
 use crate::config::HardwareProfile;
-use crate::engine_gate::{engine_lost, eta_secs, gate_is_slow, load_key, should_auto_stop, vram_total_mb, vram_used_mb};
+use crate::engine_gate::{
+    engine_lost, eta_secs, gate_is_slow, load_key, should_auto_stop, vram_total_mb, vram_used_mb,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -564,7 +566,8 @@ impl ProcessManager {
                                 } else {
                                     // Pre-aviso único 5 min antes: cualquier request
                                     // proxyeado refresca `last_activity` y lo cancela.
-                                    let elapsed = now.saturating_sub(last_activity_poll.load(Ordering::Relaxed));
+                                    let elapsed = now
+                                        .saturating_sub(last_activity_poll.load(Ordering::Relaxed));
                                     let left = timeout.saturating_sub(elapsed);
                                     if left <= 300 && left > 0 {
                                         static WARNED_ONCE: std::sync::atomic::AtomicU64 =
@@ -572,9 +575,15 @@ impl ProcessManager {
                                         // Marcar por ventana de 5 min (evita spam
                                         // del poller cada 500 ms).
                                         let mark = now / 300;
-                                        if WARNED_ONCE.swap(mark, std::sync::atomic::Ordering::Relaxed) != mark {
+                                        if WARNED_ONCE
+                                            .swap(mark, std::sync::atomic::Ordering::Relaxed)
+                                            != mark
+                                        {
                                             let ncfg = cfg_poll.get().notifications;
-                                            if crate::notify::should_notify(ncfg.enabled, ncfg.on_autostop) {
+                                            if crate::notify::should_notify(
+                                                ncfg.enabled,
+                                                ncfg.on_autostop,
+                                            ) {
                                                 let logf = log_file_poll.clone();
                                                 let mins = left / 60;
                                                 let secs = left % 60;

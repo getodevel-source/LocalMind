@@ -109,7 +109,13 @@ pub(crate) fn vram_total_mb() -> Option<u64> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let out = std::process::Command::new("wmic")
-        .args(["path", "Win32_VideoController", "get", "AdapterRAM", "/value"])
+        .args([
+            "path",
+            "Win32_VideoController",
+            "get",
+            "AdapterRAM",
+            "/value",
+        ])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;

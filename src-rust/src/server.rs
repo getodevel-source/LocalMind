@@ -933,7 +933,8 @@ fn handle_request(
         // Espacio: el ZIP (~cientos de MB) + staging duplican en %TEMP%. Sin
         // dato medido no se bloquea; con dato y sin 2× se responde 507.
         let work = crate::update::update_work_dir(&snap.latest);
-        if crate::update::fits_download(asize, crate::update::free_bytes_for(&work)) == Some(false) {
+        if crate::update::fits_download(asize, crate::update::free_bytes_for(&work)) == Some(false)
+        {
             let _ = req.respond(json_response_for_origin(
                 507,
                 r#"{"error":"Sin espacio en el disco temporal para la actualización"}"#.to_string(),
@@ -1692,7 +1693,8 @@ fn handle_request(
     if method == "GET" && url == "/api/events" {
         let rx = mgr.subscribe_logs();
         let initial: Vec<LogEvent> = mgr.get_log_events();
-        let reader: Box<dyn Read + Send + Sync> = Box::new(crate::sse::EventReader::new(rx, initial));
+        let reader: Box<dyn Read + Send + Sync> =
+            Box::new(crate::sse::EventReader::new(rx, initial));
         let mut resp = Response::new(StatusCode(200), Vec::new(), reader, None, None);
         for h in sse_headers() {
             resp.add_header(h);
@@ -3684,7 +3686,9 @@ mod proxy {
             assert_eq!(v["top_p"], serde_json::json!(0.80));
             assert_eq!(v["presence_penalty"], serde_json::json!(1.5));
             // `enable_thinking:false` explícito también rige instruct.
-            let v = get(br#"{"model":"m","chat_template_kwargs":{"enable_thinking":false},"messages":[]}"#);
+            let v = get(
+                br#"{"model":"m","chat_template_kwargs":{"enable_thinking":false},"messages":[]}"#,
+            );
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             assert_eq!(v["presence_penalty"], serde_json::json!(1.5));
         }

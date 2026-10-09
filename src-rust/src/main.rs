@@ -3,6 +3,7 @@
 mod agents;
 mod auth;
 mod config;
+mod engine_gate;
 mod filelog;
 mod launcher;
 mod meta;
@@ -14,7 +15,6 @@ mod sse;
 mod tray;
 mod update;
 mod usage;
-mod engine_gate;
 
 use std::env;
 use std::path::PathBuf;

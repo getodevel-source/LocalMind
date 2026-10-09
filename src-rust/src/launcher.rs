@@ -1008,7 +1008,10 @@ mod tests {
         // El patch apunta al GATEWAY ligado (no al motor) con contexto vivo;
         // la clave viaja por `apiKeyEnv` (nombre), jamás cruda.
         let a = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "localmind");
-        assert!(a.contains("formato v1"), "el patch debe declarar su versión");
+        assert!(
+            a.contains("formato v1"),
+            "el patch debe declarar su versión"
+        );
         assert!(a.contains("baseURL: http://127.0.0.1:17861/v1"));
         assert!(a.contains("contextWindow: 32768"));
         assert!(a.contains("model: localmind"));
