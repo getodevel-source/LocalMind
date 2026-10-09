@@ -33,6 +33,22 @@ jobs:
           $Tag = '${{ github.ref_name }}'.TrimStart('v')
           if ($Matches[1] -ne $Tag) { throw "Cargo.toml ($($Matches[1])) != tag ($Tag)" }
 
+      - name: Fetch engine runtime (bin/)
+        shell: pwsh
+        run: |
+          # bin/ es runtime de terceros (fork PrismML-Eng/llama.cpp, build
+          # 10743 verificado en SRS §3.2) y viaja en .gitignore: el checkout
+          # de CI no lo trae y build-portable.ps1 lo exige. Se descarga el
+          # asset canónico y se extrae a bin/ (layout plano del ZIP upstream).
+          $Tag = 'prism-b10743-adfffbe'
+          $Asset = 'llama-prism-b10743-adfffbe-bin-win-vulkan-x64.zip'
+          $Url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/$Tag/$Asset"
+          Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP/engine.zip"
+          if ((Get-Item "$env:TEMP/engine.zip").Length -lt 10MB) { throw 'engine ZIP demasiado pequeño: descarga rota' }
+          Expand-Archive -Path "$env:TEMP/engine.zip" -DestinationPath 'bin' -Force
+          if (-not (Test-Path 'bin/llama-server.exe')) { throw 'bin/llama-server.exe ausente tras extraer el runtime' }
+          Get-ChildItem bin | Measure-Object | ForEach-Object { Write-Host "bin/: $($_.Count) ficheros" }
+
       - name: Build portable ZIP
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1
