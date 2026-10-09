@@ -307,6 +307,106 @@ pub fn fetch_tree(repo: &str, rev: &str) -> Result<Vec<TreeFile>, String> {
     parse_tree(&v)
 }
 
+/// Asesor de compatibilidad (portabilidad, estilo canirun.ai pero honesto):
+/// dado el árbol de un repo HF y el HW del host, decide si el modelo cabe y
+/// qué perfil conviene. Puro y testeable (sin red: el llamador ya trajo el
+/// árbol). Reglas:
+/// - Solo cuentan los `.gguf` (el resto del repo no pesa para el motor).
+/// - Si se pide un fichero concreto (`only_file`), solo ese; si no, el mayor
+///   `.gguf` (peor caso honesto: es el que probablemente quieran arrancar).
+/// - `verdict`: `"fits"` (cabe en VRAM al 90%), `"tight"` (cabe con KV en
+///   RAM: necesita `cache_ram`), `"no_fit"` (ni con RAM de respaldo alcanza).
+/// - `profile`: sugerencia (`velocidad`/`multi_doc`/`libros`) según lo que el
+///   peso permite en la VRAM.
+/// - Sin dato de VRAM (`None`) el veredicto es `"unknown"` (no se inventa).
+pub fn advise_fit(
+    tree: &[TreeFile],
+    only_file: Option<&str>,
+    vram_total_mb: Option<u64>,
+    ram_total_mb: Option<u64>,
+) -> serde_json::Value {
+    let ggufs: Vec<&TreeFile> = tree
+        .iter()
+        .filter(|f| f.path.to_lowercase().ends_with(".gguf"))
+        .collect();
+    if ggufs.is_empty() {
+        return serde_json::json!({
+            "verdict": "no_gguf",
+            "detail": "El repo no trae ningún .gguf en este revision.",
+        });
+    }
+    let target: &TreeFile = match only_file {
+        Some(f) => match ggufs.iter().find(|g| {
+            g.path == f
+                || g.path
+                    .to_lowercase()
+                    .ends_with(&format!("/{}", f.to_lowercase()))
+                || g.path.eq_ignore_ascii_case(f)
+        }) {
+            Some(t) => t,
+            None => {
+                return serde_json::json!({
+                    "verdict": "no_file",
+                    "detail": format!("El repo no trae '{}' en este revision.", f),
+                })
+            }
+        },
+        None => ggufs.iter().max_by_key(|g| g.size).unwrap_or(&ggufs[0]),
+    };
+    let model_mb = target.size / (1024 * 1024);
+    let vram = match vram_total_mb {
+        Some(v) => v,
+        None => {
+            return serde_json::json!({
+                "verdict": "unknown",
+                "file": target.path,
+                "size_mb": model_mb,
+                "detail": "Sin dato de VRAM en este equipo: no se puede estimar. El guard avisará al arrancar.",
+            })
+        }
+    };
+    let budget = vram * 9 / 10;
+    // KV a 32K por defecto (perfil recomendado): 1024 MB techo.
+    let kv32 = 1024u64;
+    if model_mb + kv32 <= budget {
+        return serde_json::json!({
+            "verdict": "fits",
+            "file": target.path,
+            "size_mb": model_mb,
+            "profile": "velocidad",
+            "detail": format!("Cabe en VRAM ({} MB + KV 32K frente a {} MB útiles). Perfil sugerido: Recomendado 32K.", model_mb, budget),
+        });
+    }
+    // ¿Cabe con KV desbordado a RAM? El peso debe caber en VRAM y el KV 128K
+    // (techo 4096 MB) entre VRAM libre + mitad de la RAM como techo prudente.
+    let ram = ram_total_mb.unwrap_or(0);
+    let kv128 = 4096u64;
+    let ram_help = ram / 2;
+    if model_mb <= budget && model_mb + kv128 <= budget + ram_help {
+        let ctx =
+            if model_mb + kv128 <= budget + ram_help && model_mb + 2048 <= budget + ram_help / 2 {
+                131072
+            } else {
+                65536
+            };
+        let profile = if ctx >= 131072 { "libros" } else { "multi_doc" };
+        return serde_json::json!({
+            "verdict": "tight",
+            "file": target.path,
+            "size_mb": model_mb,
+            "profile": profile,
+            "detail": format!("El peso cabe en VRAM pero el KV debe desbordar a RAM. Perfil sugerido: {} (parte del KV en DDR5, ~5-20% menos t/s).", profile),
+        });
+    }
+    serde_json::json!({
+        "verdict": "no_fit",
+        "file": target.path,
+        "size_mb": model_mb,
+        "detail": format!("No cabe: {} MB (peso) superan la VRAM útil ({} MB de {} instalados) y ni con RAM de respaldo alcanza para el KV mínimo. Busca una cuantización menor.", model_mb, budget, vram),
+        "hint_quant": "Prueba el mismo modelo en Q3_K_M o IQ3_XS, o baja a 7-8B: suelen ocupar la mitad.",
+    })
+}
+
 fn snippet(s: &str) -> String {
     const MAX: usize = 300;
     let t = s.trim();
@@ -1081,6 +1181,60 @@ mod tests {
         assert_eq!(g["family"], serde_json::json!("generic"));
         assert!(g["ctx_native"].is_null());
         assert_eq!(g["thinking"], serde_json::json!(false));
+    }
+
+    /// Asesor: fits en 16 GB, tight con KV en RAM, no_fit en 8 GB con 27B,
+    /// unknown sin dato, no_gguf sin pesos. Números de la máquina del dueño
+    /// como referencia (27B = 14336 MB).
+    #[test]
+    fn asesor_veredictos_por_hardware() {
+        let tree = vec![
+            TreeFile {
+                path: "grande.gguf".to_string(),
+                size: 14336 * 1024 * 1024,
+                oid: None,
+            },
+            TreeFile {
+                path: "config.json".to_string(),
+                size: 1000,
+                oid: None,
+            },
+        ];
+        // 27B en 16 GB: 14336+1024(KV32K) = 15360 > 14745 → tight con perfil
+        // (coherente con cache_ram 6144 real de esta máquina).
+        let v = advise_fit(&tree, None, Some(16384), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("tight"));
+        assert!(v["profile"].is_string());
+        // 7B (~4 GB) en 16 GB: 4096+1024 = 5120 <= 14745 → fits velocidad.
+        let small = vec![TreeFile {
+            path: "chico.gguf".to_string(),
+            size: 4096 * 1024 * 1024,
+            oid: None,
+        }];
+        let v = advise_fit(&small, None, Some(16384), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("fits"));
+        assert_eq!(v["profile"], serde_json::json!("velocidad"));
+        // 8 GB: el peso (14336) supera el budget (7372) → no_fit con guía.
+        let v = advise_fit(&tree, None, Some(8192), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("no_fit"));
+        assert!(v["hint_quant"].is_string());
+        // Sin VRAM → unknown, sin inventar.
+        let v = advise_fit(&tree, None, None, Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("unknown"));
+        let v = advise_fit(
+            &[TreeFile {
+                path: "a.json".to_string(),
+                size: 1,
+                oid: None,
+            }],
+            None,
+            Some(16384),
+            None,
+        );
+        assert_eq!(v["verdict"], serde_json::json!("no_gguf"));
+        // Fichero concreto que no existe → no_file.
+        let v = advise_fit(&tree, Some("otro.gguf"), Some(16384), None);
+        assert_eq!(v["verdict"], serde_json::json!("no_file"));
     }
 
     #[test]

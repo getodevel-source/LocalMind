@@ -6,6 +6,16 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-10-09
+
+### Añadido (asesor canirun honesto: antes de descargar, no después de fallar)
+- `POST /api/models/advise {repo, revision?, files?}`: resuelve el árbol HF,
+  estima fit contra VRAM+RAM del host y devuelve `{verdict, file, size_mb,
+  profile?, detail, hint_quant?}` (`fits`/`tight`/`no_fit`/`unknown`/
+  `no_gguf`/`no_file`). Sin descargas, sin estado. Test `asesor_veredictos`.
+- Botón «Evaluar» junto a Descargar + veredicto con perfil sugerido y guía
+  de cuantización si no cabe (claves es/en). La descarga sigue igual.
+
 ## [2.0.7] - 2026-10-09
 
 ### Corregido (P0: el drill real rompió el canal en vivo)

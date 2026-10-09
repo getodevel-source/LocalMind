@@ -2164,8 +2164,10 @@
               <div class="model-dl-row" style="margin-top: 8px;">
                 <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
                 <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
+                <button class="tool-btn" type="button" id="btn-dl-advise" onclick="adviseModelDownload()" data-i18n-title="models.adviseTitle" title="Evaluar si cabe en tu equipo antes de descargar"><span data-i18n="models.advise">Evaluar</span> <span id="dl-advise-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
                 <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
               </div>
+              <div id="model-advise-box" class="profile-hint" role="status" style="display: none; margin-top: 6px;"></div>
               <div id="model-dl-section" style="display: none;">
                 <div id="model-dl-status" class="model-dl-status" role="status"></div>
                 <div class="model-dl-bar"><div id="model-dl-fill" class="model-dl-fill"></div></div>
@@ -2321,7 +2323,15 @@
         'models.empty': 'Todavía no hay modelos. Importa un .gguf o descarga uno verificado.',
         'models.starterHint': '¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.',
         'models.starterFill': 'Rellenar ejemplo',
-        'settings.backendNote': 'Backend GPU (solo lectura, se cambia en el TOML):',
+        'models.advise': 'Evaluar',
+        'models.adviseTitle': 'Evaluar si cabe en tu equipo antes de descargar',
+        'models.adviseChecking': 'Evaluando compatibilidad con tu equipo…',
+        'models.advise_fits': 'Cabe en tu GPU',
+        'models.advise_tight': 'Cabe justo (KV en RAM)',
+        'models.advise_no_fit': 'No cabe en tu equipo',
+        'models.advise_unknown': 'Sin dato de tu GPU',
+        'models.advise_no_gguf': 'Repo sin modelos',
+        'models.advise_no_file': 'Fichero no encontrado',
         'models.searching': 'Buscando modelos...',
         'models.count': '{n} modelos',
         'models.colModel': 'Modelo', 'models.colSize': 'Tamaño',
@@ -2589,7 +2599,15 @@
         'models.empty': 'No models yet. Import a .gguf or download a verified one.',
         'models.starterHint': 'First time? Start with a small one (2-3 GB, runs on almost any GPU), then move up to 27B if your VRAM allows it.',
         'models.starterFill': 'Fill example',
-        'settings.backendNote': 'GPU backend (read-only, change it in the TOML):',
+        'models.advise': 'Check fit',
+        'models.adviseTitle': 'Check if it fits your machine before downloading',
+        'models.adviseChecking': 'Checking fit on your machine…',
+        'models.advise_fits': 'Fits your GPU',
+        'models.advise_tight': 'Tight fit (KV on RAM)',
+        'models.advise_no_fit': 'Does not fit your machine',
+        'models.advise_unknown': 'No GPU data',
+        'models.advise_no_gguf': 'Repo has no models',
+        'models.advise_no_file': 'File not found',
         'models.searching': 'Looking for models...',
         'models.count': '{n} models',
         'models.colModel': 'Model', 'models.colSize': 'Size',
@@ -4916,6 +4934,45 @@
       try { document.getElementById('dl-repo').focus(); } catch (e) {}
     }
 
+    // Asesor previo a descargar (portabilidad): pregunta al servidor si el
+    // repo cabe en ESTE equipo y muestra el veredicto con perfil sugerido.
+    // No descarga nada; el usuario decide después con Descargar.
+    async function adviseModelDownload() {
+      const box = document.getElementById('model-advise-box');
+      const spin = document.getElementById('dl-advise-spinner');
+      const repoEl = document.getElementById('dl-repo');
+      const revEl = document.getElementById('dl-revision');
+      const repo = repoEl ? repoEl.value.trim() : '';
+      const revision = revEl ? revEl.value.trim() : '';
+      if (box) { box.style.display = ''; box.textContent = T('models.adviseChecking'); }
+      if (spin) spin.style.display = '';
+      try {
+        if (!repo) {
+          if (box) box.textContent = T('models.dlNeedRepo');
+          return;
+        }
+        const body = { repo };
+        if (revision) body.revision = revision;
+        const res = await fetch('/api/models/advise', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (!res.ok || !data) {
+          if (box) box.textContent = (data && data.error) ? data.error : ('HTTP ' + res.status);
+          return;
+        }
+        if (box) {
+          const v = data.verdict || 'unknown';
+          const key = 'models.advise_' + v;
+          let label = T(key);
+          if (label === key) label = v;
+          let text = label + ': ' + (data.detail || '');
+          if (data.hint_quant) text += ' ' + data.hint_quant;
+          box.textContent = text;
+        }
+      } finally {
+        if (spin) spin.style.display = 'none';
+      }
+    }
     async function cancelModelDownload() {
       try {
         await fetch('/api/models/download/cancel', { method: 'POST' });

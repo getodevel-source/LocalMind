@@ -1883,6 +1883,107 @@ fn handle_request(
         return;
     }
 
+    // Asesor de compatibilidad (portabilidad): `POST /api/models/advise
+    // {"repo","revision?","files?"}` resuelve el árbol HF, estima si el peso
+    // cabe en el HW del host y devuelve `{verdict, file, size_mb, profile?,
+    // detail, hint_quant?}`. Sin descargas, sin estado: solo lectura + red HF.
+    if method == "POST" && url == "/api/models/advise" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        let v: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
+        let repo = v
+            .get("repo")
+            .and_then(|r| r.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if let Err(e) = crate::models::check_repo(&repo) {
+            let _ = req.respond(json_response_for_origin(
+                400,
+                serde_json::json!({ "error": e }).to_string(),
+                origin.as_deref(),
+            ));
+            return;
+        }
+        let revision = v
+            .get("revision")
+            .and_then(|r| r.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(r) = revision.as_deref() {
+            if let Err(e) = crate::models::check_revision(r) {
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        }
+        let only_file = v
+            .get("files")
+            .and_then(|f| f.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(f) = only_file.as_deref() {
+            if let Err(e) = crate::models::check_rel_path(f) {
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        }
+        let rev = match revision {
+            Some(r) => r,
+            None => match crate::models::resolve_main_sha(&repo) {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = req.respond(json_response_for_origin(
+                        502,
+                        serde_json::json!({ "error": e }).to_string(),
+                        origin.as_deref(),
+                    ));
+                    return;
+                }
+            },
+        };
+        let tree = match crate::models::fetch_tree(&repo, &rev) {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(
+                    502,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
+        let hw = mgr.detect_hardware();
+        let ans = crate::models::advise_fit(
+            &tree,
+            only_file.as_deref(),
+            hw.vram_total_mb,
+            hw.ram_total_mb,
+        );
+        let _ = req.respond(json_response_for_origin(
+            200,
+            ans.to_string(),
+            origin.as_deref(),
+        ));
+        return;
+    }
     if method == "POST" && url == "/api/models/download" {
         let mut body = String::new();
         let _ = req.as_reader().read_to_string(&mut body);
