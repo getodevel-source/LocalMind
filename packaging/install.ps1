@@ -52,6 +52,12 @@ $runningHere = Get-Process -Name 'OMNI' -ErrorAction SilentlyContinue | Where-Ob
 if ((Test-Path $TargetExe) -and $runningHere) {
   throw 'OMNI.exe is running from the install dir. Close it first, then re-run install.ps1.'
 }
+# Una actualización pendiente (staging en %TEMP%\omni-update) se aplica al
+# salir de la app: no reinstalar encima o el swap fallaría a medias.
+$PendingUpdate = Get-ChildItem ([System.IO.Path]::GetTempPath()) -Directory -Filter 'omni-update' -ErrorAction SilentlyContinue
+if ($PendingUpdate) {
+  throw 'Hay una actualización pendiente de instalar. Abre OMNI, reiníciala para aplicarla y vuelve a ejecutar install.ps1.'
+}
 
 $null = New-Item -ItemType Directory -Path $TargetDir -Force
 $BinDest = New-Item -ItemType Directory -Path (Join-Path $TargetDir 'bin') -Force

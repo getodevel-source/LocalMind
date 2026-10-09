@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-rust/Cargo.toml
+
+      - name: Version matches tag
+        shell: pwsh
+        run: |
+          $Cargo = Get-Content src-rust/Cargo.toml -Raw
+          if ($Cargo -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw 'No version in Cargo.toml' }
+          $Tag = '${{ github.ref_name }}'.TrimStart('v')
+          if ($Matches[1] -ne $Tag) { throw "Cargo.toml ($($Matches[1])) != tag ($Tag)" }
+
+      - name: Build portable ZIP
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.zip, dist/*.sha256.txt | ForEach-Object { Write-Host $_.FullName }
+
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $Zip = Get-ChildItem dist/*.zip | Select-Object -First 1
+          $Sum = Get-Content ($Zip.FullName + '.sha256.txt') -Raw
+          $Hex = ($Sum -split '\s+')[0].Trim().ToLower()
+          $Notes = @(
+            "## OMNI $($Zip.BaseName)",
+            '',
+            'Descarga el ZIP, extráelo y ejecuta `OMNI.exe`.',
+            'La app avisa de futuras versiones en Ajustes → Actualización.',
+            '',
+            '### Verificación',
+            '',
+            '```',
+            "SHA256 $($Zip.Name) $Hex",
+            '```',
+            ''
+          )
+          Set-Content release-notes.md -Value $Notes -Encoding UTF8
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.sha256.txt
+          body_path: release-notes.md

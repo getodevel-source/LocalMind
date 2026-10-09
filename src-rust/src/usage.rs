@@ -37,7 +37,6 @@ pub fn now_ts() -> i64 {
 const ROTATE_BYTES: u64 = 1024 * 1024;
 const KEEP_LINES: usize = 5000;
 
-
 /// Cola acotada (máx 64 KiB) para extraer usage al final sin guardar el body entero.
 pub const TAIL_MAX_BYTES: usize = 64 * 1024;
 
@@ -94,8 +93,18 @@ pub fn log_usage(
     obj.insert("ts".to_string(), serde_json::json!(now_ts()));
     obj.insert("endpoint".to_string(), serde_json::json!(endpoint));
     obj.insert("model".to_string(), serde_json::json!(model));
-    obj.insert("prompt_tokens".to_string(), prompt_tokens.map(|v| serde_json::Value::from(v)).unwrap_or(serde_json::Value::Null));
-    obj.insert("completion_tokens".to_string(), completion_tokens.map(|v| serde_json::Value::from(v)).unwrap_or(serde_json::Value::Null));
+    obj.insert(
+        "prompt_tokens".to_string(),
+        prompt_tokens
+            .map(|v| serde_json::Value::from(v))
+            .unwrap_or(serde_json::Value::Null),
+    );
+    obj.insert(
+        "completion_tokens".to_string(),
+        completion_tokens
+            .map(|v| serde_json::Value::from(v))
+            .unwrap_or(serde_json::Value::Null),
+    );
     obj.insert("ms".to_string(), serde_json::json!(ms));
     obj.insert("stream".to_string(), serde_json::json!(stream));
     let line_str = serde_json::Value::Object(obj).to_string();
@@ -117,7 +126,11 @@ pub fn log_usage(
         }
     }
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(f, "{}", line_str);
     }
 }
@@ -135,9 +148,13 @@ pub fn tail_lines(content: &str, n: usize) -> String {
 /// Ruta del resumen cacheado: `%APPDATA%\LocalMind\usage-summary.json`.
 pub fn summary_path() -> PathBuf {
     if let Ok(appdata) = std::env::var("APPDATA") {
-        PathBuf::from(appdata).join("LocalMind").join("usage-summary.json")
+        PathBuf::from(appdata)
+            .join("LocalMind")
+            .join("usage-summary.json")
     } else {
-        std::env::temp_dir().join("LocalMind").join("usage-summary.json")
+        std::env::temp_dir()
+            .join("LocalMind")
+            .join("usage-summary.json")
     }
 }
 
@@ -179,40 +196,81 @@ fn summary_from_scratch() -> serde_json::Value {
 }
 
 fn add_line(sum: &mut serde_json::Value, v: &serde_json::Value) {
-    let req_model = v.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string();
+    let req_model = v
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
     let pt = v.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-    let ct = v.get("completion_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+    let ct = v
+        .get("completion_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
     let ts = v.get("ts").and_then(|x| x.as_i64()).unwrap_or(0);
-    let model_id = if req_model.is_empty() { "(sin modelo)".to_string() } else { req_model };
+    let model_id = if req_model.is_empty() {
+        "(sin modelo)".to_string()
+    } else {
+        req_model
+    };
     if let Some(t) = sum.get_mut("totals") {
-        t["requests"] = serde_json::Value::from(t.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
-        t["prompt_tokens"] = serde_json::Value::from(t.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt);
-        t["completion_tokens"] = serde_json::Value::from(t.get("completion_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + ct);
+        t["requests"] =
+            serde_json::Value::from(t.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
+        t["prompt_tokens"] = serde_json::Value::from(
+            t.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt,
+        );
+        t["completion_tokens"] = serde_json::Value::from(
+            t.get("completion_tokens")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+                + ct,
+        );
     }
     if sum.get("by_model").and_then(|m| m.get(&model_id)).is_none() {
         if let Some(m) = sum.get_mut("by_model") {
             if let Some(o) = m.as_object_mut() {
-                o.insert(model_id.clone(), serde_json::json!({"requests": 0, "prompt_tokens": 0, "completion_tokens": 0}));
+                o.insert(
+                    model_id.clone(),
+                    serde_json::json!({"requests": 0, "prompt_tokens": 0, "completion_tokens": 0}),
+                );
             }
         }
     }
     if let Some(e) = sum.get_mut("by_model").and_then(|m| m.get_mut(&model_id)) {
-        e["requests"] = serde_json::Value::from(e.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
-        e["prompt_tokens"] = serde_json::Value::from(e.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt);
-        e["completion_tokens"] = serde_json::Value::from(e.get("completion_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + ct);
+        e["requests"] =
+            serde_json::Value::from(e.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
+        e["prompt_tokens"] = serde_json::Value::from(
+            e.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt,
+        );
+        e["completion_tokens"] = serde_json::Value::from(
+            e.get("completion_tokens")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+                + ct,
+        );
     }
     let day = day_of(ts);
     if sum.get("by_day").and_then(|m| m.get(&day)).is_none() {
         if let Some(m) = sum.get_mut("by_day") {
             if let Some(o) = m.as_object_mut() {
-                o.insert(day.clone(), serde_json::json!({"requests": 0, "prompt_tokens": 0, "completion_tokens": 0}));
+                o.insert(
+                    day.clone(),
+                    serde_json::json!({"requests": 0, "prompt_tokens": 0, "completion_tokens": 0}),
+                );
             }
         }
     }
     if let Some(e) = sum.get_mut("by_day").and_then(|m| m.get_mut(&day)) {
-        e["requests"] = serde_json::Value::from(e.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
-        e["prompt_tokens"] = serde_json::Value::from(e.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt);
-        e["completion_tokens"] = serde_json::Value::from(e.get("completion_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + ct);
+        e["requests"] =
+            serde_json::Value::from(e.get("requests").and_then(|x| x.as_u64()).unwrap_or(0) + 1);
+        e["prompt_tokens"] = serde_json::Value::from(
+            e.get("prompt_tokens").and_then(|x| x.as_u64()).unwrap_or(0) + pt,
+        );
+        e["completion_tokens"] = serde_json::Value::from(
+            e.get("completion_tokens")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+                + ct,
+        );
     }
     if ts > 0 {
         let first = sum.get("first_ts").and_then(|x| x.as_i64()).unwrap_or(0);
@@ -244,7 +302,11 @@ pub fn usage_summary_at(log: &std::path::Path, cache: &std::path::Path) -> Strin
         let start = (offset as usize).min(content.len());
         let tail = &content[start..];
         // Solo líneas completas (cortar en el último `\n` si el writer va a medias).
-        let end = tail.iter().rposition(|&b| b == b'\n').map(|i| i + 1).unwrap_or(0);
+        let end = tail
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
         let consumed = start + end;
         for line in tail[..end].split(|&b| b == b'\n') {
             if line.is_empty() {
@@ -302,12 +364,14 @@ pub fn usage_raw_at(log: &std::path::Path, limit: usize) -> String {
 mod tests {
     use super::*;
 
-
     #[test]
     fn usage_del_chunk_final_y_nada_si_no_hay() {
         let raw = "data: {\"choices\":[{\"delta\":{\"content\":\"h\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":9}}\n\ndata: [DONE]\n\n";
         assert_eq!(extract_usage_from_sse(raw), (Some(3), Some(9)));
-        assert_eq!(extract_usage_from_sse("data: {\"choices\":[]}\n\ndata: [DONE]\n"), (None, None));
+        assert_eq!(
+            extract_usage_from_sse("data: {\"choices\":[]}\n\ndata: [DONE]\n"),
+            (None, None)
+        );
     }
 
     #[test]
@@ -326,7 +390,11 @@ mod tests {
 
     #[test]
     fn recorte_de_cola() {
-        let c = (0..10).map(|i| format!("l{}", i)).collect::<Vec<_>>().join("\n") + "\n";
+        let c = (0..10)
+            .map(|i| format!("l{}", i))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
         let t = tail_lines(&c, 3);
         assert_eq!(t, "l7\nl8\nl9\n");
     }
@@ -341,7 +409,10 @@ mod tests {
         assert!(tail.ends_with(b"BC"));
         tail.clear();
         push_tail(&mut tail, b"data: {\"choices\":[{\"delta\":{}}]}\n\n");
-        push_tail(&mut tail, b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n");
+        push_tail(
+            &mut tail,
+            b"data: {\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n",
+        );
         let s = String::from_utf8_lossy(&tail).to_string();
         assert_eq!(extract_usage_from_sse(&s), (Some(1), Some(2)));
         assert!(tail.len() <= TAIL_MAX_BYTES);
@@ -367,7 +438,10 @@ mod tests {
         let s1: serde_json::Value = serde_json::from_str(&usage_summary_at(&log, &cache)).unwrap();
         assert_eq!(s1["totals"]["requests"], serde_json::json!(2));
         assert_eq!(s1["totals"]["prompt_tokens"], serde_json::json!(15));
-        assert_eq!(s1["by_model"]["m1"]["completion_tokens"], serde_json::json!(25));
+        assert_eq!(
+            s1["by_model"]["m1"]["completion_tokens"],
+            serde_json::json!(25)
+        );
         assert_eq!(s1["by_day"]["2026-09-25"]["requests"], serde_json::json!(2));
         assert_eq!(s1["first_ts"], serde_json::json!(base));
         // Incremental: una línea más solo suma su parte.
@@ -385,7 +459,10 @@ mod tests {
         }
         let s3: serde_json::Value = serde_json::from_str(&usage_summary_at(&log, &cache)).unwrap();
         assert_eq!(s3["totals"]["requests"], serde_json::json!(1));
-        assert_eq!(s3["by_model"]["m3"]["completion_tokens"], serde_json::json!(8));
+        assert_eq!(
+            s3["by_model"]["m3"]["completion_tokens"],
+            serde_json::json!(8)
+        );
         assert!(s3.get("by_model").and_then(|m| m.get("m1")).is_none());
         assert!(!s3.to_string().contains("NaN"));
         // Raw: últimas n con skipped.

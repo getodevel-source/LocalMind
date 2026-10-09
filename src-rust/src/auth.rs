@@ -24,35 +24,20 @@ pub fn gateway_key_path() -> PathBuf {
     }
 }
 
-/// Generar 32 bytes aleatorios en hex (64 chars) sin crates nuevas.
-///
-/// Usa `RandomState::new()` como fuente de entropía del SO (en Windows se
-/// siembra con `BCryptGenRandom`) mezclada con tiempo/PID/contador, y hashea
-/// para obtener 4×u64 que se vuelcan en hex.
+/// Generar 32 bytes aleatorios en hex (64 chars) con el CSPRNG del SO
+/// (`getrandom`, BCryptGenRandom en Windows). Sin mezcla casera: la salida
+/// del SO es la clave.
 pub fn generate_key() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static CTR: AtomicU64 = AtomicU64::new(0);
-
+    let mut bytes = [0u8; 32];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        // Sin entropía del SO no hay clave segura: abortar es mejor que una
+        // clave predecible (el gateway nace sin secreto y `/api/unlock`
+        // quedaría abierto a cualquiera que adivine tiempo/PID).
+        panic!("sin entropía del SO para la clave del gateway");
+    }
     let mut out = String::with_capacity(64);
-    for i in 0..4 {
-        let rs = RandomState::new();
-        let mut h = rs.build_hasher();
-        let now_nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let ctr = CTR.fetch_add(1, Ordering::Relaxed);
-        h.write_u64(now_nanos.wrapping_add(ctr.wrapping_mul(0x9E3779B97F4A7C15)));
-        h.write_u32(std::process::id());
-        h.write_usize(i as usize);
-        // Dirección de pila como entropía extra (no secreta, solo mezcla).
-        let stack_salt: usize = &i as *const _ as usize;
-        h.write_usize(stack_salt);
-        let v = h.finish();
-        out.push_str(&format!("{:016x}", v));
+    for b in bytes {
+        out.push_str(&format!("{:02x}", b));
     }
     out
 }
@@ -93,15 +78,63 @@ pub fn rotate_key_at(path: &std::path::Path) -> Result<String, String> {
 }
 
 /// Comparar clave candidata con la vigente (Fase B4, desbloqueo LAN): igual y
-/// no vacía. Función aparte para testear sin socket. Comparación directa: el
-/// modelo de amenaza es la LAN hogareña tras el gate del peer (diseño B2).
+/// no vacía, en tiempo constante (sin cortocircuito por primer byte distinto:
+/// evita oráculo de temporización en la LAN). Función aparte para testear.
 pub fn key_matches(candidate: &str, key: &str) -> bool {
-    !key.is_empty() && candidate == key
+    let a = candidate.as_bytes();
+    let b = key.as_bytes();
+    if b.is_empty() || a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
 }
 
 /// Valor para `Set-Cookie` en `/`, `/index.html`, iconos y `/api/unlock`.
 pub fn set_cookie_value(key: &str) -> String {
-    format!("{}={}; Path=/; HttpOnly; SameSite=Strict", KEY_COOKIE_NAME, key)
+    format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Strict",
+        KEY_COOKIE_NAME, key
+    )
+}
+
+/// Freno de fuerza bruta en `/api/unlock`: 5 fallos seguidos bloquean 5 min.
+/// Contador global del proceso (el gateway es un solo proceso; sin estado
+/// por IP: el peer ya está acotado a loopback/red privada por el gate B2).
+static UNLOCK_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static UNLOCK_BLOCKED_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn unlock_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// ¿Se admite un intento de desbloqueo ahora? Falso durante el bloqueo.
+pub fn unlock_allowed() -> bool {
+    unlock_now_secs() >= UNLOCK_BLOCKED_UNTIL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Registrar un fallo: al 5.º se bloquea 5 min y se resetea el contador.
+pub fn unlock_failed() {
+    let n = UNLOCK_FAILS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n >= 5 {
+        UNLOCK_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
+        UNLOCK_BLOCKED_UNTIL.store(
+            unlock_now_secs() + 300,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
+/// Registrar un éxito: limpia fallos y bloqueos.
+pub fn unlock_ok() {
+    UNLOCK_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
+    UNLOCK_BLOCKED_UNTIL.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// La MISMA clave del gateway, cacheada por proceso.
@@ -146,24 +179,26 @@ pub fn is_authorized(headers: &[Header], key: &str) -> bool {
     if let Some(auth) = header_value(headers, "Authorization") {
         let auth = auth.trim();
         if auth.len() > 7 && auth[..7].eq_ignore_ascii_case("bearer ") {
-            if auth[7..].trim() == key {
+            if key_matches(auth[7..].trim(), key) {
                 return true;
             }
         }
     }
     // 2. x-api-key: <key> (clientes Anthropic)
     if let Some(k) = header_value(headers, "x-api-key") {
-        if k.trim() == key {
+        if key_matches(k.trim(), key) {
             return true;
         }
     }
     // 3. Cookie: lm_key=<key>
-    if let Some(cookie) = header_value(headers, "Cookie").or_else(|| header_value(headers, "cookie")) {
+    if let Some(cookie) =
+        header_value(headers, "Cookie").or_else(|| header_value(headers, "cookie"))
+    {
         for part in cookie.split(';') {
             let part = part.trim();
             if let Some(eq) = part.find('=') {
                 let (n, v) = part.split_at(eq);
-                if n.trim() == KEY_COOKIE_NAME && v[1..].trim() == key {
+                if n.trim() == KEY_COOKIE_NAME && key_matches(v[1..].trim(), key) {
                     return true;
                 }
             }
@@ -183,16 +218,28 @@ mod tests {
     #[test]
     fn sin_credenciales_401() {
         assert!(!is_authorized(&[], "abc123"));
-        assert!(!is_authorized(&[h("Authorization", "Bearer otra")], "abc123"));
+        assert!(!is_authorized(
+            &[h("Authorization", "Bearer otra")],
+            "abc123"
+        ));
     }
 
     #[test]
     fn bearer_cookie_y_x_api_key_permitidos() {
         let key = "clave-de-prueba-123";
-        assert!(is_authorized(&[h("Authorization", "Bearer clave-de-prueba-123")], key));
-        assert!(is_authorized(&[h("authorization", "bearer clave-de-prueba-123")], key));
+        assert!(is_authorized(
+            &[h("Authorization", "Bearer clave-de-prueba-123")],
+            key
+        ));
+        assert!(is_authorized(
+            &[h("authorization", "bearer clave-de-prueba-123")],
+            key
+        ));
         assert!(is_authorized(&[h("x-api-key", "clave-de-prueba-123")], key));
-        assert!(is_authorized(&[h("Cookie", "otra=1; lm_key=clave-de-prueba-123; x=2")], key));
+        assert!(is_authorized(
+            &[h("Cookie", "otra=1; lm_key=clave-de-prueba-123; x=2")],
+            key
+        ));
         assert!(!is_authorized(&[h("Cookie", "lm_key=otra")], key));
     }
 
@@ -225,5 +272,21 @@ mod tests {
         assert!(!key_matches("", "abc123"));
         assert!(!key_matches("abc123", ""));
         assert!(!key_matches("", ""));
+        // Longitud distinta también es falso (sin pánico por slicing).
+        assert!(!key_matches("abc1234", "abc123"));
+    }
+
+    #[test]
+    fn freno_cinco_fallos_bloquea_y_exito_limpia() {
+        unlock_ok();
+        assert!(unlock_allowed());
+        for _ in 0..4 {
+            unlock_failed();
+            assert!(unlock_allowed());
+        }
+        unlock_failed();
+        assert!(!unlock_allowed(), "5 fallos deben bloquear");
+        unlock_ok();
+        assert!(unlock_allowed());
     }
 }

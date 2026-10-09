@@ -54,41 +54,28 @@ pub fn notify(title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str)
         None => return,
     };
     let mut cmd = Command::new("powershell");
-    cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script]);
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        &script,
+    ]);
     cmd.creation_flags(CREATE_NO_WINDOW);
     // Desacoplado: no se espera el hijo (el toast vive en el SO).
     match cmd.spawn() {
         Ok(_) => {}
-        Err(e) => log_on_fail(&format!("[LocalMind] Aviso de escritorio no enviado ({}).", e)),
+        Err(e) => log_on_fail(&format!(
+            "[LocalMind] Aviso de escritorio no enviado ({}).",
+            e
+        )),
     }
 }
 
 /// Puerta de avisos con la config viva (P20): `enabled` general + flag del evento.
 pub fn should_notify(enabled: bool, flag_on: bool) -> bool {
     enabled && flag_on
-}
-
-/// Frontera de plugin (Fase A2, vuelta a raíces): el núcleo solo necesita
-/// `should_notify` + este trait. El toast de Windows es una implementación más.
-pub trait Notifier {
-    fn notify(&self, title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str));
-}
-
-/// Implementación nula: ignora el aviso pero reporta por el canal de log.
-/// Útil en modo Cliente (sin motor local) y en tests.
-pub struct NoopNotifier;
-
-impl Notifier for NoopNotifier {
-    fn notify(&self, _title: &str, _body: &str, _tag: &str, _log_on_fail: impl FnOnce(&str)) {}
-}
-
-/// Implementación Windows (toast PowerShell desacoplado).
-pub struct PowerShellNotifier;
-
-impl Notifier for PowerShellNotifier {
-    fn notify(&self, title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str)) {
-        notify(title, body, tag, log_on_fail);
-    }
 }
 
 #[cfg(test)]

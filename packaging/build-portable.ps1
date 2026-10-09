@@ -30,6 +30,9 @@ $CargoText = Get-Content (Join-Path $RepoRoot 'src-rust/Cargo.toml') -Raw
 if ($CargoText -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw 'Could not read version from src-rust/Cargo.toml' }
 $Version = $Matches[1]
 $DateStamp = Get-Date -Format 'yyyyMMdd'
+# Commit para trazabilidad ZIP -> commit (canal de auto-update).
+$Commit = 'unknown'
+try { $Commit = (git -C $RepoRoot rev-parse --short HEAD 2>$null).Trim() } catch {}
 # --- Engine build string: bin/llama-server.exe --version (writes to STDERR) ---
 # NOTE: $ErrorActionPreference='Stop' turns native stderr lines into
 # terminating errors under 2>&1, so relax it just for this call.
@@ -85,25 +88,34 @@ try {
 
   Set-Content -Path (Join-Path $Stage 'version.txt') -Encoding UTF8 -Value @(
     "OMNI $Version"
+    "commit: $Commit"
     "llama.cpp: $EngineVersion"
-    "Built: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-  )
+    "Built: $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC"
+  ) # version.txt es ASCII puro: sin BOM no hay problema.
 
   $Leeme = @(
-    'OMNI portable — inicio rápido',
+    'OMNI portable - inicio rapido',
     '===================================',
     '',
     '1. Extrae este ZIP donde quieras (p. ej. C:\LocalMind).',
     '2. Ejecuta OMNI.exe (se abre la ventana; sin terminal).',
-    '3. En la primera ejecución NO se descarga nada.',
+    '3. En la primera ejecucion NO se descarga nada.',
     '',
     'Modelos (.gguf):',
     '- Van en la carpeta models/ junto a OMNI.exe.',
-    '- Si ya tienes pesos, cópialos ahí antes de iniciar el motor.',
+    '- Si ya tienes pesos, copialos ahi antes de iniciar el motor.',
     '- La carpeta models/ NUNCA se incluye en este ZIP (pesa ~14 GB).',
     '',
-    'Detener y liberar VRAM/RAM: botón Detener en la ventana o cierra la app.',
-    "Versión: $Version (detalle en version.txt)."
+    'Actualizacion automatica: la app comprueba GitHub Releases al arrancar',
+    'y avisa en Ajustes -> Actualizacion (la instalacion es al reiniciar,',
+    'tus modelos y ajustes se conservan).',
+    '',
+    'Si no abre: instala WebView2 (viene con Edge).',
+    'Logs: %APPDATA%\LocalMind\logs\localmind.log',
+    'Manual completo: docs/MANUAL.md del repo.',
+    '',
+    'Detener y liberar VRAM/RAM: boton Detener en la ventana o cierra la app.',
+    "Version: $Version (commit $Commit, detalle en version.txt)."
   )
   Set-Content -Path (Join-Path $Stage 'LEEME.txt') -Encoding UTF8 -Value $Leeme
 
@@ -132,9 +144,19 @@ try {
     Write-Host ("Entries: {0}   Size: {1:N2} MB" -f $Entries.Count, ($Zip.Length / 1MB))
     $Suspicious = $Entries | Where-Object { $_.FullName -match '(^|/)(models/|target/|\.git/)' -or $_.FullName -like '*.bak*' -or $_.FullName -match '\.gguf$' }
     if ($Suspicious) { throw ("ZIP contains forbidden entries: " + (($Suspicious | Select-Object -First 5 FullName) -join '; ')) }
+    # OMNI.exe + ui.html obligatorios (el updater los exige en el staging).
+    $Names = @($Entries | ForEach-Object { $_.FullName })
+    if (-not ($Names -contains 'OMNI.exe') -or -not ($Names -contains 'ui.html')) {
+      throw 'ZIP inválido para el canal de auto-update: debe traer OMNI.exe + ui.html'
+    }
   } finally {
     $Archive.Dispose()
   }
+  # SHA-256 del ZIP (canal de auto-update: la release publica
+  # "SHA256 <asset> <hex>" en el body; este fichero es la fuente).
+  $ZipHash = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()
+  Set-Content -Path ($ZipPath + '.sha256.txt') -Encoding UTF8 -Value "$ZipHash  $ZipName"
+  Write-Host "SHA256: $ZipHash"
 } finally {
   Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
 }

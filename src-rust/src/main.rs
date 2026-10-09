@@ -10,7 +10,9 @@ mod models;
 mod notify;
 mod process;
 mod server;
+mod update;
 mod usage;
+
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -172,10 +174,20 @@ fn main() {
     }
 
     // Start embedded HTTP server
-    let server = match HttpServer::start(Arc::clone(&process_mgr), Arc::clone(&config), base_dir.clone()) {
+    let server = match HttpServer::start(
+        Arc::clone(&process_mgr),
+        Arc::clone(&config),
+        base_dir.clone(),
+    ) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error al iniciar servidor HTTP: {}", e);
+            let msg = format!("Error al iniciar servidor HTTP: {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            // Sin consola (GUI): el fallo debe verse. `rfd` ya es dependencia.
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI no pudo arrancar")
+                .set_description(&msg)
+                .show();
             return;
         }
     };
@@ -183,13 +195,25 @@ fn main() {
     let port = server.port();
     let server_url = format!("http://127.0.0.1:{}", port);
 
-    let args: Vec<String> = env::args().collect();
-    if args.iter().any(|a| a == "--server-only" || a == "--headless") {
-        println!("LocalMind server-only escuchando en {}", server_url);
-        // Modo headless: mantener vivo el proceso mientras el manager exista.
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
-        }
+    // Actualización automática (Fase Prod): chequeo silencioso al arrancar
+    // (30 s de gracia para no competir con el motor) + re-chequeo cada 6 h
+    // si `check_on_startup`. Con `auto_download`, una novedad se descarga
+    // sola (la instalación siempre espera al reinicio y la pide el dueño).
+    {
+        let cfg_bg = Arc::clone(&config);
+        let mgr_bg = Arc::clone(&process_mgr);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let log: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                std::sync::Arc::new(move |line: String| mgr_bg.log(&line));
+            loop {
+                let c = cfg_bg.get();
+                if c.update.check_on_startup {
+                    crate::update::spawn_check(c.update.feed.clone(), true, Arc::clone(&log));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+            }
+        });
     }
 
     // Native Window Mode
@@ -207,7 +231,12 @@ fn main() {
     let window = match window_builder.build(&event_loop) {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("Error al crear ventana: {}", e);
+            let msg = format!("Error al crear ventana: {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI no pudo arrancar")
+                .set_description(&msg)
+                .show();
             return;
         }
     };
@@ -215,7 +244,15 @@ fn main() {
     let webview = match WebViewBuilder::new(&window).with_url(&server_url).build() {
         Ok(wv) => wv,
         Err(e) => {
-            eprintln!("Error al crear webview: {}", e);
+            let msg = format!("Error al crear webview (falta WebView2): {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI necesita WebView2")
+                .set_description(&format!(
+                    "{}\n\nInstala Microsoft Edge WebView2 y reintenta.",
+                    msg
+                ))
+                .show();
             return;
         }
     };
@@ -227,6 +264,7 @@ fn main() {
     window.set_focus();
 
     let mgr_cleanup = Arc::clone(&process_mgr);
+    let base_cleanup = base_dir.clone();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -237,6 +275,26 @@ fn main() {
         } = event
         {
             mgr_cleanup.stop();
+            // Actualización lista: swap al salir (cmd desacoplado, el exe ya
+            // liberó su lock). Sin pendiente: salida normal.
+            if let Some(pending) = crate::update::pending_update() {
+                match crate::update::prepare_install_on_exit(&base_cleanup) {
+                    Ok(script) => {
+                        let _ = std::process::Command::new("cmd.exe")
+                            .args(["/C", &script.to_string_lossy().to_string()])
+                            .spawn();
+                    }
+                    Err(e) => {
+                        crate::filelog::write_log_line(
+                            &crate::filelog::log_file(&base_cleanup),
+                            &format!(
+                                "[LocalMind] No se pudo instalar la actualización {}: {}",
+                                pending.version, e
+                            ),
+                        );
+                    }
+                }
+            }
             *control_flow = ControlFlow::Exit;
         }
     });
@@ -280,7 +338,11 @@ mod tests {
         // `write_log_line` antepone SU propio epoch UTC (no el de la línea) y
         // `format_line` sanea \n, \r y \0 a espacio: el archivo tiene UNA línea
         // lógica, que es lo que permite seguir un pánico al leer el log.
-        assert!(text.contains("[LocalMind] PANIC: a b c (f.rs:9)"), "{:?}", text);
+        assert!(
+            text.contains("[LocalMind] PANIC: a b c (f.rs:9)"),
+            "{:?}",
+            text
+        );
         assert_eq!(text.matches('\n').count(), 1, "una sola linea: {:?}", text);
         assert!(!text.contains('\0'), "{:?}", text);
         let _ = std::fs::remove_dir_all(&dir);

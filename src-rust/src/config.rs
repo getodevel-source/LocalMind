@@ -234,6 +234,31 @@ pub struct ClientConfig {
     pub enabled: bool,
 }
 
+/// Canal de actualización automática (Fase Prod): chequeo silencioso contra
+/// GitHub Releases + descarga verificada + instalación al reiniciar.
+/// `feed` vacío = repo por defecto (`update::DEFAULT_FEED_REPO`).
+/// `check_on_startup` (default true) y `auto_download` (default false):
+/// por defecto solo AVISA; la descarga la pide el dueño.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    #[serde(default)]
+    pub feed: String,
+    #[serde(default = "default_true")]
+    pub check_on_startup: bool,
+    #[serde(default)]
+    pub auto_download: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            feed: String::new(),
+            check_on_startup: true,
+            auto_download: false,
+        }
+    }
+}
+
 /// Servidor remoto del modo Cliente (diseño B5/B6): `url` base (con o sin
 /// `/v1`, se normaliza al usar) y `key` Bearer. La UI jamás la devuelve
 /// completa (enmascarada) y nunca viaja en logs ni URLs.
@@ -345,7 +370,9 @@ pub fn psu_unsafe_flag(flags: &[String]) -> Option<String> {
             num.parse::<usize>().ok()
         };
         let takes_val = |name: &str| -> bool {
-            f == name || f.starts_with(&format!("{}=", name)) || f.starts_with(&format!("{} ", name))
+            f == name
+                || f.starts_with(&format!("{}=", name))
+                || f.starts_with(&format!("{} ", name))
         };
         if f == "-ub" || f == "--ubatch-size" || f.starts_with("--ubatch-size=") {
             let v = if f.contains('=') {
@@ -416,6 +443,9 @@ pub struct AppConfig {
     /// Servidor remoto (Fase B3): ausente → vacío.
     #[serde(default)]
     pub remote: RemoteConfig,
+    /// Canal de actualización (Fase Prod): ausente → defaults (avisar, no auto-descargar).
+    #[serde(default)]
+    pub update: UpdateConfig,
 }
 
 impl Default for AppConfig {
@@ -431,6 +461,7 @@ impl Default for AppConfig {
             lan: LanConfig::default(),
             client: ClientConfig::default(),
             remote: RemoteConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
 }
@@ -462,7 +493,7 @@ fn default_poll() -> u32 {
 }
 fn default_idle_timeout() -> u64 {
     5400 // 90 min: el motor residente evita ciclos stop/start entre sesiones
-    // (cada arranque = transitorio PSU); para liberar VRAM usar Stop manual.
+         // (cada arranque = transitorio PSU); para liberar VRAM usar Stop manual.
 }
 fn default_start_cooldown() -> u64 {
     120
@@ -504,10 +535,7 @@ fn default_max_tokens() -> usize {
     2048
 }
 fn default_aliases() -> Vec<String> {
-    vec![
-        "localmind".to_string(),
-        "qwen3.8-27b".to_string(),
-    ]
+    vec!["localmind".to_string(), "qwen3.8-27b".to_string()]
 }
 fn default_mmproj_files() -> Vec<String> {
     vec![
@@ -587,7 +615,11 @@ pub fn previous_built_in_field(id: &str, version: u32) -> Option<(usize, usize, 
         ("multi_doc", _) => Some((65536, 4096, Vec::new())),
         ("libros", 0) | ("libros", 2) | ("libros", 4) => Some((131072, 6144, Vec::new())),
         ("libros", 1) => Some((131072, 6144, vec!["--no-mmap".to_string()])),
-        ("libros", 3) => Some((131072, 6144, vec!["--load-mode".to_string(), "none".to_string()])),
+        ("libros", 3) => Some((
+            131072,
+            6144,
+            vec!["--load-mode".to_string(), "none".to_string()],
+        )),
         ("max_contexto", _) => Some((262144, 6144, vec!["-kvu".to_string()])),
         _ => None,
     }
@@ -661,7 +693,9 @@ pub fn migrate_engine_defaults(cfg: &mut AppConfig, stored_version: u32) -> Vec<
     }
     let mut touched = Vec::new();
     // `idle_timeout_secs`: existe desde v0 con foto 1500 → 900 intacto.
-    if prevs.iter().any(|p| p.idle_timeout_secs == Some(cfg.engine.idle_timeout_secs))
+    if prevs
+        .iter()
+        .any(|p| p.idle_timeout_secs == Some(cfg.engine.idle_timeout_secs))
         && cfg.engine.idle_timeout_secs != cur.idle_timeout_secs
     {
         cfg.engine.idle_timeout_secs = cur.idle_timeout_secs;
@@ -673,9 +707,7 @@ pub fn migrate_engine_defaults(cfg: &mut AppConfig, stored_version: u32) -> Vec<
     // era default v4). Solo migrar si coincide con foto `Some` previa.
     macro_rules! mig_new {
         ($field:ident, $touched:literal) => {
-            if prevs
-                .iter()
-                .any(|p| p.$field == Some(cfg.engine.$field))
+            if prevs.iter().any(|p| p.$field == Some(cfg.engine.$field))
                 && cfg.engine.$field != cur.$field
             {
                 cfg.engine.$field = cur.$field;
@@ -717,7 +749,9 @@ pub fn migrate_builtin_profiles_from(
         if prevs.is_empty() {
             continue;
         }
-        let flags_untouched = prevs.iter().any(|prev| p.extra_flags.iter().all(|f| prev.2.contains(f)));
+        let flags_untouched = prevs
+            .iter()
+            .any(|prev| p.extra_flags.iter().all(|f| prev.2.contains(f)));
         let mut changed = false;
         if flags_untouched && p.extra_flags != cur.extra_flags {
             p.extra_flags = cur.extra_flags.clone();
@@ -808,6 +842,12 @@ impl ConfigStore {
         // Atómica best-effort; la nota nombra perfiles y campos tocados.
         let mut tuned_note: Option<String> = None;
         if raw.is_some() && cfg.profiles_version < PROFILES_VERSION {
+            // Backup del TOML previo (irreversible sin copia: un bug de
+            // migración no puede costar la config del dueño).
+            if let Some(text) = raw.as_ref() {
+                let bak = path.with_extension("toml.bak");
+                let _ = std::fs::write(&bak, text);
+            }
             let from = cfg.profiles_version;
             let touched_p = migrate_builtin_profiles_from(&mut cfg.profiles, from);
             let touched_e = migrate_engine_defaults(&mut cfg, from);
@@ -878,7 +918,6 @@ impl ConfigStore {
         }
         std::fs::write(&self.path, text).map_err(|e| e.to_string())
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -942,13 +981,22 @@ pub fn resolve_profile(profiles: &[HardwareProfile], id: &str) -> HardwareProfil
 /// `patch` debe ser un objeto con un subconjunto de las claves `engine`,
 /// `generation`, `notifications`. Todo lo demás es `Err` con el mensaje que
 /// el gateway expone en `{"error": ...}` (mismo texto que servía el handler).
-pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Result<AppConfig, String> {
+pub fn apply_config_patch(
+    current: &AppConfig,
+    patch: &serde_json::Value,
+) -> Result<AppConfig, String> {
     if !patch.is_object() {
         return Err("cuerpo inválido: se esperaba un objeto".to_string());
     }
     let obj = patch.as_object().cloned().unwrap_or_default();
     for k in obj.keys() {
-        if k != "engine" && k != "generation" && k != "notifications" && k != "lan" && k != "client" {
+        if k != "engine"
+            && k != "generation"
+            && k != "notifications"
+            && k != "lan"
+            && k != "client"
+            && k != "update"
+        {
             return Err(format!("clave desconocida: {}", k));
         }
     }
@@ -962,7 +1010,10 @@ pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Res
         };
         for k in em.keys() {
             if k != "idle_timeout_secs" && k != "threads" && k != "priority" && k != "speculation" {
-                return Err(format!("campo inválido: engine.{} (solo lectura o desconocido)", k));
+                return Err(format!(
+                    "campo inválido: engine.{} (solo lectura o desconocido)",
+                    k
+                ));
             }
         }
         if let Some(j) = em.get("idle_timeout_secs") {
@@ -1126,6 +1177,40 @@ pub fn apply_config_patch(current: &AppConfig, patch: &serde_json::Value) -> Res
             _ => return Err(bad("client.enabled")),
         }
     }
+    // --- update (Fase Prod): `feed` (repo owner/name o vacío = defecto),
+    // `check_on_startup` y `auto_download` (booleanos). Efecto al próximo
+    // chequeo; el scheduler lee la config viva.
+    if let Some(up) = obj.get("update") {
+        let um = match up.as_object() {
+            Some(m) => m,
+            None => return Err(bad("update")),
+        };
+        for k in um.keys() {
+            if k != "feed" && k != "check_on_startup" && k != "auto_download" {
+                return Err(format!("clave desconocida: update.{}", k));
+            }
+        }
+        if let Some(j) = um.get("feed") {
+            match j.as_str() {
+                Some(s) if s.len() <= 120 && (s.is_empty() || valid_update_feed(s)) => {
+                    next.update.feed = s.trim().to_string();
+                }
+                _ => return Err(bad("update.feed")),
+            }
+        }
+        if let Some(j) = um.get("check_on_startup") {
+            match j.as_bool() {
+                Some(b) => next.update.check_on_startup = b,
+                None => return Err(bad("update.check_on_startup")),
+            }
+        }
+        if let Some(j) = um.get("auto_download") {
+            match j.as_bool() {
+                Some(b) => next.update.auto_download = b,
+                None => return Err(bad("update.auto_download")),
+            }
+        }
+    }
     Ok(next)
 }
 
@@ -1205,6 +1290,30 @@ pub fn remote_url_ok(url: &str) -> bool {
     }
 }
 
+/// ¿Feed de actualización aceptable? `owner/name` GitHub (vacío = defecto).
+/// Misma gramática estricta que `models::check_repo`: sin `..`, sin espacios,
+/// sin backslash; cada lado `owner`/`name` no vacío, charset acotado.
+pub fn valid_update_feed(feed: &str) -> bool {
+    let r = feed.trim();
+    if r.is_empty() {
+        return false;
+    }
+    let mut parts = r.split('/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(o), Some(n), None) => {
+            !o.is_empty()
+                && !n.is_empty()
+                && !r.contains("..")
+                && !r.contains(' ')
+                && !r.contains('\\')
+                && r.chars().all(|c| {
+                    c.is_ascii_alphanumeric() || c == '/' || c == '-' || c == '_' || c == '.'
+                })
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,7 +1356,11 @@ mod tests {
 
     #[test]
     fn validador_extra_flags() {
-        let ok_flags = vec!["-kvu".to_string(), "--flash-attn".to_string(), "foo=bar:1/2".to_string()];
+        let ok_flags = vec![
+            "-kvu".to_string(),
+            "--flash-attn".to_string(),
+            "foo=bar:1/2".to_string(),
+        ];
         assert!(profile_flags_ok(&ok_flags));
         assert!(profile_flags_ok(&[]));
         // Máximo 8 flags
@@ -1343,11 +1456,16 @@ mod tests {
         assert!(err.contains("clave desconocida: motor"), "{}", err);
         // Campo de solo lectura en engine.
         let err = apply_config_patch(&base, &patch(r#"{"engine":{"device":"x"}}"#)).unwrap_err();
-        assert!(err.contains("engine.device") && err.contains("solo lectura"), "{}", err);
+        assert!(
+            err.contains("engine.device") && err.contains("solo lectura"),
+            "{}",
+            err
+        );
         // Clave desconocida en generation y notifications.
         let err = apply_config_patch(&base, &patch(r#"{"generation":{"top_k":5}}"#)).unwrap_err();
         assert!(err.contains("generation.top_k"), "{}", err);
-        let err = apply_config_patch(&base, &patch(r#"{"notifications":{"sms":true}}"#)).unwrap_err();
+        let err =
+            apply_config_patch(&base, &patch(r#"{"notifications":{"sms":true}}"#)).unwrap_err();
         assert!(err.contains("notifications.sms"), "{}", err);
     }
 
@@ -1366,9 +1484,11 @@ mod tests {
         // Fuera de rango se rechaza con el campo culpable.
         let err = apply_config_patch(&base, &patch(r#"{"engine":{"threads":0}}"#)).unwrap_err();
         assert!(err.contains("engine.threads"), "{}", err);
-        let err = apply_config_patch(&base, &patch(r#"{"generation":{"temperature":9.0}}"#)).unwrap_err();
+        let err =
+            apply_config_patch(&base, &patch(r#"{"generation":{"temperature":9.0}}"#)).unwrap_err();
         assert!(err.contains("generation.temperature"), "{}", err);
-        let err = apply_config_patch(&base, &patch(r#"{"notifications":{"enabled":"si"}}"#)).unwrap_err();
+        let err =
+            apply_config_patch(&base, &patch(r#"{"notifications":{"enabled":"si"}}"#)).unwrap_err();
         assert!(err.contains("notifications.enabled"), "{}", err);
         // `threads: null` limpia el override (igual que el handler).
         let next = apply_config_patch(&base, &patch(r#"{"engine":{"threads":null}}"#)).unwrap();
@@ -1378,11 +1498,30 @@ mod tests {
     #[test]
     fn config_patch_speculation_solo_enabled_booleano() {
         let base = cfg_base();
-        let next = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":false}}}"#)).unwrap();
-        assert_eq!(next.engine.speculation.as_ref().map(|s| s.enabled), Some(false));
-        let err = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#)).unwrap_err();
-        assert!(err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"), "{}", err);
-        let err = apply_config_patch(&base, &patch(r#"{"engine":{"speculation":{"enabled":"si"}}}"#)).unwrap_err();
+        let next = apply_config_patch(
+            &base,
+            &patch(r#"{"engine":{"speculation":{"enabled":false}}}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            next.engine.speculation.as_ref().map(|s| s.enabled),
+            Some(false)
+        );
+        let err = apply_config_patch(
+            &base,
+            &patch(r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"),
+            "{}",
+            err
+        );
+        let err = apply_config_patch(
+            &base,
+            &patch(r#"{"engine":{"speculation":{"enabled":"si"}}}"#),
+        )
+        .unwrap_err();
         assert!(err.contains("engine.speculation.enabled"), "{}", err);
     }
 
@@ -1447,7 +1586,8 @@ mod tests {
         assert!(next.client.enabled);
         assert!(!next.lan.enabled);
         // Sub-clave desconocida y tipo erróneo se rechazan con nombre.
-        let err = apply_config_patch(&base, &patch(r#"{"lan":{"enabled":true,"port":1}}"#)).unwrap_err();
+        let err =
+            apply_config_patch(&base, &patch(r#"{"lan":{"enabled":true,"port":1}}"#)).unwrap_err();
         assert!(err.contains("lan.port"), "{}", err);
         let err = apply_config_patch(&base, &patch(r#"{"client":{"enabled":"si"}}"#)).unwrap_err();
         assert!(err.contains("client.enabled"), "{}", err);
@@ -1474,7 +1614,12 @@ mod tests {
             let mut stored = vec![mig_profile("libros", 131072, 6144, flags)];
             let from = if flags.contains(&"--no-mmap") { 1 } else { 0 };
             let touched = migrate_builtin_profiles_from(&mut stored, from);
-            assert_eq!(stored[0].extra_flags, Vec::<String>::new(), "flags={:?}", flags);
+            assert_eq!(
+                stored[0].extra_flags,
+                Vec::<String>::new(),
+                "flags={:?}",
+                flags
+            );
             let _ = touched;
         }
         assert_eq!(PROFILES_VERSION, 5);
@@ -1492,7 +1637,12 @@ mod tests {
     #[test]
     fn mig_v3_canonical_reverted_to_empty() {
         // v3 (`--load-mode none` intacto) → v4 `[]` (seguridad: arranques baratos).
-        let mut stored = vec![mig_profile("libros", 131072, 6144, &["--load-mode", "none"])];
+        let mut stored = vec![mig_profile(
+            "libros",
+            131072,
+            6144,
+            &["--load-mode", "none"],
+        )];
         let touched = migrate_builtin_profiles_from(&mut stored, 3);
         assert_eq!(touched, vec!["libros".to_string()]);
         assert_eq!(stored[0].extra_flags, Vec::<String>::new());
@@ -1564,7 +1714,6 @@ mod tests {
         assert!(back.contains("profiles_version = 5"));
         assert!(!back.contains("--load-mode"));
         let _ = std::fs::remove_dir_all(&dir);
-
     }
 
     #[test]
@@ -1583,7 +1732,6 @@ mod tests {
         assert_eq!(libros.extra_flags, Vec::<String>::new());
         assert_eq!(cfg.profiles_version, 5);
         let _ = std::fs::remove_dir_all(&dir);
-
     }
 
     #[test]
@@ -1654,7 +1802,8 @@ mod tests {
         // Prueba de carga real: TOML viejo (1500) migra a 5400 + campos
         // nuevos; TOML con 900 deliberado queda intacto. Sin env global.
         for (tag, idle, expect_idle) in [("old", 1500u64, 5400u64), ("cust", 900u64, 900u64)] {
-            let dir = std::env::temp_dir().join(format!("lm-eng-proof-{}-{}", tag, std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("lm-eng-proof-{}-{}", tag, std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("LocalMind")).unwrap();
             let toml = format!(
@@ -1690,7 +1839,9 @@ mod tests {
         let roto = "esto no [es TOML = \"valido\"\n[[[";
         std::fs::write(&path, roto).unwrap();
         let store = ConfigStore::load_from_path(&path);
-        let note = store.take_migration_note().expect("un TOML ilegible debe dejar nota");
+        let note = store
+            .take_migration_note()
+            .expect("un TOML ilegible debe dejar nota");
         assert!(note.contains(&path.display().to_string()), "{}", note);
         // Carga: defaults en memoria, archivo corrupto intacto en disco.
         assert_eq!(store.get().profiles_version, PROFILES_VERSION);

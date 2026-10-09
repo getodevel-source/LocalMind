@@ -1558,6 +1558,7 @@
 
           <div class="card-body">
             <div id="error-banner" class="error-banner" role="alert"></div>
+            <div id="update-banner" class="cfg-ok" style="display: none; cursor: pointer;" role="status" onclick="switchTab('settings')"></div>
 
             <div class="field-group">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -2141,6 +2142,28 @@
           </div>
         </div>
 
+        <div class="card" id="cfg-update-card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="settings.updateTitle">Actualización</span>
+            <span class="card-meta" id="cfg-update-meta">–</span>
+          </div>
+          <div class="card-body">
+            <div id="cfg-update-status" class="telemetry-meta" role="status"></div>
+            <div id="model-dl-section-update" style="display: none; margin-top: 6px;">
+              <div class="model-dl-bar"><div id="cfg-update-fill" class="model-dl-fill"></div></div>
+            </div>
+            <div id="cfg-update-error" class="error-banner" role="alert"></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-update-check" onclick="checkUpdate()"><span data-i18n="settings.updateCheck">Buscar actualización</span> <span id="cfg-update-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+              <button class="tool-btn" type="button" id="cfg-update-dl" onclick="downloadUpdate()"><span data-i18n="settings.updateDownload">Descargar</span></button>
+              <button class="tool-btn" type="button" id="cfg-update-cancel" onclick="cancelUpdate()"><span data-i18n="settings.updateCancel">Cancelar</span></button>
+            </div>
+            <label class="cfg-check" style="margin-top: 6px;"><input type="checkbox" id="cfg-update-startup" onchange="saveUpdateCfg()"> <span data-i18n="settings.updateStartup">Comprobar al arrancar</span></label>
+            <div class="profile-hint" data-i18n="settings.updateHint">La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.</div>
+            <div id="cfg-update-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+          </div>
+        </div>
+
         <div class="card" id="cfg-unavailable-card" style="display: none;">
           <div class="card-body">
             <div class="empty-state" data-i18n="settings.needsNew">Requiere la versión nueva del motor</div>
@@ -2397,6 +2420,19 @@
         'settings.clientSave': 'Guardar remoto',
         'settings.clientOk': 'Remoto OK',
         'settings.saving': 'Guardando…',
+        'settings.updateTitle': 'Actualización',
+        'settings.updateCheck': 'Buscar actualización',
+        'settings.updateDownload': 'Descargar',
+        'settings.updateCancel': 'Cancelar',
+        'settings.updateStartup': 'Comprobar al arrancar',
+        'settings.updateHint': 'La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.',
+        'settings.updateIdle': 'Al día (v{cur}).',
+        'settings.updateAvailable': 'Disponible OMNI {ver}: pulsa Descargar.',
+        'settings.updateDownloading': 'Descargando OMNI {ver}… {pct}%.',
+        'settings.updateReady': 'OMNI {ver} listo: reinicia la app para instalarlo.',
+        'settings.updateChecking': 'Comprobando…',
+        'settings.updateError': 'No se pudo actualizar: {msg}',
+        'settings.logFailed': 'El log en disco no se escribe (disco lleno o sin permiso): los errores pueden perderse.',
         'unlock.title': 'Desbloquear',
         'unlock.sub': 'Esta UI está en red: ingresa la clave del Servidor.',
         'unlock.go': 'Entrar',
@@ -2632,6 +2668,19 @@
         'settings.clientSave': 'Save remote',
         'settings.clientOk': 'Remote OK',
         'settings.saving': 'Saving…',
+        'settings.updateTitle': 'Update',
+        'settings.updateCheck': 'Check for update',
+        'settings.updateDownload': 'Download',
+        'settings.updateCancel': 'Cancel',
+        'settings.updateStartup': 'Check on startup',
+        'settings.updateHint': 'The update installs when you restart the app; your models and settings are kept.',
+        'settings.updateIdle': 'Up to date (v{cur}).',
+        'settings.updateAvailable': 'OMNI {ver} available: press Download.',
+        'settings.updateDownloading': 'Downloading OMNI {ver}… {pct}%.',
+        'settings.updateReady': 'OMNI {ver} ready: restart the app to install it.',
+        'settings.updateChecking': 'Checking…',
+        'settings.updateError': 'Could not update: {msg}',
+        'settings.logFailed': 'Disk log is not being written (disk full or no permission): errors may be lost.',
         'unlock.title': 'Unlock',
         'unlock.sub': 'This UI is on the network: enter the Server key.',
         'unlock.go': 'Enter',
@@ -3491,7 +3540,8 @@
       setCheck('cfg-notif-ready', notif.on_ready === true);
       setCheck('cfg-notif-failure', notif.on_failure === true);
       setCheck('cfg-notif-autostop', notif.on_autostop === true);
-      // Read-only guardrails: shown from GET /api/config (or TOML); never POSTed.
+      const upd = (cfg && cfg.update) || {};
+      setCheck('cfg-update-startup', upd.check_on_startup !== false);
       const setT = (id, v) => {
         const el = document.getElementById(id);
         if (el) el.textContent = v;
@@ -3860,6 +3910,150 @@
       }
     }
 
+    /* ---------- Actualización automática (Fase Prod): estado + chequeo +
+       descarga verificada + instalación al reiniciar. Poll de 2 s solo
+       mientras hay operación en curso; la tarjeta vive en Ajustes y el
+       banner de Panel avisa con la versión disponible. */
+    let updatePollTimer = 0;
+    let updateLastState = '';
+
+    async function fetchUpdate() {
+      try {
+        const res = await fetch('/api/update');
+        if (res.status === 404 || res.status === 501) return { missing: true };
+        if (res.ok) return await res.json();
+      } catch (e) {
+        return { missing: true };
+      }
+      return null;
+    }
+
+    function renderUpdate(st) {
+      if (!st || st.missing) {
+        const card = document.getElementById('cfg-update-card');
+        if (card) card.style.display = 'none';
+        return;
+      }
+      updateLastState = st.state || '';
+      const meta = document.getElementById('cfg-update-meta');
+      const status = document.getElementById('cfg-update-status');
+      const fill = document.getElementById('cfg-update-fill');
+      const bar = document.getElementById('model-dl-section-update');
+      const dlBtn = document.getElementById('cfg-update-dl');
+      const cancelBtn = document.getElementById('cfg-update-cancel');
+      const cur = (st.current || '').trim();
+      const ver = (st.latest || '').trim();
+      if (meta) meta.textContent = ver && ver !== cur ? ('v' + cur + ' → ' + ver) : ('v' + (cur || '?'));
+      let text = '';
+      if (st.state === 'available') text = T('settings.updateAvailable', { ver });
+      else if (st.state === 'downloading') text = T('settings.updateDownloading', { ver, pct: (st.percent != null ? st.percent : 0) });
+      else if (st.state === 'ready') text = T('settings.updateReady', { ver });
+      else if (st.state === 'checking') text = T('settings.updateChecking');
+      else if (st.state === 'error') text = T('settings.updateError', { msg: st.error || ('HTTP ?') });
+      else text = T('settings.updateIdle', { cur: cur || '?' });
+      if (status) status.textContent = text;
+      const pct = (typeof st.percent === 'number' && isFinite(st.percent)) ? Math.max(0, Math.min(100, st.percent)) : 0;
+      if (fill) fill.style.width = pct + '%';
+      if (bar) bar.style.display = (st.state === 'downloading') ? '' : 'none';
+      if (dlBtn) dlBtn.disabled = (st.state !== 'available');
+      if (cancelBtn) cancelBtn.disabled = !(st.state === 'downloading' || st.state === 'checking');
+      const banner = document.getElementById('update-banner');
+      if (banner) {
+        const show = (st.state === 'available' || st.state === 'ready');
+        banner.style.display = show ? '' : 'none';
+        if (show) banner.textContent = (st.state === 'ready')
+          ? T('settings.updateReady', { ver })
+          : T('settings.updateAvailable', { ver });
+      }
+      // Poll corto solo en curso; al terminar vuelve a estado quieto.
+      const busy = (st.state === 'checking' || st.state === 'downloading');
+      if (busy && !updatePollTimer) {
+        updatePollTimer = setInterval(async () => {
+          const s = await fetchUpdate();
+          if (s && !s.missing) {
+            renderUpdate(s);
+            if (s.state !== 'checking' && s.state !== 'downloading') {
+              clearInterval(updatePollTimer);
+              updatePollTimer = 0;
+            }
+          }
+        }, 2000);
+      } else if (!busy && updatePollTimer) {
+        clearInterval(updatePollTimer);
+        updatePollTimer = 0;
+      }
+    }
+
+    async function refreshUpdate() {
+      const st = await fetchUpdate();
+      if (st) renderUpdate(st);
+      try {
+        const cfg = await api.getAppConfig();
+        const ck = document.getElementById('cfg-update-startup');
+        if (ck && cfg && !cfg.missing && cfg.update) ck.checked = cfg.update.check_on_startup !== false;
+      } catch (e) {}
+    }
+
+    async function checkUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      cfgSetSaving('cfg-update-check', 'cfg-update-spinner', true);
+      try {
+        const res = await fetch('/api/update/check', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          if (data) renderUpdate(data);
+          await refreshUpdate();
+          return;
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      } finally {
+        cfgSetSaving('cfg-update-check', 'cfg-update-spinner', false);
+      }
+    }
+
+    async function downloadUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      try {
+        const res = await fetch('/api/update/download', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          if (data) renderUpdate(data);
+          return;
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    async function cancelUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      try {
+        const res = await fetch('/api/update/cancel', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok && data) renderUpdate(data);
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    async function saveUpdateCfg() {
+      const ck = document.getElementById('cfg-update-startup');
+      const on = ck ? !!ck.checked : true;
+      try {
+        const res = await api.postAppConfig({ update: { check_on_startup: on } });
+        if (res && res.ok) cfgFlashOk('cfg-update-ok');
+        else cfgInlineError('cfg-update-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
     /* ---------- Unlock (Fase B4): la UI en red llega sin cookie de sesión.
        Si /api/status da 401, se muestra el overlay una vez; el desbloqueo
        canjea la clave por cookie vía POST /api/unlock y refresca. */
@@ -3935,6 +4129,8 @@
       } catch (e) {
         hideSettingsMissing('config');
       }
+      // Update: GET /api/update (card propia; 404/501 → ocultar).
+      try { await refreshUpdate(); } catch (e) {}
     }
 
     function formatSizeGb(m) {
@@ -4582,6 +4778,13 @@
         const v = await api.getVersion();
         const build = v && typeof v.engine_build === 'string' ? v.engine_build.trim() : '';
         if (build) showEngine(build, (typeof v.engine_path === 'string' && v.engine_path) || '--');
+        if (v && v.log_ok === false) {
+          const errBanner = document.getElementById('error-banner');
+          if (errBanner && !errBanner.textContent) {
+            errBanner.textContent = T('settings.logFailed');
+            errBanner.style.display = 'block';
+          }
+        }
         const ver = v && (typeof v.app === 'string' && v.app ? v.app : (typeof v.version === 'string' && v.version ? v.version : ''));
         if (ver) {
           badge.textContent = 'v' + ver;
@@ -5243,6 +5446,8 @@
             if (cfg && !cfg.missing) syncRoleSwitcher(roleFromCfg(cfg));
           }).catch(() => {});
         } catch (e) {}
+        // Banner de update en el Panel desde el arranque (sin abrir Ajustes).
+        try { refreshUpdate().catch(() => {}); } catch (e) {}
       }
       const modelSel = document.getElementById('model-select');
       if (modelSel) modelSel.addEventListener('change', () => updateModelBadges(lastModelsCache));

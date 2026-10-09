@@ -217,8 +217,9 @@ pub fn is_loopback_origin(origin: &str) -> bool {
             }
         }
     };
-    let host_ok =
-        host.eq_ignore_ascii_case("127.0.0.1") || host.eq_ignore_ascii_case("localhost") || host == "::1";
+    let host_ok = host.eq_ignore_ascii_case("127.0.0.1")
+        || host.eq_ignore_ascii_case("localhost")
+        || host == "::1";
     if !host_ok {
         return false;
     }

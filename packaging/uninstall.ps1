@@ -1,8 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Uninstall OMNI (keeps models/ unless -RemoveModels).
-
+  Uninstall OMNI (keeps models/ and user data unless asked).
 .DESCRIPTION
   Removes the installed runtime files and Start Menu shortcuts. A running
   OMNI.exe from the target dir blocks the uninstall unless -Force is
@@ -23,15 +22,18 @@
 .PARAMETER RemoveModels
   Also delete models/ (weights, ~14 GB). Off by default.
 
+.PARAMETER RemoveData
+  Also delete %APPDATA%\LocalMind (config, gateway key, tokens, logs,
+  usage). Off by default: reinstalls keep identity and settings.
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File packaging/uninstall.ps1
 #>
-[CmdletBinding()]
 param(
   [string]$TargetDir = (Join-Path $env:LOCALAPPDATA 'Programs\OMNI'),
   [string]$ShortcutDir = (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\OMNI'),
   [switch]$Force,
-  [switch]$RemoveModels
+  [switch]$RemoveModels,
+  [switch]$RemoveData
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,4 +76,12 @@ if ($RemoveModels) {
 if (-not (Test-Path (Join-Path $TargetDir 'models')) -and @(Get-ChildItem $TargetDir -Force).Count -eq 0) {
   Remove-Item $TargetDir -Force
   Write-Host "Removed empty $TargetDir"
+}
+# User data (identity + secrets): only with explicit consent.
+$DataDir = Join-Path $env:APPDATA 'LocalMind'
+if ($RemoveData -and (Test-Path $DataDir)) {
+  Remove-Item $DataDir -Recurse -Force
+  Write-Host "Removed user data: $DataDir"
+} elseif (Test-Path $DataDir) {
+  Write-Host "Preserved user data: $DataDir (re-run with -RemoveData to wipe config, keys and logs)."
 }

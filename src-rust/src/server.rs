@@ -124,8 +124,8 @@ fn parse_start_body(body: &str) -> Result<StartRequest, String> {
 /// `/api/profiles/save` sí aplica. Reusa los mismos predicados y nombra el
 /// campo culpable, en el mismo formato `campo inválido: <campo>`.
 fn parse_profiles_import(body: &str) -> Result<Vec<crate::config::HardwareProfile>, String> {
-    let imported: Vec<crate::config::HardwareProfile> = serde_json::from_str(body)
-        .map_err(|e| format!("JSON inválido: {}", e))?;
+    let imported: Vec<crate::config::HardwareProfile> =
+        serde_json::from_str(body).map_err(|e| format!("JSON inválido: {}", e))?;
     if imported.is_empty() {
         return Err("La lista de perfiles está vacía".to_string());
     }
@@ -199,11 +199,20 @@ fn app_config_json(c: &crate::config::AppConfig) -> String {
         "remote": {
             "url": c.remote.url,
         },
+        "update": {
+            "feed": c.update.feed,
+            "check_on_startup": c.update.check_on_startup,
+            "auto_download": c.update.auto_download,
+        },
     })
     .to_string()
 }
 
-fn settings_json(cfg: &crate::config::AppConfig, config_path: &std::path::Path, http_port: u16) -> String {
+fn settings_json(
+    cfg: &crate::config::AppConfig,
+    config_path: &std::path::Path,
+    http_port: u16,
+) -> String {
     let body = serde_json::json!({
         "last": cfg.last,
         "config_path": config_path.to_string_lossy(),
@@ -261,7 +270,10 @@ fn parse_metrics(text: &str) -> Metrics {
         set!(cached_tot, "llamacpp:prompt_tokens_cached_total");
         set!(requests_processing, "llamacpp:requests_processing");
         set!(draft_tot, "llamacpp:spec_decode_num_draft_tokens_total");
-        set!(accepted_tot, "llamacpp:spec_decode_num_accepted_tokens_total");
+        set!(
+            accepted_tot,
+            "llamacpp:spec_decode_num_accepted_tokens_total"
+        );
     }
     m
 }
@@ -271,7 +283,6 @@ fn parse_metrics(text: &str) -> Metrics {
 fn load_asset(base_dir: &std::path::Path, name: &str) -> Option<Vec<u8>> {
     std::fs::read(base_dir.join(name)).ok()
 }
-
 
 /// Mapea un `reasoning_effort` al vocabulario de la plantilla Qwen
 /// (`low`/`medium`/`xhigh`); `None` = desconocido → el llamador elimina el campo.
@@ -289,7 +300,6 @@ fn normalize_reasoning_effort(v: &str) -> Option<String> {
         None
     }
 }
-
 
 /// Preparar el payload de `POST /v1/chat/completions` en UN solo parseo
 /// (auditoría de rendimiento): equivale byte por byte al chain
@@ -317,7 +327,10 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
                 .and_then(normalize_reasoning_effort)
             {
                 Some(mapped) => {
-                    obj.insert("reasoning_effort".to_string(), serde_json::Value::String(mapped));
+                    obj.insert(
+                        "reasoning_effort".to_string(),
+                        serde_json::Value::String(mapped),
+                    );
                 }
                 None => {
                     obj.remove("reasoning_effort");
@@ -325,7 +338,10 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
             }
         }
         if !served.is_empty() && obj.get("model").and_then(|m| m.as_str()).is_some() {
-            obj.insert("model".to_string(), serde_json::Value::String(served.to_string()));
+            obj.insert(
+                "model".to_string(),
+                serde_json::Value::String(served.to_string()),
+            );
         }
         if stream_req {
             if obj.get("stream_options").is_none() {
@@ -433,7 +449,11 @@ impl HttpServer {
             "[LocalMind] Gateway HTTP en {}:{} (modo LAN {}).",
             bind_host,
             port,
-            if lan_enabled { "activado" } else { "desactivado" }
+            if lan_enabled {
+                "activado"
+            } else {
+                "desactivado"
+            }
         ));
         thread::spawn(move || {
             for req in srv_clone.incoming_requests() {
@@ -508,7 +528,27 @@ fn handle_request(
     // (solo loopback).
     let peer_ip = req.remote_addr().map(|a| a.ip());
     if !peer_ip.is_some_and(|ip| crate::meta::peer_permitido(ip, crate::meta::lan_mode())) {
-        let _ = req.respond(json_response_for_origin(403, r#"{"error":"red_no_permitida"}"#.into(), origin_ref));
+        // Trazabilidad de sondeos: IP y origen denegados al log (sin cuerpo).
+        let peer_txt = peer_ip
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "<sin-peer>".to_string());
+        mgr.log_warn(&format!(
+            "[LocalMind] Conexión denegada de {} (origen {:?}, {} {}) en modo {}.",
+            peer_txt,
+            origin_ref.unwrap_or("-"),
+            method,
+            url.split('?').next().unwrap_or(&url),
+            if crate::meta::lan_mode() {
+                "LAN"
+            } else {
+                "local"
+            },
+        ));
+        let _ = req.respond(json_response_for_origin(
+            403,
+            r#"{"error":"red_no_permitida"}"#.into(),
+            origin_ref,
+        ));
         return;
     }
     // La cookie de sesión (`lm_key`) solo se fija a loopback (diseño B4,
@@ -535,12 +575,17 @@ fn handle_request(
         } else {
             include_str!("../ui_fallback.html").to_string()
         };
-        let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
+        let ct =
+            Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
         let mut resp = Response::from_string(html);
         resp.add_header(ct);
         if peer_loopback {
             let Some(cookie) = session_cookie_header(&gateway_key) else {
-                let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                let _ = req.respond(json_response_for_origin(
+                    500,
+                    r#"{"error":"clave de sesión inválida"}"#.into(),
+                    origin_ref,
+                ));
                 return;
             };
             resp.add_header(cookie);
@@ -557,7 +602,11 @@ fn handle_request(
             let bytes = match load_asset(&base_dir, file) {
                 Some(b) => b,
                 None => {
-                    let _ = req.respond(json_response_for_origin(404, "{\"error\":\"not_found\"}".into(), origin_ref));
+                    let _ = req.respond(json_response_for_origin(
+                        404,
+                        "{\"error\":\"not_found\"}".into(),
+                        origin_ref,
+                    ));
                     return;
                 }
             };
@@ -566,7 +615,11 @@ fn handle_request(
             resp.add_header(ct);
             if peer_loopback {
                 let Some(cookie) = session_cookie_header(&gateway_key) else {
-                    let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+                    let _ = req.respond(json_response_for_origin(
+                        500,
+                        r#"{"error":"clave de sesión inválida"}"#.into(),
+                        origin_ref,
+                    ));
                     return;
                 };
                 resp.add_header(cookie);
@@ -588,22 +641,38 @@ fn handle_request(
             .ok()
             .and_then(|v| v.get("key").and_then(|k| k.as_str()).map(str::to_string))
             .unwrap_or_default();
+        if !crate::auth::unlock_allowed() {
+            // 429 con el mismo cuerpo opaco: no distingue «bloqueado» de
+            // «clave mala» más que por el código (el atacante ya sabe que
+            // existe el endpoint; lo que se frena es la cadencia).
+            let _ = req.respond(json_response_for_origin(
+                429,
+                r#"{"error":"unauthorized"}"#.into(),
+                origin_ref,
+            ));
+            return;
+        }
         if !crate::auth::key_matches(&candidate, &gateway_key) {
+            crate::auth::unlock_failed();
+            // Retardo fijo: la comparación ya es constante, pero el 401
+            // inmediato permite ~miles de intentos/s en LAN; 500 ms lo baja
+            // a ~2/s por conexión sin molestar al dueño (un intento real).
+            std::thread::sleep(std::time::Duration::from_millis(500));
             let _ = req.respond(unauthorized_json_for_origin(origin_ref));
             return;
         }
+        crate::auth::unlock_ok();
         let Some(cookie) = session_cookie_header(&gateway_key) else {
-            let _ = req.respond(json_response_for_origin(500, r#"{"error":"clave de sesión inválida"}"#.into(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                r#"{"error":"clave de sesión inválida"}"#.into(),
+                origin_ref,
+            ));
             return;
         };
         let mut resp = json_response_for_origin(200, r#"{"status":"ok"}"#.to_string(), origin_ref);
         resp.add_header(cookie);
         let _ = req.respond(resp);
-        return;
-    }
-    // Clave local (D-7): `/v1/*` y `/api/*` exigen Bearer, x-api-key o cookie.
-    if !is_public_path(&method, &url) && !crate::auth::is_authorized(req.headers(), &gateway_key) {
-        let _ = req.respond(unauthorized_json_for_origin(origin_ref));
         return;
     }
 
@@ -641,13 +710,204 @@ fn handle_request(
     // del motor salen `null` y la respuesta sigue siendo 200.
     if method == "GET" && url == "/api/version" {
         let info = crate::meta::engine_info(&base_dir);
+        let upd = crate::update::update_snapshot();
         let body = serde_json::json!({
             "app": env!("CARGO_PKG_VERSION"),
             "engine_build": info.build,
             "engine_commit": info.commit,
             "engine_path": info.path,
+            "log_ok": crate::filelog::log_ok(),
+            "update": {
+                "state": upd.state,
+                "latest": upd.latest,
+                "pending": crate::update::pending_update().is_some(),
+            },
         });
         let _ = req.respond(json_response_for_origin(200, body.to_string(), origin_ref));
+        return;
+    }
+
+    // Actualización automática (Fase Prod): estado + chequeo + descarga +
+    // cancelación. La instalación ocurre al reiniciar (main.rs aplica el
+    // staging pendiente al salir). Todas exigen clave (no son públicas).
+    if method == "GET" && (url == "/api/update" || url.starts_with("/api/update?")) {
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::update::update_snapshot().json(),
+            origin_ref,
+        ));
+        return;
+    }
+
+    if method == "POST" && url == "/api/update/check" {
+        let _ = req.as_reader().read_to_string(&mut String::new());
+        if crate::update::update_busy() {
+            let _ = req.respond(json_response_for_origin(
+                409,
+                serde_json::json!({ "error": "Ya hay una operación de actualización en curso" })
+                    .to_string(),
+                origin_ref,
+            ));
+            return;
+        }
+        let feed = cfg.get().update.feed.clone();
+        // Logger con niveles: `[ERROR]`/`[WARN]` a disco con nivel (G5), el
+        // resto como INFO. Misma forma en `/api/update/download` abajo.
+        let logger: std::sync::Arc<dyn Fn(String) + Send + Sync> = {
+            let m = Arc::clone(&mgr);
+            std::sync::Arc::new(move |line: String| {
+                if line.contains("[ERROR]") {
+                    m.log_error(&line);
+                } else if line.contains("[WARN]") {
+                    m.log_warn(&line);
+                } else {
+                    m.log(&line);
+                }
+            })
+        };
+        crate::update::spawn_check(feed, false, logger);
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::update::update_snapshot().json(),
+            origin_ref,
+        ));
+        return;
+    }
+
+    if method == "POST" && url == "/api/update/download" {
+        let mut body = String::new();
+        let _ = req.as_reader().read_to_string(&mut body);
+        if crate::update::update_busy() {
+            let _ = req.respond(json_response_for_origin(
+                409,
+                serde_json::json!({ "error": "Ya hay una operación de actualización en curso" })
+                    .to_string(),
+                origin_ref,
+            ));
+            return;
+        }
+        let snap = crate::update::update_snapshot();
+        if snap.state != "available" || snap.latest.is_empty() {
+            let _ = req.respond(json_response_for_origin(409, serde_json::json!({ "error": "No hay actualización disponible: comprueba primero" }).to_string(), origin_ref));
+            return;
+        }
+        // Re-resolver el asset contra el canal (el estado `available` no
+        // guarda la URL: evita persistir URLs firmadas y revalida el checksum).
+        let feed = cfg.get().update.feed.clone();
+        let repo = crate::update::feed_repo(&feed)
+            .unwrap_or_else(|| crate::update::DEFAULT_FEED_REPO.to_string());
+        let api_base = crate::update::releases_api_base();
+        let current = env!("CARGO_PKG_VERSION").to_string();
+        let url = crate::update::latest_url(&repo, &api_base);
+        let latest_raw = match ureq::get(&url)
+            .set("User-Agent", &format!("OMNI/{}", current))
+            .set("Accept", "application/vnd.github+json")
+            .timeout(std::time::Duration::from_secs(20))
+            .call()
+        {
+            Ok(r) => match r.into_string() {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = req.respond(json_response_for_origin(502, serde_json::json!({ "error": format!("Error al leer el canal de actualizaciones: {}", e) }).to_string(), origin_ref));
+                    return;
+                }
+            },
+            Err(ureq::Error::Status(code, _)) => {
+                let _ = req.respond(json_response_for_origin(502, serde_json::json!({ "error": format!("El canal de actualizaciones devolvió {}", code) }).to_string(), origin_ref));
+                return;
+            }
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(502, serde_json::json!({ "error": format!("Error de red con el canal de actualizaciones: {}", e) }).to_string(), origin_ref));
+                return;
+            }
+        };
+        let v: serde_json::Value = match serde_json::from_str(&latest_raw) {
+            Ok(v) => v,
+            Err(_) => {
+                let _ = req.respond(json_response_for_origin(
+                    502,
+                    r#"{"error":"El canal de actualizaciones devolvió datos inválidos"}"#
+                        .to_string(),
+                    origin_ref,
+                ));
+                return;
+            }
+        };
+        let body_text = v.get("body").and_then(|b| b.as_str()).unwrap_or("");
+        let assets = v
+            .get("assets")
+            .and_then(|a| a.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut chosen: Option<(String, String, Option<u64>, String)> = None;
+        for a in &assets {
+            let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let durl = a
+                .get("browser_download_url")
+                .and_then(|u| u.as_str())
+                .unwrap_or("");
+            if crate::update::parse_asset_name(name)
+                .map(|(ver, _)| ver)
+                .as_deref()
+                != Some(snap.latest.as_str())
+            {
+                continue;
+            }
+            if durl.is_empty() {
+                continue;
+            }
+            let sum = crate::update::find_checksum(body_text, name).unwrap_or_default();
+            if sum.is_empty() {
+                continue;
+            }
+            let size = a.get("size").and_then(|s| s.as_u64()).filter(|n| *n > 0);
+            chosen = Some((name.to_string(), durl.to_string(), size, sum));
+            break;
+        }
+        let Some((aname, aurl, asize, asum)) = chosen else {
+            let _ = req.respond(json_response_for_origin(
+                502,
+                r#"{"error":"La actualización ya no ofrece paquete verificado"}"#.to_string(),
+                origin_ref,
+            ));
+            return;
+        };
+        let notes = v
+            .get("body")
+            .and_then(|b| b.as_str())
+            .unwrap_or("")
+            .lines()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let logger: std::sync::Arc<dyn Fn(String) + Send + Sync> = {
+            let m = Arc::clone(&mgr);
+            std::sync::Arc::new(move |line: String| {
+                if line.contains("[ERROR]") {
+                    m.log_error(&line);
+                } else if line.contains("[WARN]") {
+                    m.log_warn(&line);
+                } else {
+                    m.log(&line);
+                }
+            })
+        };
+        crate::update::spawn_download(aname, aurl, snap.latest.clone(), asize, asum, notes, logger);
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::update::update_snapshot().json(),
+            origin_ref,
+        ));
+        return;
+    }
+
+    if method == "POST" && url == "/api/update/cancel" {
+        let _ = req.as_reader().read_to_string(&mut String::new());
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::update::update_cancel().json(),
+            origin_ref,
+        ));
         return;
     }
 
@@ -655,7 +915,8 @@ fn handle_request(
     if method == "GET" && url == "/api/logs/export" {
         let lines = mgr.get_recent_logs();
         let mut resp = Response::from_string(lines.join("\n")).with_status_code(StatusCode(200));
-        let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..]).unwrap();
+        let ct =
+            Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..]).unwrap();
         resp.add_header(ct);
         let stamp = crate::meta::utc_stamp_now();
         let cd = Header::from_bytes(
@@ -687,7 +948,11 @@ fn handle_request(
         let profiles = crate::config::get_hardware_profiles(&cfg.get());
         let json = serde_json::to_string_pretty(&profiles).unwrap_or_else(|_| "[]".to_string());
         let mut resp = json_response_for_origin(200, json, origin_ref);
-        let cd = Header::from_bytes(&b"Content-Disposition"[..], &b"attachment; filename=\"localmind_profiles.json\""[..]).unwrap();
+        let cd = Header::from_bytes(
+            &b"Content-Disposition"[..],
+            &b"attachment; filename=\"localmind_profiles.json\""[..],
+        )
+        .unwrap();
         resp.add_header(cd);
         let _ = req.respond(resp);
         return;
@@ -702,10 +967,18 @@ fn handle_request(
                     c.profiles = imported;
                 });
                 let _ = cfg.save();
-                let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok","message":"Perfiles actualizados"}"#.into(), origin_ref));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    r#"{"status":"ok","message":"Perfiles actualizados"}"#.into(),
+                    origin_ref,
+                ));
             }
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin_ref));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin_ref,
+                ));
             }
         }
         return;
@@ -720,7 +993,11 @@ fn handle_request(
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin_ref));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin_ref,
+                ));
                 return;
             }
         };
@@ -753,12 +1030,20 @@ fn handle_request(
             Some(j) => match j.as_str() {
                 Some(s) if s.len() <= 2000 => s.to_string(),
                 _ => {
-                    let _ = req.respond(json_response_for_origin(400, bad("description"), origin_ref));
+                    let _ = req.respond(json_response_for_origin(
+                        400,
+                        bad("description"),
+                        origin_ref,
+                    ));
                     return;
                 }
             },
         };
-        let context = match m.get("context").and_then(|j| j.as_u64()).and_then(|n| usize::try_from(n).ok()) {
+        let context = match m
+            .get("context")
+            .and_then(|j| j.as_u64())
+            .and_then(|n| usize::try_from(n).ok())
+        {
             Some(n) if crate::config::profile_context_ok(n) => n,
             _ => {
                 let _ = req.respond(json_response_for_origin(400, bad("context"), origin_ref));
@@ -770,7 +1055,8 @@ fn handle_request(
             Some(j) => match j.as_u64().and_then(|n| usize::try_from(n).ok()) {
                 Some(n) if crate::config::profile_cache_ram_ok(n) => n,
                 _ => {
-                    let _ = req.respond(json_response_for_origin(400, bad("cache_ram"), origin_ref));
+                    let _ =
+                        req.respond(json_response_for_origin(400, bad("cache_ram"), origin_ref));
                     return;
                 }
             },
@@ -784,7 +1070,11 @@ fn handle_request(
                         match f.as_str() {
                             Some(s) => out.push(s.to_string()),
                             None => {
-                                let _ = req.respond(json_response_for_origin(400, bad("extra_flags"), origin_ref));
+                                let _ = req.respond(json_response_for_origin(
+                                    400,
+                                    bad("extra_flags"),
+                                    origin_ref,
+                                ));
                                 return;
                             }
                         }
@@ -792,13 +1082,21 @@ fn handle_request(
                     out
                 }
                 None => {
-                    let _ = req.respond(json_response_for_origin(400, bad("extra_flags"), origin_ref));
+                    let _ = req.respond(json_response_for_origin(
+                        400,
+                        bad("extra_flags"),
+                        origin_ref,
+                    ));
                     return;
                 }
             },
         };
         if !crate::config::profile_flags_ok(&extra_flags) {
-            let _ = req.respond(json_response_for_origin(400, bad("extra_flags"), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                bad("extra_flags"),
+                origin_ref,
+            ));
             return;
         }
         let mut next = cfg.get();
@@ -818,7 +1116,12 @@ fn handle_request(
         cfg.update(|c| *c = next.clone());
         if let Err(e) = cfg.save() {
             cfg.update(|c| *c = prev);
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo guardar el perfil: {}", e) }).to_string(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": format!("no se pudo guardar el perfil: {}", e) })
+                    .to_string(),
+                origin_ref,
+            ));
             return;
         }
         mgr.log(&format!("[LocalMind] Perfil '{}' guardado.", id));
@@ -838,23 +1141,40 @@ fn handle_request(
             .and_then(|v| v.get("id").and_then(|j| j.as_str().map(str::to_string)))
             .unwrap_or_default();
         if !crate::config::profile_id_ok(&id) {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"campo inválido: id"}"#.into(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                r#"{"error":"campo inválido: id"}"#.into(),
+                origin_ref,
+            ));
             return;
         }
         let cur = cfg.get();
         if !cur.profiles.iter().any(|p| p.id == id) {
-            let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("perfil desconocido: '{}'", id) }).to_string(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                serde_json::json!({ "error": format!("perfil desconocido: '{}'", id) }).to_string(),
+                origin_ref,
+            ));
             return;
         }
         if cur.profiles.len() <= 1 {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"no se puede eliminar el último perfil"}"#.into(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                r#"{"error":"no se puede eliminar el último perfil"}"#.into(),
+                origin_ref,
+            ));
             return;
         }
         // En uso = motor en curso con ese perfil, o arranque futuro (`last`).
         let live = mgr.get_status().profile;
         let boot = cur.last.profile.clone().unwrap_or_default();
         if live == id || boot == id {
-            let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("el perfil '{}' está en uso", id) }).to_string(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                serde_json::json!({ "error": format!("el perfil '{}' está en uso", id) })
+                    .to_string(),
+                origin_ref,
+            ));
             return;
         }
         let mut next = cur.clone();
@@ -862,7 +1182,12 @@ fn handle_request(
         cfg.update(|c| *c = next.clone());
         if let Err(e) = cfg.save() {
             cfg.update(|c| *c = cur);
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo eliminar el perfil: {}", e) }).to_string(), origin_ref));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": format!("no se pudo eliminar el perfil: {}", e) })
+                    .to_string(),
+                origin_ref,
+            ));
             return;
         }
         mgr.log(&format!("[LocalMind] Perfil '{}' eliminado.", id));
@@ -883,28 +1208,46 @@ fn handle_request(
             let p = std::path::Path::new(&src);
             match mgr.import_model_from_path(p) {
                 Ok(filename) => {
-                    let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "status": "ok", "filename": filename }).to_string(), origin.as_deref()));
+                    let _ = req.respond(json_response_for_origin(
+                        200,
+                        serde_json::json!({ "status": "ok", "filename": filename }).to_string(),
+                        origin.as_deref(),
+                    ));
                 }
                 Err(e) => {
-                    let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+                    let _ = req.respond(json_response_for_origin(
+                        400,
+                        serde_json::json!({ "error": e }).to_string(),
+                        origin.as_deref(),
+                    ));
                 }
             }
         } else {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"Falta el parámetro 'path'"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                r#"{"error":"Falta el parámetro 'path'"}"#.into(),
+                origin.as_deref(),
+            ));
         }
         return;
     }
 
     if method == "POST" && url == "/api/open_models_dir" {
         let p = mgr.models_dir();
-        let _ = std::process::Command::new("explorer.exe")
-            .arg(p)
-            .spawn();
-        let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok"}"#.into(), origin.as_deref()));
+        let _ = std::process::Command::new("explorer.exe").arg(p).spawn();
+        let _ = req.respond(json_response_for_origin(
+            200,
+            r#"{"status":"ok"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
     if method == "GET" && url == "/api/status" {
-        let _ = req.respond(json_response_for_origin(200, status_json(mgr.get_status()), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            status_json(mgr.get_status()),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -922,7 +1265,11 @@ fn handle_request(
     // motor en curso nunca se reconfigura ni se reinicia desde aquí.
     if method == "GET" && url == "/api/config" {
         let c = cfg.get();
-        let _ = req.respond(json_response_for_origin(200, app_config_json(&c), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            app_config_json(&c),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -932,7 +1279,11 @@ fn handle_request(
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
@@ -941,7 +1292,11 @@ fn handle_request(
         let next = match crate::config::apply_config_patch(&cfg.get(), &v) {
             Ok(n) => n,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
@@ -955,14 +1310,22 @@ fn handle_request(
             return;
         }
         mgr.log("[LocalMind] Configuración actualizada (aplica al próximo arranque del motor).");
-        let _ = req.respond(json_response_for_origin(200, app_config_json(&next), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            app_config_json(&next),
+            origin.as_deref(),
+        ));
         return;
     }
 
     if method == "GET" && url == "/api/metrics" {
         let st = mgr.get_status();
         if (st.status != "running" && !st.is_healthy) || st.port == 0 {
-            let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                502,
+                r#"{"error":"engine_down"}"#.into(),
+                origin.as_deref(),
+            ));
             return;
         }
         match ureq::get(&format!("http://127.0.0.1:{}/metrics", st.port))
@@ -985,13 +1348,25 @@ fn handle_request(
                         "spec_draft_tokens": m.draft_tot,
                         "spec_accepted_tokens": m.accepted_tot,
                     });
-                    let _ = req.respond(json_response_for_origin(200, json.to_string(), origin.as_deref()));
+                    let _ = req.respond(json_response_for_origin(
+                        200,
+                        json.to_string(),
+                        origin.as_deref(),
+                    ));
                 } else {
-                    let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_read_failed"}"#.into(), origin.as_deref()));
+                    let _ = req.respond(json_response_for_origin(
+                        502,
+                        r#"{"error":"engine_read_failed"}"#.into(),
+                        origin.as_deref(),
+                    ));
                 }
             }
             Err(_) => {
-                let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    502,
+                    r#"{"error":"engine_down"}"#.into(),
+                    origin.as_deref(),
+                ));
             }
         }
         return;
@@ -1001,7 +1376,11 @@ fn handle_request(
         // Fase B3: en modo Cliente esta PC no computa: arrancar el motor acá
         // sería mentirle a la UI (el cómputo vive en el remoto).
         if cfg.get().client.enabled {
-            let _ = req.respond(json_response_for_origin(409, r#"{"error":"modo_cliente_sin_motor"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                409,
+                r#"{"error":"modo_cliente_sin_motor"}"#.into(),
+                origin.as_deref(),
+            ));
             return;
         }
         let mut body = String::new();
@@ -1009,20 +1388,28 @@ fn handle_request(
         let start_req: StartRequest = match parse_start_body(&body) {
             Ok(r) => r,
             Err(e) => {
-                let _ = req.respond(
-                    json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()),
-                );
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
         match mgr.start(start_req) {
             Ok(pid) => {
-                let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"starting","pid":{}}}"#, pid), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    format!(r#"{{"status":"starting","pid":{}}}"#, pid),
+                    origin.as_deref(),
+                ));
             }
             Err(e) => {
-                let _ = req.respond(
-                    json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()),
-                );
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
             }
         }
         return;
@@ -1030,7 +1417,11 @@ fn handle_request(
 
     if method == "POST" && url == "/api/stop" {
         mgr.stop();
-        let _ = req.respond(json_response_for_origin(200, r#"{"status":"stopped"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            r#"{"status":"stopped"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1054,7 +1445,11 @@ fn handle_request(
             "port": http_port,
             "pairings": pairings,
         });
-        let _ = req.respond(json_response_for_origin(200, body.to_string(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            body.to_string(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1066,10 +1461,19 @@ fn handle_request(
         match crate::auth::rotate_key() {
             Ok(_) => {
                 mgr.log("[LocalMind] Clave del gateway rotada: reiniciar para que tome efecto en gateway y motor.");
-                let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok","restart_required":true}"#.into(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    r#"{"status":"ok","restart_required":true}"#.into(),
+                    origin.as_deref(),
+                ));
             }
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo rotar la clave: {}", e) }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    500,
+                    serde_json::json!({ "error": format!("no se pudo rotar la clave: {}", e) })
+                        .to_string(),
+                    origin.as_deref(),
+                ));
             }
         }
         return;
@@ -1084,14 +1488,31 @@ fn handle_request(
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
-        let url_in = v.get("url").and_then(|u| u.as_str()).unwrap_or("").trim().to_string();
-        let key_in = v.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
+        let url_in = v
+            .get("url")
+            .and_then(|u| u.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let key_in = v
+            .get("key")
+            .and_then(|k| k.as_str())
+            .unwrap_or("")
+            .to_string();
         if !crate::config::remote_url_ok(&url_in) {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"url remota inválida"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                r#"{"error":"url remota inválida"}"#.into(),
+                origin.as_deref(),
+            ));
             return;
         }
         let base = url_in.trim_end_matches('/').to_string();
@@ -1116,7 +1537,11 @@ fn handle_request(
                     .iter()
                     .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
                     .collect();
-                let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "ok": true, "models": ids }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    serde_json::json!({ "ok": true, "models": ids }).to_string(),
+                    origin.as_deref(),
+                ));
             }
             Err(ureq::Error::Status(code, _)) => {
                 let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "ok": false, "error": format!("el remoto respondió {}", code) }).to_string(), origin.as_deref()));
@@ -1136,13 +1561,26 @@ fn handle_request(
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
-        let url_in = v.get("url").and_then(|u| u.as_str()).unwrap_or("").trim().to_string();
+        let url_in = v
+            .get("url")
+            .and_then(|u| u.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if !crate::config::remote_url_ok(&url_in) {
-            let _ = req.respond(json_response_for_origin(400, r#"{"error":"url remota inválida"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                r#"{"error":"url remota inválida"}"#.into(),
+                origin.as_deref(),
+            ));
             return;
         }
         let prev = cfg.get();
@@ -1154,16 +1592,26 @@ fn handle_request(
         });
         if let Err(e) = cfg.save() {
             cfg.update(|c| *c = prev);
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("no se pudo guardar el remoto: {}", e) }).to_string(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": format!("no se pudo guardar el remoto: {}", e) })
+                    .to_string(),
+                origin.as_deref(),
+            ));
             return;
         }
         mgr.log("[LocalMind] Remoto actualizado (aplica al modo Cliente).");
-        let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "status": "ok", "url": url_in }).to_string(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            serde_json::json!({ "status": "ok", "url": url_in }).to_string(),
+            origin.as_deref(),
+        ));
         return;
     }
 
     if method == "GET" && url == "/api/logs" {
-        let json = serde_json::to_string(&mgr.get_recent_logs()).unwrap_or_else(|_| "[]".to_string());
+        let json =
+            serde_json::to_string(&mgr.get_recent_logs()).unwrap_or_else(|_| "[]".to_string());
         let _ = req.respond(json_response_for_origin(200, json, origin.as_deref()));
         return;
     }
@@ -1173,8 +1621,7 @@ fn handle_request(
         let rx = mgr.subscribe_logs();
         let initial: Vec<LogEvent> = mgr.get_log_events();
         let reader: Box<dyn Read + Send + Sync> = Box::new(sse::EventReader::new(rx, initial));
-        let mut resp =
-            Response::new(StatusCode(200), Vec::new(), reader, None, None);
+        let mut resp = Response::new(StatusCode(200), Vec::new(), reader, None, None);
         for h in sse_headers() {
             resp.add_header(h);
         }
@@ -1192,9 +1639,17 @@ fn handle_request(
 
         if let Some(path) = folder {
             let p_str = path.to_string_lossy().to_string();
-            let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "status": "ok", "path": p_str }).to_string(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                200,
+                serde_json::json!({ "status": "ok", "path": p_str }).to_string(),
+                origin.as_deref(),
+            ));
         } else {
-            let _ = req.respond(json_response_for_origin(200, serde_json::json!({ "status": "cancelled" }).to_string(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                200,
+                serde_json::json!({ "status": "cancelled" }).to_string(),
+                origin.as_deref(),
+            ));
         }
         return;
     }
@@ -1206,17 +1661,37 @@ fn handle_request(
         return;
     }
     if method == "POST" && url == "/api/launch_omp" {
-        handle_launch_compat(req, &mgr, &cfg, "omp", &gateway_key, http_port, origin.clone());
+        handle_launch_compat(
+            req,
+            &mgr,
+            &cfg,
+            "omp",
+            &gateway_key,
+            http_port,
+            origin.clone(),
+        );
         return;
     }
 
     if method == "POST" && url == "/api/launch_pi" {
-        handle_launch_compat(req, &mgr, &cfg, "pi", &gateway_key, http_port, origin.clone());
+        handle_launch_compat(
+            req,
+            &mgr,
+            &cfg,
+            "pi",
+            &gateway_key,
+            http_port,
+            origin.clone(),
+        );
         return;
     }
 
     if method == "GET" && url == "/api/agents" {
-        let _ = req.respond(json_response_for_origin(200, crate::launcher::agents_list_json(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::launcher::agents_list_json(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1230,7 +1705,11 @@ fn handle_request(
             "[LocalMind] Abierto navegador web en http://127.0.0.1:{}",
             port
         ));
-        let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            r#"{"status":"ok"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1240,26 +1719,55 @@ fn handle_request(
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": format!("JSON inválido: {}", e) }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         };
-        let repo = v.get("repo").and_then(|r| r.as_str()).unwrap_or("").trim().to_string();
+        let repo = v
+            .get("repo")
+            .and_then(|r| r.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if let Err(e) = crate::models::check_repo(&repo) {
-            let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                400,
+                serde_json::json!({ "error": e }).to_string(),
+                origin.as_deref(),
+            ));
             return;
         }
-        let revision = v.get("revision").and_then(|r| r.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let revision = v
+            .get("revision")
+            .and_then(|r| r.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         if let Some(r) = revision.as_deref() {
             if let Err(e) = crate::models::check_revision(r) {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         }
-        let only_file = v.get("files").and_then(|f| f.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let only_file = v
+            .get("files")
+            .and_then(|f| f.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         if let Some(f) = only_file.as_deref() {
             if let Err(e) = crate::models::check_rel_path(f) {
-                let _ = req.respond(json_response_for_origin(400, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
                 return;
             }
         }
@@ -1270,10 +1778,18 @@ fn handle_request(
         };
         match crate::models::start_job(models_dir, logger, repo, revision, only_file) {
             Ok(()) => {
-                let _ = req.respond(json_response_for_origin(200, crate::models::job_snapshot().json(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    crate::models::job_snapshot().json(),
+                    origin.as_deref(),
+                ));
             }
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(409, serde_json::json!({ "error": e }).to_string(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    409,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
             }
         }
         return;
@@ -1281,7 +1797,11 @@ fn handle_request(
 
     if method == "POST" && url == "/api/models/download/cancel" {
         let _ = req.as_reader().read_to_string(&mut String::new());
-        let _ = req.respond(json_response_for_origin(200, crate::models::job_cancel().json(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::models::job_cancel().json(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1309,7 +1829,11 @@ fn handle_request(
         let picked = match picked {
             Ok(p) => p,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                let _ = req.respond(json_response_for_origin(200, r#"{"status":"cancelled","reason":"timeout"}"#.into(), origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    r#"{"status":"cancelled","reason":"timeout"}"#.into(),
+                    origin.as_deref(),
+                ));
                 return;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
@@ -1319,20 +1843,31 @@ fn handle_request(
             Some(files) if files.is_empty() => r#"{"status":"cancelled"}"#.to_string(),
             Some(files) => match crate::models::copy_picked(&models_dir, &files, overwrite) {
                 Ok(names) => {
-                    mgr.log(&format!("[LocalMind] Modelos importados: {}", names.join(", ")));
+                    mgr.log(&format!(
+                        "[LocalMind] Modelos importados: {}",
+                        names.join(", ")
+                    ));
                     serde_json::json!({ "status": "ok", "files": names }).to_string()
                 }
                 Err(e) => serde_json::json!({ "error": e }).to_string(),
             },
         };
-        let code = if body_out.contains("\"error\"") { 400 } else { 200 };
+        let code = if body_out.contains("\"error\"") {
+            400
+        } else {
+            200
+        };
         let _ = req.respond(json_response_for_origin(code, body_out, origin.as_deref()));
         return;
     }
 
     // Telemetría visible: resumen incremental + últimas líneas (LM-TEL-3).
     if method == "GET" && url == "/api/usage" {
-        let _ = req.respond(json_response_for_origin(200, crate::usage::usage_summary(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::usage::usage_summary(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1352,7 +1887,11 @@ fn handle_request(
             .next()
             .unwrap_or(100)
             .min(500);
-        let _ = req.respond(json_response_for_origin(200, crate::usage::usage_raw(limit), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            crate::usage::usage_raw(limit),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1400,7 +1939,11 @@ fn handle_request(
         return;
     }
 
-    let _ = req.respond(json_response_for_origin(404, "{\"error\":\"not_found\"}".into(), origin.as_deref()));
+    let _ = req.respond(json_response_for_origin(
+        404,
+        "{\"error\":\"not_found\"}".into(),
+        origin.as_deref(),
+    ));
 }
 /// Acción del navegador (misma que `/api/open_browser`): abre la interfaz
 /// web externa en el puerto del motor. El llamador responde `{"status":"ok"}`.
@@ -1457,13 +2000,24 @@ fn handle_launch_generic(
     };
     let mut body = String::new();
     let _ = req.as_reader().read_to_string(&mut body);
-    let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
-    let agent_raw = body_val.get("agent").and_then(|a| a.as_str()).unwrap_or("").to_string();
-    let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
-    let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
+    let body_val =
+        serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
+    let agent_raw = body_val
+        .get("agent")
+        .and_then(|a| a.as_str())
+        .unwrap_or("")
+        .to_string();
+    let req_dir = body_val
+        .get("cwd")
+        .and_then(|d| d.as_str().map(str::to_string));
+    let req_effort = body_val
+        .get("effort")
+        .and_then(|e| e.as_str().map(str::to_string));
     // `task` lo usan `deepseek`/`opencode` (one-shot); para pi/omp/web se
     // ignora. Sin `task` se abre el harness en modo interactivo.
-    let req_task = body_val.get("task").and_then(|t| t.as_str().map(str::to_string));
+    let req_task = body_val
+        .get("task")
+        .and_then(|t| t.as_str().map(str::to_string));
     let id = match crate::launcher::parse_agent_id(&agent_raw) {
         Some(id) => id,
         None => {
@@ -1483,7 +2037,11 @@ fn handle_launch_generic(
             return;
         }
         open_browser_action(&mgr);
-        let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            r#"{"status":"ok"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
 
@@ -1496,13 +2054,18 @@ fn handle_launch_generic(
     match crate::launcher::launch_action_for(id, crate::launcher::deepseek_installed()) {
         crate::launcher::LaunchAction::Web => {
             open_browser_action(&mgr);
-            let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                200,
+                r#"{"status":"ok"}"#.into(),
+                origin.as_deref(),
+            ));
             return;
         }
         crate::launcher::LaunchAction::PendingHarness => {
             let _ = req.respond(json_response_for_origin(
                 501,
-                serde_json::json!({ "error": crate::launcher::deepseek_not_configured_msg() }).to_string(),
+                serde_json::json!({ "error": crate::launcher::deepseek_not_configured_msg() })
+                    .to_string(),
                 origin.as_deref(),
             ));
             return;
@@ -1514,15 +2077,34 @@ fn handle_launch_generic(
     // 409 siempre refleja el estado real del motor de esta instancia.
     // `deepseek`/`opencode` = harnesses reales; `pi`/`omp` = núcleo CLI.
     if id == crate::launcher::AgentId::DeepSeek {
-        launch_deepseek(req, &ctx, req_dir.as_deref(), req_task.as_deref(), origin.as_deref());
+        launch_deepseek(
+            req,
+            &ctx,
+            req_dir.as_deref(),
+            req_task.as_deref(),
+            origin.as_deref(),
+        );
         return;
     }
     if id == crate::launcher::AgentId::OpenCode {
-        launch_opencode(req, &ctx, req_dir.as_deref(), req_task.as_deref(), origin.as_deref());
+        launch_opencode(
+            req,
+            &ctx,
+            req_dir.as_deref(),
+            req_task.as_deref(),
+            origin.as_deref(),
+        );
         return;
     }
     // `pi`/`omp` llegan aquí (el `match` ya resolvió `web` y el 501).
-    launch_cli(req, &ctx, id, req_dir.as_deref(), req_effort.as_deref(), origin.as_deref());
+    launch_cli(
+        req,
+        &ctx,
+        id,
+        req_dir.as_deref(),
+        req_effort.as_deref(),
+        origin.as_deref(),
+    );
 }
 
 /// Reenvíos finos de `/api/launch_omp` y `/api/launch_pi` (UI actual).
@@ -1538,21 +2120,39 @@ fn handle_launch_compat(
 ) {
     let mut body = String::new();
     let _ = req.as_reader().read_to_string(&mut body);
-    let body_val = serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
-    let req_dir = body_val.get("cwd").and_then(|d| d.as_str().map(str::to_string));
-    let req_effort = body_val.get("effort").and_then(|e| e.as_str().map(str::to_string));
+    let body_val =
+        serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
+    let req_dir = body_val
+        .get("cwd")
+        .and_then(|d| d.as_str().map(str::to_string));
+    let req_effort = body_val
+        .get("effort")
+        .and_then(|e| e.as_str().map(str::to_string));
     let id = match crate::launcher::parse_agent_id(agent) {
         Some(id) => id,
         None => {
             let _ = req.respond(json_response_for_origin(
                 400,
-                serde_json::json!({ "error": format!("Agente desconocido: '{}'.", agent) }).to_string(),
+                serde_json::json!({ "error": format!("Agente desconocido: '{}'.", agent) })
+                    .to_string(),
                 origin.as_deref(),
             ));
             return;
         }
     };
-    launch_cli(req, &LaunchCtx { mgr, cfg, gateway_key, http_port }, id, req_dir.as_deref(), req_effort.as_deref(), origin.as_deref());
+    launch_cli(
+        req,
+        &LaunchCtx {
+            mgr,
+            cfg,
+            gateway_key,
+            http_port,
+        },
+        id,
+        req_dir.as_deref(),
+        req_effort.as_deref(),
+        origin.as_deref(),
+    );
 }
 
 /// Helpers de spawn de terminal con verificación + fallback (`wt` → `cmd`).
@@ -1585,11 +2185,7 @@ fn cmd_start_command(cmd_str: &str) -> std::process::Command {
 /// el remoto responde.
 fn remote_status_target(body: &str) -> (String, usize) {
     let v: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
-    let model = v
-        .get("model")
-        .and_then(|m| m.as_str())
-        .unwrap_or("")
-        .trim();
+    let model = v.get("model").and_then(|m| m.as_str()).unwrap_or("").trim();
     let stem = model
         .strip_suffix(".gguf")
         .or_else(|| model.strip_suffix(".GGUF"))
@@ -1637,7 +2233,9 @@ fn resolve_launch_target(
                 )
             })?;
         let (model_id, context) = remote_status_target(&body);
-        return Ok(crate::launcher::LlmTarget::remote(&root, &key, &model_id, context));
+        return Ok(crate::launcher::LlmTarget::remote(
+            &root, &key, &model_id, context,
+        ));
     }
     if !crate::agents::engine_live(st) {
         return Err(crate::agents::engine_down_error(st));
@@ -1670,7 +2268,12 @@ fn launch_cli(
     let mgr = ctx.mgr;
     // Destino LLM (Fase UX-Guest): Oráculo = gateway local con motor vivo;
     // Guest = Oráculo remoto. Los 409 históricos salen del resolver.
-    let target = match resolve_launch_target(&ctx.cfg.get(), &mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+    let target = match resolve_launch_target(
+        &ctx.cfg.get(),
+        &mgr.get_status(),
+        ctx.gateway_key,
+        ctx.http_port,
+    ) {
         Ok(t) => t,
         Err(e) => {
             let _ = req.respond(json_response_for_origin(409, e, origin));
@@ -1689,7 +2292,8 @@ fn launch_cli(
         crate::launcher::AgentId::Web => {
             let _ = req.respond(json_response_for_origin(
                 400,
-                serde_json::json!({ "error": "El agente web no usa este lanzamiento." }).to_string(),
+                serde_json::json!({ "error": "El agente web no usa este lanzamiento." })
+                    .to_string(),
                 origin,
             ));
             return;
@@ -1697,10 +2301,20 @@ fn launch_cli(
     };
     let cli_model = crate::launcher::cli_model(id, &served);
     let label = crate::launcher::agent_label(id);
-    let agent_dir = match crate::agents::write_agent_dir(agent, &target.base_url, context, &target.key, &served) {
+    let agent_dir = match crate::agents::write_agent_dir(
+        agent,
+        &target.base_url,
+        context,
+        &target.key,
+        &served,
+    ) {
         Ok(d) => d,
         Err(e) => {
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": e }).to_string(),
+                origin,
+            ));
             return;
         }
     };
@@ -1735,7 +2349,8 @@ fn launch_cli(
     // ramas fallan el endpoint responde 500 en vez de un falso 200.
     let cmd_str = inner_cmd.clone();
     let wt = wt_command(&cmd_str);
-    let (ok, branch, detail) = crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
+    let (ok, branch, detail) =
+        crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
     let via = match branch {
         crate::launcher::SpawnBranch::Wt => "wt",
         crate::launcher::SpawnBranch::CmdStart => "cmd-start",
@@ -1745,7 +2360,8 @@ fn launch_cli(
             "[LocalMind] ERROR al lanzar Terminal {} en '{}': {} (vía {}).",
             label,
             req_dir.unwrap_or("directorio default"),
-            detail, via
+            detail,
+            via
         ));
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo abrir la terminal ({}): {}", via, detail) }).to_string(), origin));
         return;
@@ -1757,11 +2373,25 @@ fn launch_cli(
     };
     mgr.log(&format!(
         "[LocalMind] Terminal {} lanzada ({} {}) en '{}' ({}; ctx: {}) conectada a {}.",
-        label, via, detail,
+        label,
+        via,
+        detail,
         req_dir.unwrap_or("directorio default"),
-        via_donde, context, cli_model
+        via_donde,
+        context,
+        cli_model
     ));
-    let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","model":"{}","port":{},"context":{},"remote":{}}}"#, cli_model, if target.remote { 0 } else { ctx.http_port }, context, target.remote), origin));
+    let _ = req.respond(json_response_for_origin(
+        200,
+        format!(
+            r#"{{"status":"ok","model":"{}","port":{},"context":{},"remote":{}}}"#,
+            cli_model,
+            if target.remote { 0 } else { ctx.http_port },
+            context,
+            target.remote
+        ),
+        origin,
+    ));
 }
 
 /// Lanzador DeepSeek (`dsh --profile headless ["<tarea>"]`, verificado en
@@ -1785,19 +2415,30 @@ fn launch_deepseek(
     // Patch Cordis generado con el destino VIVO (Oráculo local o remoto):
     // solo se reescribe si cambia (mtime estable). Sin destino no se escribe
     // ninguna config ni se abre terminal contra la nada (409 del resolver).
-    let target = match resolve_launch_target(&ctx.cfg.get(), &ctx.mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+    let target = match resolve_launch_target(
+        &ctx.cfg.get(),
+        &ctx.mgr.get_status(),
+        ctx.gateway_key,
+        ctx.http_port,
+    ) {
         Ok(t) => t,
         Err(e) => {
             let _ = req.respond(json_response_for_origin(409, e, origin));
             return;
         }
     };
-    let home = crate::launcher::deepseek_home().unwrap_or_else(|| crate::agents::agent_dir("deepseek"));
-    let patch = crate::launcher::deepseek_profile_patch(&target.base_url, target.context, &target.model_id);
+    let home =
+        crate::launcher::deepseek_home().unwrap_or_else(|| crate::agents::agent_dir("deepseek"));
+    let patch =
+        crate::launcher::deepseek_profile_patch(&target.base_url, target.context, &target.model_id);
     match crate::launcher::write_deepseek_patch(&home, &patch) {
         Ok(_) => {}
         Err(e) => {
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": e }).to_string(),
+                origin,
+            ));
             return;
         }
     }
@@ -1807,16 +2448,23 @@ fn launch_deepseek(
         match crate::launcher::write_remote_key_file(&home, &target.key) {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+                let _ = req.respond(json_response_for_origin(
+                    500,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin,
+                ));
                 return;
             }
         }
     } else {
-        crate::auth::gateway_key_path().to_string_lossy().to_string()
+        crate::auth::gateway_key_path()
+            .to_string_lossy()
+            .to_string()
     };
     let cmd_str = crate::launcher::deepseek_cmdline(&cd_prefix, &inner, &key_file);
     let wt = wt_command(&cmd_str);
-    let (ok, branch, detail) = crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
+    let (ok, branch, detail) =
+        crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
     let via = match branch {
         crate::launcher::SpawnBranch::Wt => "wt",
         crate::launcher::SpawnBranch::CmdStart => "cmd-start",
@@ -1829,18 +2477,25 @@ fn launch_deepseek(
         mgr.log(&format!(
             "[LocalMind] ERROR al lanzar Terminal DeepSeek harness en '{}' ({}): {} (vía {}).",
             req_dir.unwrap_or("directorio default"),
-            what, detail, via
+            what,
+            detail,
+            via
         ));
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo abrir la terminal ({}): {}", via, detail) }).to_string(), origin));
         return;
     }
     mgr.log(&format!(
         "[LocalMind] Terminal DeepSeek harness lanzada ({} {}) en '{}' ({}).",
-        via, detail,
+        via,
+        detail,
         req_dir.unwrap_or("directorio default"),
         what
     ));
-    let _ = req.respond(json_response_for_origin(200, r#"{"status":"ok","agent":"deepseek"}"#.into(), origin));
+    let _ = req.respond(json_response_for_origin(
+        200,
+        r#"{"status":"ok","agent":"deepseek"}"#.into(),
+        origin,
+    ));
 }
 
 /// Lanzador OpenCode (`opencode --model localmind/<id> [run "<tarea>"]`,
@@ -1859,13 +2514,19 @@ fn launch_opencode(
     if !crate::launcher::opencode_installed() {
         let _ = req.respond(json_response_for_origin(
             501,
-            serde_json::json!({ "error": "El harness de OpenCode todavía no está configurado" }).to_string(),
+            serde_json::json!({ "error": "El harness de OpenCode todavía no está configurado" })
+                .to_string(),
             origin,
         ));
         return;
     }
     // Destino LLM (Fase UX-Guest): Oráculo local con motor vivo o remoto.
-    let target = match resolve_launch_target(&ctx.cfg.get(), &ctx.mgr.get_status(), ctx.gateway_key, ctx.http_port) {
+    let target = match resolve_launch_target(
+        &ctx.cfg.get(),
+        &ctx.mgr.get_status(),
+        ctx.gateway_key,
+        ctx.http_port,
+    ) {
         Ok(t) => t,
         Err(e) => {
             let _ = req.respond(json_response_for_origin(409, e, origin));
@@ -1881,14 +2542,28 @@ fn launch_opencode(
     let full = crate::launcher::cli_model(crate::launcher::AgentId::OpenCode, &model_id);
     let home = crate::agents::agent_dir("opencode");
     if let Err(e) = std::fs::create_dir_all(&home) {
-        let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo crear {}: {}", home.display(), e) }).to_string(), origin));
+        let _ = req.respond(json_response_for_origin(
+            500,
+            serde_json::json!({ "error": format!("No se pudo crear {}: {}", home.display(), e) })
+                .to_string(),
+            origin,
+        ));
         return;
     }
-    let content = crate::launcher::opencode_config_json(&target.base_url, target.context, &model_id, Some(&target.key));
+    let content = crate::launcher::opencode_config_json(
+        &target.base_url,
+        target.context,
+        &model_id,
+        Some(&target.key),
+    );
     match crate::launcher::write_opencode_config(&home, &content) {
         Ok(_) => {}
         Err(e) => {
-            let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+            let _ = req.respond(json_response_for_origin(
+                500,
+                serde_json::json!({ "error": e }).to_string(),
+                origin,
+            ));
             return;
         }
     }
@@ -1898,12 +2573,18 @@ fn launch_opencode(
         match crate::launcher::write_remote_key_file(&home, &target.key) {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(e) => {
-                let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": e }).to_string(), origin));
+                let _ = req.respond(json_response_for_origin(
+                    500,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin,
+                ));
                 return;
             }
         }
     } else {
-        crate::auth::gateway_key_path().to_string_lossy().to_string()
+        crate::auth::gateway_key_path()
+            .to_string_lossy()
+            .to_string()
     };
     let inner = crate::launcher::opencode_inner_cmd(&model_id, req_task);
     let cd_prefix = match req_dir {
@@ -1912,7 +2593,8 @@ fn launch_opencode(
     };
     let cmd_str = crate::launcher::opencode_cmdline(&cd_prefix, &home_s, &key_file, &inner);
     let wt = wt_command(&cmd_str);
-    let (ok, branch, detail) = crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
+    let (ok, branch, detail) =
+        crate::launcher::spawn_terminal(wt, &|| cmd_start_command(&cmd_str), req_dir);
     let via = match branch {
         crate::launcher::SpawnBranch::Wt => "wt",
         crate::launcher::SpawnBranch::CmdStart => "cmd-start",
@@ -1925,17 +2607,25 @@ fn launch_opencode(
         mgr.log(&format!(
             "[LocalMind] ERROR al lanzar Terminal OpenCode en '{}' ({}): {} (vía {}).",
             req_dir.unwrap_or("directorio default"),
-            what, detail, via
+            what,
+            detail,
+            via
         ));
         let _ = req.respond(json_response_for_origin(500, serde_json::json!({ "error": format!("No se pudo abrir la terminal ({}): {}", via, detail) }).to_string(), origin));
         return;
     }
     mgr.log(&format!(
         "[LocalMind] Terminal OpenCode lanzada ({} {}) en '{}' ({}) con modelo {} ({}; ctx: {}).",
-        via, detail,
+        via,
+        detail,
         req_dir.unwrap_or("directorio default"),
-        what, full,
-        if target.remote { format!("remoto {}", target.base_url) } else { format!("gateway local :{}", ctx.http_port) },
+        what,
+        full,
+        if target.remote {
+            format!("remoto {}", target.base_url)
+        } else {
+            format!("gateway local :{}", ctx.http_port)
+        },
         target.context
     ));
     let _ = req.respond(json_response_for_origin(200, format!(r#"{{"status":"ok","agent":"opencode","model":"{}","port":{},"context":{},"remote":{}}}"#, full, if target.remote { 0 } else { ctx.http_port }, target.context, target.remote), origin));
@@ -1964,10 +2654,7 @@ fn remote_transport_error(path: &str) -> (u16, String) {
     } else if path == "/v1/responses" {
         responses_error(502, "remoto no alcanzado")
     } else {
-        (
-            502,
-            r#"{"error":"Error al contactar remoto"}"#.to_string(),
-        )
+        (502, r#"{"error":"Error al contactar remoto"}"#.to_string())
     }
 }
 
@@ -1986,7 +2673,11 @@ fn handle_remote_forward(
 ) {
     let snapshot = cfg.get();
     let Some((root, key)) = remote_target(&snapshot) else {
-        let _ = req.respond(json_response_for_origin(409, r#"{"error":"remoto_no_configurado"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            409,
+            r#"{"error":"remoto_no_configurado"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     };
     let target = format!("{}{}", root, path);
@@ -1997,7 +2688,10 @@ fn handle_remote_forward(
         .ok()
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
         .unwrap_or_else(|| "remoto".to_string());
-    let endpoint_log = format!("{}.remoto", path.trim_start_matches("/v1/").replace('/', "."));
+    let endpoint_log = format!(
+        "{}.remoto",
+        path.trim_start_matches("/v1/").replace('/', ".")
+    );
     let t0 = Instant::now();
     // El chat puede tardar minutos: sin timeout (igual que el proxy local).
     // `/v1/models` es control: 15 s para no colgar la UI.
@@ -2022,7 +2716,8 @@ fn handle_remote_forward(
             if status == 200 && ct.contains("text/event-stream") {
                 // Streaming directo: cada chunk al cliente en cuanto llega.
                 let reader = resp.into_reader();
-                let sse_ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
+                let sse_ct =
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
                 let mut hdrs = vec![sse_ct];
                 if let Some(o) = cors_origin_header(origin.as_deref()) {
                     hdrs.push(o);
@@ -2030,19 +2725,38 @@ fn handle_remote_forward(
                 hdrs.extend(cors_fixed_headers());
                 let proxy_resp = Response::new(StatusCode(200), hdrs, reader, None, None);
                 let _ = req.respond(proxy_resp);
-                crate::usage::log_usage(&endpoint_log, &req_model, None, None, t0.elapsed().as_millis() as u64, true);
+                crate::usage::log_usage(
+                    &endpoint_log,
+                    &req_model,
+                    None,
+                    None,
+                    t0.elapsed().as_millis() as u64,
+                    true,
+                );
             } else {
                 let mut raw = String::new();
                 let _ = resp.into_reader().read_to_string(&mut raw);
-                crate::usage::log_usage(&endpoint_log, &req_model, None, None, t0.elapsed().as_millis() as u64, false);
+                crate::usage::log_usage(
+                    &endpoint_log,
+                    &req_model,
+                    None,
+                    None,
+                    t0.elapsed().as_millis() as u64,
+                    false,
+                );
                 // Cuerpo tal cual (el remoto ya le dio forma); vacío → error
                 // genérico con el código para no responder 200/4xx sin cuerpo.
                 let body_out = if raw.is_empty() {
-                    serde_json::json!({ "error": format!("el remoto respondió {}", status) }).to_string()
+                    serde_json::json!({ "error": format!("el remoto respondió {}", status) })
+                        .to_string()
                 } else {
                     raw
                 };
-                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    status,
+                    body_out,
+                    origin.as_deref(),
+                ));
             }
         }
         Err(ureq::Error::Status(code, resp)) => {
@@ -2077,7 +2791,11 @@ fn handle_chat_completions(
     // Fase A6: `stopped`/`error` con puerto placeholder no es motor (el 8080
     // lo puede ocupar cualquiera). `starting` sí proxyea: ya responde.
     if !crate::agents::engine_reachable(&st) {
-        let _ = req.respond(json_response_for_origin(502, r#"{"error":"engine_down"}"#.into(), origin.as_deref()));
+        let _ = req.respond(json_response_for_origin(
+            502,
+            r#"{"error":"engine_down"}"#.into(),
+            origin.as_deref(),
+        ));
         return;
     }
     let served = served_model_id(&st, cfg);
@@ -2090,7 +2808,10 @@ fn handle_chat_completions(
         .set("Content-Type", "application/json")
         // El motor exige `--api-key` (D-45): sin la cabecera responde 401 y el
         // proxy devolvería el error del motor al cliente en vez de traducirlo.
-        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+        .set(
+            "Authorization",
+            &crate::auth::bearer(crate::auth::gateway_key()),
+        )
         .send_bytes(&payload_bytes)
     {
         Ok(resp) => {
@@ -2104,7 +2825,8 @@ fn handle_chat_completions(
                     req_model,
                     t0,
                 );
-                let ct = Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
+                let ct =
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
                 let mut hdrs = vec![ct];
                 if let Some(o) = cors_origin_header(origin.as_deref()) {
                     hdrs.push(o);
@@ -2116,7 +2838,11 @@ fn handle_chat_completions(
                 let mut raw = String::new();
                 let mut reader = resp.into_reader();
                 if reader.read_to_string(&mut raw).is_err() {
-                    let _ = req.respond(json_response_for_origin(502, r#"{"error":"Error al contactar motor"}"#.into(), origin.as_deref()));
+                    let _ = req.respond(json_response_for_origin(
+                        502,
+                        r#"{"error":"Error al contactar motor"}"#.into(),
+                        origin.as_deref(),
+                    ));
                     return;
                 }
                 let (p, c) = crate::usage::extract_usage_from_sse(&raw);
@@ -2138,7 +2864,11 @@ fn handle_chat_completions(
             let _ = req.respond(json_response_for_origin(code, body, origin.as_deref()));
         }
         Err(_) => {
-            let _ = req.respond(json_response_for_origin(502, r#"{"error":"Error al contactar motor"}"#.into(), origin.as_deref()));
+            let _ = req.respond(json_response_for_origin(
+                502,
+                r#"{"error":"Error al contactar motor"}"#.into(),
+                origin.as_deref(),
+            ));
         }
     }
 }
@@ -2148,7 +2878,8 @@ fn handle_chat_completions(
 fn anthropic_error(status: u16, err_type: &str, message: &str) -> (u16, String) {
     (
         status,
-        serde_json::json!({"type": "error", "error": {"type": err_type, "message": message}}).to_string(),
+        serde_json::json!({"type": "error", "error": {"type": err_type, "message": message}})
+            .to_string(),
     )
 }
 
@@ -2305,7 +3036,10 @@ fn handle_anthropic_messages(
     match ureq::post(&format!("http://127.0.0.1:{}/v1/messages", st.port))
         .set("Content-Type", "application/json")
         // El motor exige `--api-key` (D-45): sin la cabecera responde 401.
-        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+        .set(
+            "Authorization",
+            &crate::auth::bearer(crate::auth::gateway_key()),
+        )
         .send_bytes(&body_bytes)
     {
         Ok(resp) => {
@@ -2316,8 +3050,12 @@ fn handle_anthropic_messages(
                 .to_string();
             if status == 200 && ct.contains("text/event-stream") {
                 // Streaming directo: cada chunk al cliente en cuanto llega.
-                let reader =
-                    NativeUsageTee::new(resp.into_reader(), "messages".to_string(), model_for_log, t0);
+                let reader = NativeUsageTee::new(
+                    resp.into_reader(),
+                    "messages".to_string(),
+                    model_for_log,
+                    t0,
+                );
                 let sse_ct =
                     Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
                 let mut hdrs = vec![sse_ct];
@@ -2340,11 +3078,16 @@ fn handle_anthropic_messages(
                     false,
                 );
                 let body_out = if raw.is_empty() {
-                    serde_json::json!({ "error": format!("el motor respondió {}", status) }).to_string()
+                    serde_json::json!({ "error": format!("el motor respondió {}", status) })
+                        .to_string()
                 } else {
                     raw
                 };
-                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    status,
+                    body_out,
+                    origin.as_deref(),
+                ));
             }
         }
         Err(ureq::Error::Status(code, resp)) => {
@@ -2399,7 +3142,10 @@ fn handle_responses(
     match ureq::post(&format!("http://127.0.0.1:{}/v1/responses", st.port))
         .set("Content-Type", "application/json")
         // El motor exige `--api-key` (D-45): sin la cabecera responde 401.
-        .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+        .set(
+            "Authorization",
+            &crate::auth::bearer(crate::auth::gateway_key()),
+        )
         .send_bytes(&body_bytes)
     {
         Ok(resp) => {
@@ -2410,8 +3156,12 @@ fn handle_responses(
                 .to_string();
             if status == 200 && ct.contains("text/event-stream") {
                 // Streaming directo: cada chunk al cliente en cuanto llega.
-                let reader =
-                    NativeUsageTee::new(resp.into_reader(), "responses".to_string(), model_for_log, t0);
+                let reader = NativeUsageTee::new(
+                    resp.into_reader(),
+                    "responses".to_string(),
+                    model_for_log,
+                    t0,
+                );
                 let sse_ct =
                     Header::from_bytes(&b"Content-Type"[..], &b"text/event-stream"[..]).unwrap();
                 let mut hdrs = vec![sse_ct];
@@ -2434,11 +3184,16 @@ fn handle_responses(
                     false,
                 );
                 let body_out = if raw.is_empty() {
-                    serde_json::json!({ "error": format!("el motor respondió {}", status) }).to_string()
+                    serde_json::json!({ "error": format!("el motor respondió {}", status) })
+                        .to_string()
                 } else {
                     raw
                 };
-                let _ = req.respond(json_response_for_origin(status, body_out, origin.as_deref()));
+                let _ = req.respond(json_response_for_origin(
+                    status,
+                    body_out,
+                    origin.as_deref(),
+                ));
             }
         }
         Err(ureq::Error::Status(code, resp)) => {
@@ -2490,7 +3245,6 @@ mod proxy {
         t0: Instant,
     }
     impl<R: Read + Send> TeeLogReader<R> {
-
         pub fn new(inner: R, endpoint: String, model: String, t0: Instant) -> Self {
             Self {
                 inner,
@@ -2588,7 +3342,8 @@ mod proxy {
         fn tee_incremental_y_cola_acotada() {
             // Higiene (auditoría): el tee registra en `usage.jsonl`; fijar un
             // scratch para no contaminar el registro real del dueño.
-            let scratch = std::env::temp_dir().join(format!("lm-test-usage-{}", std::process::id()));
+            let scratch =
+                std::env::temp_dir().join(format!("lm-test-usage-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&scratch);
             unsafe { std::env::set_var("LOCALMIND_USAGE_PATH", scratch.join("usage.jsonl")) };
             let c1 = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hola\"}}]}\n\n".to_vec();
@@ -2632,10 +3387,18 @@ mod proxy {
                 }
                 rest.extend_from_slice(&buf[..n]);
             }
-            assert_eq!(&rest, &(c2.into_iter().chain(c3.clone().into_iter()).collect::<Vec<u8>>()));
+            assert_eq!(
+                &rest,
+                &(c2.into_iter()
+                    .chain(c3.clone().into_iter())
+                    .collect::<Vec<u8>>())
+            );
             assert!(tee.tail.len() <= crate::usage::TAIL_MAX_BYTES);
             let text = String::from_utf8_lossy(&tee.tail).to_string();
-            assert_eq!(crate::usage::extract_usage_from_sse(&text), (Some(5), Some(7)));
+            assert_eq!(
+                crate::usage::extract_usage_from_sse(&text),
+                (Some(5), Some(7))
+            );
             // Limpieza: quitar el override y el scratch (no filtrar al resto).
             unsafe { std::env::remove_var("LOCALMIND_USAGE_PATH") };
         }
@@ -2672,22 +3435,26 @@ mod proxy {
         fn native_usage_lee_ambos_dialectos_y_toma_el_ultimo() {
             // Anthropic no-streaming y message_start/message_delta.
             let j = r#"{"id":"m","usage":{"input_tokens":13,"output_tokens":30}}"#;
-            assert_eq!(
-                super::super::extract_native_usage(j),
-                (Some(13), Some(30))
-            );
+            assert_eq!(super::super::extract_native_usage(j), (Some(13), Some(30)));
             let sse = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":14,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":20}}\n\ndata: [DONE]\n";
-            assert_eq!(super::super::extract_native_usage(sse), (Some(14), Some(20)));
+            assert_eq!(
+                super::super::extract_native_usage(sse),
+                (Some(14), Some(20))
+            );
             // Responses con usage anidado en response.*.
             let r = "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":55,\"output_tokens\":30,\"total_tokens\":85}}}\n";
             assert_eq!(super::super::extract_native_usage(r), (Some(55), Some(30)));
             // Basura y vacíos no inventan tokens.
-            assert_eq!(super::super::extract_native_usage("no-json\n[DONE]\n"), (None, None));
+            assert_eq!(
+                super::super::extract_native_usage("no-json\n[DONE]\n"),
+                (None, None)
+            );
             assert_eq!(super::super::extract_native_usage(""), (None, None));
         }
         #[test]
         fn native_errores_con_forma_de_dialecto() {
-            let (c, t) = super::super::anthropic_error(502, "api_error", "Motor apagado (engine_down)");
+            let (c, t) =
+                super::super::anthropic_error(502, "api_error", "Motor apagado (engine_down)");
             assert_eq!(c, 502);
             let v: serde_json::Value = serde_json::from_str(&t).unwrap();
             assert_eq!(v["error"]["type"], serde_json::json!("api_error"));
@@ -2704,7 +3471,10 @@ mod proxy {
             // Stream sin options -> se inyecta.
             let (out, model, stream) = prep(br#"{"model":"m","stream":true,"messages":[]}"#, "S");
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-            assert_eq!(v["stream_options"], serde_json::json!({"include_usage": true}));
+            assert_eq!(
+                v["stream_options"],
+                serde_json::json!({"include_usage": true})
+            );
             assert_eq!((model, stream), ("m".to_string(), true));
             // Stream con options objeto -> se respeta.
             let (out, _, _) = prep(br#"{"model":"m","stream":true,"stream_options":{}}"#, "S");
@@ -2724,7 +3494,10 @@ mod proxy {
             let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
             assert_eq!(v["model"], serde_json::json!("SERVIDO"));
             assert_eq!(v["reasoning_effort"], serde_json::json!("xhigh"));
-            assert_eq!(v["stream_options"], serde_json::json!({"include_usage": true}));
+            assert_eq!(
+                v["stream_options"],
+                serde_json::json!({"include_usage": true})
+            );
             // No-objeto y no-JSON pasan intactos.
             assert_eq!(prep(b"[1,2]", "S").0, b"[1,2]".to_vec());
             assert_eq!(prep(b"no-json", "S").0, b"no-json".to_vec());
@@ -2741,22 +3514,50 @@ mod proxy {
                 v.get("reasoning_effort").cloned()
             };
             // `max` → `xhigh` (era el 500 de la plantilla Qwen).
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"max"}"#), Some(serde_json::json!("xhigh")));
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"MAX"}"#), Some(serde_json::json!("xhigh")));
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"max"}"#),
+                Some(serde_json::json!("xhigh"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"MAX"}"#),
+                Some(serde_json::json!("xhigh"))
+            );
             // Comportamiento previo intacto.
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"minimal"}"#), Some(serde_json::json!("low")));
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"high"}"#), Some(serde_json::json!("xhigh")));
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"minimal"}"#),
+                Some(serde_json::json!("low"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"high"}"#),
+                Some(serde_json::json!("xhigh"))
+            );
             // Válidos intactos (normalizados a minúsculas).
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"low"}"#), Some(serde_json::json!("low")));
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"medium"}"#), Some(serde_json::json!("medium")));
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"xhigh"}"#), Some(serde_json::json!("xhigh")));
-            assert_eq!(get(r#"{"model":"m","reasoning_effort":"Medium"}"#), Some(serde_json::json!("medium")));
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"low"}"#),
+                Some(serde_json::json!("low"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"medium"}"#),
+                Some(serde_json::json!("medium"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"xhigh"}"#),
+                Some(serde_json::json!("xhigh"))
+            );
+            assert_eq!(
+                get(r#"{"model":"m","reasoning_effort":"Medium"}"#),
+                Some(serde_json::json!("medium"))
+            );
             // Desconocidos (incluido `off`, que la plantilla también rechaza)
             // y no-strings: campo eliminado, el motor usa su default.
             let dropped = |body: &str| {
                 let (out, _, _) = super::super::prepare_chat_payload(body.as_bytes(), "m");
                 let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-                assert!(v.get("reasoning_effort").is_none(), "debió eliminarse: {:?}", String::from_utf8_lossy(&out));
+                assert!(
+                    v.get("reasoning_effort").is_none(),
+                    "debió eliminarse: {:?}",
+                    String::from_utf8_lossy(&out)
+                );
             };
             dropped(r#"{"model":"m","reasoning_effort":"ultra"}"#);
             dropped(r#"{"model":"m","reasoning_effort":"off"}"#);
@@ -2770,7 +3571,10 @@ mod proxy {
             assert!(v.get("reasoning_effort").is_none());
             assert_eq!(v["temperature"], serde_json::json!(0.7));
             // No-JSON pasa intacto.
-            assert_eq!(super::super::prepare_chat_payload(b"no-json", "m").0, b"no-json".to_vec());
+            assert_eq!(
+                super::super::prepare_chat_payload(b"no-json", "m").0,
+                b"no-json".to_vec()
+            );
         }
 
         #[test]
@@ -2783,29 +3587,55 @@ mod proxy {
             let path = dir.join("localmind.toml");
             let store = crate::config::ConfigStore::load_from_path(&path);
             // Estado inicial: `speculation` ausente => GET expone `false`.
-            let v0: serde_json::Value = serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
-            assert_eq!(v0["engine"]["speculation_enabled"], serde_json::json!(false));
+            let v0: serde_json::Value =
+                serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
+            assert_eq!(
+                v0["engine"]["speculation_enabled"],
+                serde_json::json!(false)
+            );
             // Aplicar `{"enabled":false}` con la regla real del gateway
             // (`config::apply_config_patch`, Fase A4): solo se acepta la
             // sub-clave `enabled` y debe ser booleano.
             let apply = |store: &crate::config::ConfigStore, body: &str| -> Result<bool, String> {
-                let val: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+                let val: serde_json::Value =
+                    serde_json::from_str(body).map_err(|e| e.to_string())?;
                 let next = crate::config::apply_config_patch(&store.get(), &val)?;
                 let en = next.engine.speculation.as_ref().is_some_and(|s| s.enabled);
                 store.update(|c| *c = next);
                 store.save()?;
                 Ok(en)
             };
-            assert_eq!(apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap(), false);
-            assert_eq!(store.get().engine.speculation.as_ref().map(|s| s.enabled), Some(false));
-            let v1: serde_json::Value = serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
-            assert_eq!(v1["engine"]["speculation_enabled"], serde_json::json!(false));
+            assert_eq!(
+                apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap(),
+                false
+            );
+            assert_eq!(
+                store.get().engine.speculation.as_ref().map(|s| s.enabled),
+                Some(false)
+            );
+            let v1: serde_json::Value =
+                serde_json::from_str(&super::super::app_config_json(&store.get())).unwrap();
+            assert_eq!(
+                v1["engine"]["speculation_enabled"],
+                serde_json::json!(false)
+            );
             // Recarga desde disco: persiste.
             let store2 = crate::config::ConfigStore::load_from_path(&path);
-            assert_eq!(store2.get().engine.speculation.as_ref().map(|s| s.enabled), Some(false));
+            assert_eq!(
+                store2.get().engine.speculation.as_ref().map(|s| s.enabled),
+                Some(false)
+            );
             // Sub-clave desconocida => 400 con el mensaje del handler.
-            let err = apply(&store, r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#).unwrap_err();
-            assert!(err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"), "{}", err);
+            let err = apply(
+                &store,
+                r#"{"engine":{"speculation":{"enabled":true,"n":8}}}"#,
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("engine.speculation.n") && err.contains("solo se acepta enabled"),
+                "{}",
+                err
+            );
             // `enabled` no booleano => 400.
             let err2 = apply(&store, r#"{"engine":{"speculation":{"enabled":"si"}}}"#).unwrap_err();
             assert!(err2.contains("engine.speculation.enabled"), "{}", err2);
@@ -2878,21 +3708,35 @@ mod proxy {
                 ..Default::default()
             };
 
-            let bonsai: serde_json::Value =
-                serde_json::from_str(&models_list_json(&st("Ternary-Bonsai-2-27B-PTQ1_0.gguf", 8080), &cfg)).unwrap();
+            let bonsai: serde_json::Value = serde_json::from_str(&models_list_json(
+                &st("Ternary-Bonsai-2-27B-PTQ1_0.gguf", 8080),
+                &cfg,
+            ))
+            .unwrap();
             let ids: Vec<String> = bonsai["data"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .map(|m| m["id"].as_str().unwrap().to_string())
                 .collect();
-            assert_eq!(ids[0], "Ternary-Bonsai-2-27B-PTQ1_0", "el id servido no encabeza la lista: {:?}", ids);
+            assert_eq!(
+                ids[0], "Ternary-Bonsai-2-27B-PTQ1_0",
+                "el id servido no encabeza la lista: {:?}",
+                ids
+            );
             // El alias de compat sigue publicado (agentes en la calle lo usan).
-            assert!(ids.iter().any(|i| i == "localmind"), "se perdió el alias localmind: {:?}", ids);
+            assert!(
+                ids.iter().any(|i| i == "localmind"),
+                "se perdió el alias localmind: {:?}",
+                ids
+            );
 
             // Con Qwen cargado, la lista cambia: no es un literal con aliases.
-            let qwen: serde_json::Value =
-                serde_json::from_str(&models_list_json(&st("Qwen3.8-27B-IQ4_XS_4BPW.gguf", 8080), &cfg)).unwrap();
+            let qwen: serde_json::Value = serde_json::from_str(&models_list_json(
+                &st("Qwen3.8-27B-IQ4_XS_4BPW.gguf", 8080),
+                &cfg,
+            ))
+            .unwrap();
             let qwen_ids: Vec<String> = qwen["data"]
                 .as_array()
                 .unwrap()
@@ -2957,7 +3801,11 @@ mod proxy {
             let dir = std::env::temp_dir().join(format!("lm-test-off-{}", std::process::id()));
             let cfg = store_de_prueba(&dir);
             // `ServerStatus` conserva el `model` de la sesión anterior al parar.
-            let parado = ServerStatus { status: "stopped".to_string(), port: 0, ..Default::default() };
+            let parado = ServerStatus {
+                status: "stopped".to_string(),
+                port: 0,
+                ..Default::default()
+            };
             let cuerpo = models_list_json(&parado, &cfg);
             let v: serde_json::Value = serde_json::from_str(&cuerpo).unwrap();
             let ids: Vec<String> = v["data"]
@@ -2966,8 +3814,15 @@ mod proxy {
                 .iter()
                 .map(|m| m["id"].as_str().unwrap().to_string())
                 .collect();
-            assert!(!ids.is_empty(), "/v1/models dejó de contestar con el motor apagado");
-            assert!(ids.iter().any(|i| i == "localmind"), "sin alias de compat: {:?}", ids);
+            assert!(
+                !ids.is_empty(),
+                "/v1/models dejó de contestar con el motor apagado"
+            );
+            assert!(
+                ids.iter().any(|i| i == "localmind"),
+                "sin alias de compat: {:?}",
+                ids
+            );
             // El lanzador, en cambio, NO escribe nada: eso ya lo hace el 409.
             assert!(!crate::agents::engine_live(&parado));
             let _ = std::fs::remove_dir_all(&dir);
@@ -2988,11 +3843,20 @@ mod proxy {
                 (b"Content-Type", b"text/event-stream"),
                 (b"Content-Type", b"image/x-icon"),
                 (b"Content-Type", b"image/png"),
-                (b"Content-Disposition", b"attachment; filename=\"localmind_profiles.json\""),
+                (
+                    b"Content-Disposition",
+                    b"attachment; filename=\"localmind_profiles.json\"",
+                ),
                 (b"Cache-Control", b"no-cache"),
                 (b"Connection", b"keep-alive"),
-                (b"Access-Control-Allow-Methods", b"GET, POST, OPTIONS, PUT, DELETE"),
-                (b"Access-Control-Allow-Headers", b"Content-Type, Authorization, x-api-key"),
+                (
+                    b"Access-Control-Allow-Methods",
+                    b"GET, POST, OPTIONS, PUT, DELETE",
+                ),
+                (
+                    b"Access-Control-Allow-Headers",
+                    b"Content-Type, Authorization, x-api-key",
+                ),
             ];
             for &(name, value) in literales {
                 assert!(
@@ -3028,7 +3892,8 @@ mod proxy {
             let ws = super::super::parse_start_body("   ").unwrap();
             assert!(ws.profile.is_none());
             // Bien formado: pasa intacto.
-            let ok = super::super::parse_start_body(r#"{"model":"a.gguf","context":32768}"#).unwrap();
+            let ok =
+                super::super::parse_start_body(r#"{"model":"a.gguf","context":32768}"#).unwrap();
             assert_eq!(ok.model.as_deref(), Some("a.gguf"));
             assert_eq!(ok.context, Some(32768));
         }
@@ -3043,20 +3908,32 @@ mod proxy {
                 )
             };
             // Flag con inyección de shell (mismo charset que `profile_flag_ok`).
-            let err = super::super::parse_profiles_import(&perfil("velocidad", 32768, r#"["-flag & calc.exe"]"#))
-                .unwrap_err();
+            let err = super::super::parse_profiles_import(&perfil(
+                "velocidad",
+                32768,
+                r#"["-flag & calc.exe"]"#,
+            ))
+            .unwrap_err();
             assert!(err.contains("extra_flags"), "{}", err);
             // Contexto fuera de rango / no múltiplo de 1024.
-            let err2 = super::super::parse_profiles_import(&perfil("velocidad", 1023, "[]")).unwrap_err();
+            let err2 =
+                super::super::parse_profiles_import(&perfil("velocidad", 1023, "[]")).unwrap_err();
             assert!(err2.contains("context"), "{}", err2);
             // Id inválido.
-            let err3 = super::super::parse_profiles_import(&perfil("Perfil Mal", 32768, "[]")).unwrap_err();
+            let err3 = super::super::parse_profiles_import(&perfil("Perfil Mal", 32768, "[]"))
+                .unwrap_err();
             assert!(err3.contains("id"), "{}", err3);
             // Lista vacía y JSON roto.
-            assert!(super::super::parse_profiles_import("[]").unwrap_err().contains("vacía"));
-            assert!(super::super::parse_profiles_import("{").unwrap_err().starts_with("JSON inválido"));
+            assert!(super::super::parse_profiles_import("[]")
+                .unwrap_err()
+                .contains("vacía"));
+            assert!(super::super::parse_profiles_import("{")
+                .unwrap_err()
+                .starts_with("JSON inválido"));
             // Perfil válido: pasa intacto.
-            let ok = super::super::parse_profiles_import(&perfil("libros", 131072, r#"["--no-mmap"]"#)).unwrap();
+            let ok =
+                super::super::parse_profiles_import(&perfil("libros", 131072, r#"["--no-mmap"]"#))
+                    .unwrap();
             assert_eq!(ok.len(), 1);
             assert_eq!(ok[0].context, 131072);
         }
@@ -3080,7 +3957,8 @@ mod proxy {
         );
         assert_eq!((m.as_str(), c), ("Qwen3.8-27B-IQ4_XS_4BPW", 131072));
         // Sin modelo → alias; sin contexto o cero → default honesto.
-        let (m, c) = crate::server::remote_status_target(r#"{"status":"running","model":"","context":0}"#);
+        let (m, c) =
+            crate::server::remote_status_target(r#"{"status":"running","model":"","context":0}"#);
         assert_eq!((m.as_str(), c), ("localmind", 32768));
         let (m, c) = crate::server::remote_status_target("no-json");
         assert_eq!((m.as_str(), c), ("localmind", 32768));
@@ -3094,7 +3972,8 @@ mod proxy {
             port: 8080,
             ..Default::default()
         };
-        let err = crate::server::resolve_launch_target(&cfg_guest(""), &st, "K", 17860).unwrap_err();
+        let err =
+            crate::server::resolve_launch_target(&cfg_guest(""), &st, "K", 17860).unwrap_err();
         assert!(err.contains("remoto_no_configurado"), "{}", err);
         // Oráculo apagado: mensaje histórico intacto, sin red.
         let cfg = crate::config::AppConfig::default();
@@ -3156,7 +4035,10 @@ mod sse {
                 } {
                     self.chunk = self.encode(ev.seq, &ev.line);
                 } else {
-                    let g = match self.rx.lock() { Ok(g) => g, Err(po) => po.into_inner() };
+                    let g = match self.rx.lock() {
+                        Ok(g) => g,
+                        Err(po) => po.into_inner(),
+                    };
                     match g.recv() {
                         Ok(line) => {
                             let seq = self.next_live_seq;
@@ -3176,5 +4058,4 @@ mod sse {
             Ok(n)
         }
     }
-
 }

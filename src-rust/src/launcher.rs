@@ -118,7 +118,11 @@ pub fn agent_kind(id: AgentId) -> &'static str {
 /// el nombre del modelo anterior) siguen conectando porque el proxy reescribe
 /// cualquier `model` pedido al servido (D-2).
 pub fn cli_model(id: AgentId, served: &str) -> String {
-    let model = if served.trim().is_empty() { "localmind" } else { served.trim() };
+    let model = if served.trim().is_empty() {
+        "localmind"
+    } else {
+        served.trim()
+    };
     match id {
         AgentId::Pi | AgentId::Omp | AgentId::OpenCode => format!("localmind/{}", model),
         _ => String::new(),
@@ -158,7 +162,9 @@ pub fn agent_available(id: AgentId) -> bool {
 /// `dsh`/`opencode` vive ahí aunque no esté en el PATH del servicio.
 fn npm_shim_present(bin: &str) -> bool {
     if let Ok(appdata) = std::env::var("APPDATA") {
-        let shim = PathBuf::from(appdata).join("npm").join(format!("{}.cmd", bin));
+        let shim = PathBuf::from(appdata)
+            .join("npm")
+            .join(format!("{}.cmd", bin));
         if shim.is_file() {
             return true;
         }
@@ -178,7 +184,9 @@ pub fn deepseek_installed() -> bool {
         return true;
     }
     if let Ok(appdata) = std::env::var("APPDATA") {
-        let shim = std::path::PathBuf::from(appdata).join("npm").join("dsh.cmd");
+        let shim = std::path::PathBuf::from(appdata)
+            .join("npm")
+            .join("dsh.cmd");
         if shim.is_file() {
             return true;
         }
@@ -190,7 +198,12 @@ pub fn deepseek_installed() -> bool {
 /// Directorio aislado del harness (`DSH_HOME`): nunca toca `~/.dsh`.
 pub fn deepseek_home() -> Option<PathBuf> {
     std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("agents").join("deepseek"))
+        .map(|a| {
+            PathBuf::from(a)
+                .join("LocalMind")
+                .join("agents")
+                .join("deepseek")
+        })
         .ok()
 }
 
@@ -199,7 +212,12 @@ pub fn deepseek_home() -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn opencode_home() -> Option<PathBuf> {
     std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("agents").join("opencode"))
+        .map(|a| {
+            PathBuf::from(a)
+                .join("LocalMind")
+                .join("agents")
+                .join("opencode")
+        })
         .ok()
 }
 
@@ -214,7 +232,10 @@ pub fn deepseek_env(gateway_key: &str) -> Vec<(String, String)> {
     vec![
         ("DSH_HOME".to_string(), home),
         ("DSH_TELEMETRY_MODE".to_string(), "DISABLED".to_string()),
-        ("DSH_PERMISSION_MODE".to_string(), "workspace-write".to_string()),
+        (
+            "DSH_PERMISSION_MODE".to_string(),
+            "workspace-write".to_string(),
+        ),
         ("LOCALMIND_API_KEY".to_string(), gateway_key.to_string()),
     ]
 }
@@ -268,7 +289,9 @@ pub fn deepseek_profile_patch(base_url: &str, context: usize, model_id: &str) ->
 
 /// Ruta del patch dentro del dir privado (`DSH_HOME`).
 pub fn deepseek_patch_path(home: &std::path::Path) -> PathBuf {
-    home.join("profiles").join("headless").join("cordis.patch.yml")
+    home.join("profiles")
+        .join("headless")
+        .join("cordis.patch.yml")
 }
 
 /// Escribir el patch solo si cambia (tmp+rename atómico; mtime estable si el
@@ -492,7 +515,12 @@ pub fn opencode_config_content(base_url: &str, context: usize, model_id: &str) -
 
 /// Núcleo testeable: construye el JSON con la clave según el modo.
 /// `api_key=None` → `{env:LOCALMIND_API_KEY}` (lo que escribe el lanzador).
-pub fn opencode_config_json(base_url: &str, context: usize, model_id: &str, api_key: Option<&str>) -> String {
+pub fn opencode_config_json(
+    base_url: &str,
+    context: usize,
+    model_id: &str,
+    api_key: Option<&str>,
+) -> String {
     let key = api_key.unwrap_or("{env:LOCALMIND_API_KEY}");
     serde_json::json!({
         "$schema": "https://opencode.ai/config.json",
@@ -643,9 +671,19 @@ pub fn spawn_terminal(
                 }
                 match c2.spawn() {
                     Ok(child) => {
-                        return (true, SpawnBranch::CmdStart, format!("pid {} (fallback tras fallo de wt: {})", child.id(), e))
+                        return (
+                            true,
+                            SpawnBranch::CmdStart,
+                            format!("pid {} (fallback tras fallo de wt: {})", child.id(), e),
+                        )
                     }
-                    Err(e2) => return (false, SpawnBranch::CmdStart, format!("wt: {}; cmd: {}", e, e2)),
+                    Err(e2) => {
+                        return (
+                            false,
+                            SpawnBranch::CmdStart,
+                            format!("wt: {}; cmd: {}", e, e2),
+                        )
+                    }
                 }
             }
         }
@@ -707,7 +745,10 @@ mod tests {
             .collect();
         assert_eq!(kinds, vec!["cli", "cli", "cli", "web", "cli"]);
         assert_eq!(v["agents"][3]["available"], serde_json::json!(true));
-        assert_eq!(v["agents"][3]["label"], serde_json::json!("Interfaz web externa"));
+        assert_eq!(
+            v["agents"][3]["label"],
+            serde_json::json!("Interfaz web externa")
+        );
     }
 
     #[test]
@@ -723,7 +764,16 @@ mod tests {
             "set \"OPENAI_BASE_URL=http://127.0.0.1:17861/v1\" && set \"OPENAI_API_KEY=CLAVE-GW\" && set \"PI_CODING_AGENT_DIR=C:\\dir\" && pi --provider localmind --model localmind/M-VIVO --thinking max"
         );
         // omp igual: gateway + clave, sin hardcodear 8080.
-        let omp = cli_inner_cmd(AgentId::Omp, "", "http://127.0.0.1:17860/v1", "K2", "C:\\d", Some("low"), "", "M-VIVO");
+        let omp = cli_inner_cmd(
+            AgentId::Omp,
+            "",
+            "http://127.0.0.1:17860/v1",
+            "K2",
+            "C:\\d",
+            Some("low"),
+            "",
+            "M-VIVO",
+        );
         assert!(omp.contains("http://127.0.0.1:17860/v1"));
         assert!(omp.contains("OPENAI_API_KEY=K2"));
         assert!(!omp.contains("http://127.0.0.1:8080/v1"));
@@ -740,9 +790,27 @@ mod tests {
         assert_eq!(effort_flag(Some("high")), " --thinking high");
         assert_eq!(effort_flag(Some("max")), " --thinking max");
         // La línea construida solo lleva `--thinking low` cuando no se pidió effort.
-        let sin_effort = cli_inner_cmd(AgentId::Pi, "", "http://127.0.0.1:17861/v1", "K", "C:\\d", None, "", "M-VIVO");
+        let sin_effort = cli_inner_cmd(
+            AgentId::Pi,
+            "",
+            "http://127.0.0.1:17861/v1",
+            "K",
+            "C:\\d",
+            None,
+            "",
+            "M-VIVO",
+        );
         assert!(sin_effort.contains("--thinking low"), "{}", sin_effort);
-        let con_max = cli_inner_cmd(AgentId::Pi, "", "http://127.0.0.1:17861/v1", "K", "C:\\d", Some("max"), "", "M-VIVO");
+        let con_max = cli_inner_cmd(
+            AgentId::Pi,
+            "",
+            "http://127.0.0.1:17861/v1",
+            "K",
+            "C:\\d",
+            Some("max"),
+            "",
+            "M-VIVO",
+        );
         assert!(con_max.contains("--thinking max"), "{}", con_max);
         assert!(!con_max.contains("--thinking low"), "{}", con_max);
     }
@@ -758,7 +826,10 @@ mod tests {
                 .map(|(_, v)| v.clone())
                 .unwrap_or_default()
         };
-        assert!(get("DSH_HOME").ends_with("agents\\deepseek") || get("DSH_HOME").ends_with("agents/deepseek"));
+        assert!(
+            get("DSH_HOME").ends_with("agents\\deepseek")
+                || get("DSH_HOME").ends_with("agents/deepseek")
+        );
         assert_eq!(get("DSH_TELEMETRY_MODE"), "DISABLED");
         assert_eq!(get("DSH_PERMISSION_MODE"), "workspace-write");
         assert_eq!(get("LOCALMIND_API_KEY"), "CLAVE-FALSA");
@@ -776,7 +847,11 @@ mod tests {
         assert!(evil.contains("\"\""));
         assert!(!evil.contains("&& del"));
         // La cmdline completa nunca lleva la clave en argv: va por `set /p`.
-        let full = deepseek_cmdline("cd /d \"C:\\proj\" && ", "dsh --profile headless", "C:\\gw\\gateway.key");
+        let full = deepseek_cmdline(
+            "cd /d \"C:\\proj\" && ",
+            "dsh --profile headless",
+            "C:\\gw\\gateway.key",
+        );
         assert!(full.contains("set /p LOCALMIND_API_KEY<"));
         assert!(!full.contains("CLAVE-FALSA"));
         assert!(full.contains("dsh --profile headless"));
@@ -790,7 +865,10 @@ mod tests {
         assert_eq!(agent_label(AgentId::OpenCode), "OpenCode");
         assert_eq!(agent_kind(AgentId::OpenCode), "cli");
         assert_eq!(agent_bin(AgentId::OpenCode), Some("opencode"));
-        assert_eq!(cli_model(AgentId::OpenCode, "Ternary-Bonsai-2-27B-PTQ1_0"), "localmind/Ternary-Bonsai-2-27B-PTQ1_0");
+        assert_eq!(
+            cli_model(AgentId::OpenCode, "Ternary-Bonsai-2-27B-PTQ1_0"),
+            "localmind/Ternary-Bonsai-2-27B-PTQ1_0"
+        );
         // Desconocidos siguen a 400.
         assert_eq!(parse_agent_id("codex"), None);
         assert_eq!(parse_agent_id("opencode3"), None);
@@ -812,7 +890,10 @@ mod tests {
             serde_json::json!("http://127.0.0.1:17861/v1")
         );
         // La clave cruda jamás va en el payload: referencia `{env:...}`.
-        assert_eq!(prov["options"]["apiKey"], serde_json::json!("{env:LOCALMIND_API_KEY}"));
+        assert_eq!(
+            prov["options"]["apiKey"],
+            serde_json::json!("{env:LOCALMIND_API_KEY}")
+        );
         let m = &prov["models"]["qwen3.8-27b"];
         assert_eq!(m["limit"]["context"], serde_json::json!(32768));
         assert_eq!(m["limit"]["output"], serde_json::json!(8192));
@@ -857,7 +938,9 @@ mod tests {
         assert!(full.contains("set /p LOCALMIND_API_KEY<"));
         assert!(!full.contains("CLAVE-FALSA"));
         // El home aislado es el dir privado, no el del usuario.
-        let h = opencode_home().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let h = opencode_home()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         assert!(h.ends_with("agents\\opencode") || h.ends_with("agents/opencode"));
         assert!(!h.is_empty());
     }
@@ -872,13 +955,21 @@ mod tests {
         assert!(a.contains("{env:LOCALMIND_API_KEY}"));
         assert!(!a.contains("CLAVE-FALSA"));
         assert!(a.contains("\"context\":32768"));
-        let inline = opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", Some("K-CRUDA"));
+        let inline = opencode_config_json(
+            "http://127.0.0.1:17861/v1",
+            32768,
+            "qwen3.8-27b",
+            Some("K-CRUDA"),
+        );
         assert!(inline.contains("K-CRUDA"));
         // Otro puerto/contexto → difieren; mismo input ⇒ idéntico.
         let b = opencode_config_json("http://127.0.0.1:17862/v1", 65536, "qwen3.8-27b", None);
         assert!(b.contains("http://127.0.0.1:17862/v1"));
         assert_ne!(a, b);
-        assert_eq!(a, opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", None));
+        assert_eq!(
+            a,
+            opencode_config_json("http://127.0.0.1:17861/v1", 32768, "qwen3.8-27b", None)
+        );
         // Ruta dentro del dir privado y escritura solo-si-cambia.
         let dir = std::env::temp_dir().join(format!("lm-oc-cfg-{}", std::process::id()));
         let home = dir.join("opencode");
@@ -956,17 +1047,53 @@ mod tests {
         for id in [AgentId::Pi, AgentId::Omp, AgentId::OpenCode] {
             let con_bonsai = cli_model(id, bonsai);
             let con_qwen = cli_model(id, qwen);
-            assert_ne!(con_bonsai, con_qwen, "{:?}: el id no depende del modelo servido", id);
-            assert!(con_bonsai.contains("Bonsai"), "{:?} no anuncia Bonsai: {}", id, con_bonsai);
-            assert!(con_qwen.contains("Qwen"), "{:?} no anuncia Qwen: {}", id, con_qwen);
+            assert_ne!(
+                con_bonsai, con_qwen,
+                "{:?}: el id no depende del modelo servido",
+                id
+            );
+            assert!(
+                con_bonsai.contains("Bonsai"),
+                "{:?} no anuncia Bonsai: {}",
+                id,
+                con_bonsai
+            );
+            assert!(
+                con_qwen.contains("Qwen"),
+                "{:?} no anuncia Qwen: {}",
+                id,
+                con_qwen
+            );
             // El prefijo de provider se conserva: no es un alias de modelo.
-            assert!(con_bonsai.starts_with("localmind/"), "{:?} perdió el provider: {}", id, con_bonsai);
+            assert!(
+                con_bonsai.starts_with("localmind/"),
+                "{:?} perdió el provider: {}",
+                id,
+                con_bonsai
+            );
         }
 
         // El `--model` que se ejecuta lleva el mismo id que la respuesta JSON.
-        let linea = cli_inner_cmd(AgentId::Omp, "", "http://127.0.0.1:17860/v1", "K", "C:\\d", Some("low"), "", bonsai);
-        assert!(linea.contains("--model localmind/Ternary-Bonsai-2-27B-PTQ1_0"), "{}", linea);
-        assert!(!linea.contains("qwen3.8-27b"), "la línea aún nombra al modelo viejo: {}", linea);
+        let linea = cli_inner_cmd(
+            AgentId::Omp,
+            "",
+            "http://127.0.0.1:17860/v1",
+            "K",
+            "C:\\d",
+            Some("low"),
+            "",
+            bonsai,
+        );
+        assert!(
+            linea.contains("--model localmind/Ternary-Bonsai-2-27B-PTQ1_0"),
+            "{}",
+            linea
+        );
+        assert!(
+            !linea.contains("qwen3.8-27b"),
+            "la línea aún nombra al modelo viejo: {}",
+            linea
+        );
     }
 
     /// Sin id servido (`""` = motor sin modelo) el lanzador cae al alias
@@ -987,15 +1114,27 @@ mod tests {
     /// Falla sobre el código original, que fijaba `"localmind"` en el patch.
     #[test]
     fn el_patch_de_deepseek_nombra_el_modelo_y_el_contexto_vivos() {
-        let a = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "Ternary-Bonsai-2-27B-PTQ1_0");
+        let a = deepseek_profile_patch(
+            "http://127.0.0.1:17861/v1",
+            32768,
+            "Ternary-Bonsai-2-27B-PTQ1_0",
+        );
         assert!(a.contains("model: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
         assert!(a.contains("id: Ternary-Bonsai-2-27B-PTQ1_0"), "{}", a);
         assert!(a.contains("contextWindow: 32768"), "{}", a);
         // Cambiar de modelo cambia el patch (se reescribe en cada lanzamiento).
-        let b = deepseek_profile_patch("http://127.0.0.1:17861/v1", 32768, "Qwen3.8-27B-IQ4_XS_4BPW");
+        let b = deepseek_profile_patch(
+            "http://127.0.0.1:17861/v1",
+            32768,
+            "Qwen3.8-27B-IQ4_XS_4BPW",
+        );
         assert_ne!(a, b);
         // Cambiar de contexto también (nada queda colgado de una sesión vieja).
-        let c = deepseek_profile_patch("http://127.0.0.1:17861/v1", 262144, "Ternary-Bonsai-2-27B-PTQ1_0");
+        let c = deepseek_profile_patch(
+            "http://127.0.0.1:17861/v1",
+            262144,
+            "Ternary-Bonsai-2-27B-PTQ1_0",
+        );
         assert!(c.contains("contextWindow: 262144"), "{}", c);
         assert_ne!(a, c);
     }
@@ -1016,7 +1155,11 @@ mod tests {
         assert_eq!(r2.base_url, "http://192.168.1.10:17860/v1");
         // Y los builders la usan tal cual (nada hardcodeado a loopback).
         let yml = crate::agents::omp_models_yml(&r.base_url, 1, "KR", false, "M");
-        assert!(yml.contains("baseUrl: http://192.168.1.10:17860/v1"), "{}", yml);
+        assert!(
+            yml.contains("baseUrl: http://192.168.1.10:17860/v1"),
+            "{}",
+            yml
+        );
         assert!(!yml.contains("127.0.0.1"), "{}", yml);
     }
 
