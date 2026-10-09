@@ -156,13 +156,24 @@ pub(crate) fn check_vram_fit(
     cache_ram_mb: usize,
     vram_total: Option<u64>,
 ) -> Result<(), String> {
+    let model_mb = std::fs::metadata(model_path)
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0);
+    check_vram_fit_mb(model_mb, context, cache_ram_mb, vram_total)
+}
+
+/// Núcleo puro (sin disco): misma decisión con el tamaño ya medido en MB.
+/// El test usa este (crear 14 GB dispersos revienta el disco del CI).
+pub(crate) fn check_vram_fit_mb(
+    model_mb: u64,
+    context: usize,
+    cache_ram_mb: usize,
+    vram_total: Option<u64>,
+) -> Result<(), String> {
     let total = match vram_total {
         Some(t) => t,
         None => return Ok(()),
     };
-    let model_mb = std::fs::metadata(model_path)
-        .map(|m| m.len() / (1024 * 1024))
-        .unwrap_or(0);
     let kv_mb =
         ((context as u64).saturating_mul(32) / (1024 * 1024)).saturating_sub(cache_ram_mb as u64);
     let need_mb = model_mb + kv_mb;
@@ -212,21 +223,14 @@ mod tests {
     /// pasa; en 8 GB falla con GB concretos; sin dato nunca bloquea.
     #[test]
     fn vram_fit_avisa_con_gb_y_no_bloquea_sin_dato() {
-        let dir = std::env::temp_dir().join(format!("lm-vram-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let big = dir.join("grande.gguf");
-        // 14 GB disperso: metadatos, no 14 GB reales en disco.
-        let f = std::fs::File::create(&big).unwrap();
-        f.set_len(14 * 1024 * 1024 * 1024).unwrap();
-        // KV 32K = 32768*32/1MiB = 1024 MB; con cache_ram 6144 del perfil:
-        // 14336+1024-6144 = 9216 <= 14745 (16 GB*0.9) OK.
-        assert!(check_vram_fit(&big, 32768, 6144, Some(16384)).is_ok());
-        let err = check_vram_fit(&big, 32768, 0, Some(8192)).unwrap_err();
+        // Sin disco: 14336 MB simulan el 27B (~14 GB). KV 32K = 1024 MB; con
+        // cache_ram 6144: 14336+1024-6144 = 9216 <= 14745 (16 GB*0.9) OK.
+        assert!(check_vram_fit_mb(14336, 32768, 6144, Some(16384)).is_ok());
+        let err = check_vram_fit_mb(14336, 32768, 0, Some(8192)).unwrap_err();
         assert!(err.contains("no cabe en la VRAM"), "{}", err);
         assert!(err.contains("GB"), "{}", err);
-        assert!(check_vram_fit(&big, 32768, 0, None).is_ok());
-        assert!(check_vram_fit(&big, 32768, 0, Some(32768)).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(check_vram_fit_mb(14336, 32768, 0, None).is_ok());
+        assert!(check_vram_fit_mb(14336, 32768, 0, Some(32768)).is_ok());
     }
 
     /// Umbral relativo: 2B→25, 27B→20, 70B→12, desconocido→cfg; el cfg como

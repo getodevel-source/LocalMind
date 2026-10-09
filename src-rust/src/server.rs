@@ -1049,6 +1049,34 @@ fn handle_request(
         return;
     }
 
+    // Reiniciar e instalar (P0 2026-10-09): con staging `ready`, arma la
+    // salida ordenada; el tick del loop ejecuta stop+swap+Exit en ≤5 s y el
+    // script desacoplado relanza la app ya actualizada. Sin `ready` → 409.
+    if method == "POST" && url == "/api/update/restart" {
+        let _ = req.as_reader().read_to_string(&mut String::new());
+        let snap = crate::update::update_snapshot();
+        if snap.state != "ready" || crate::update::pending_update().is_none() {
+            let _ = req.respond(json_response_for_origin(
+                409,
+                serde_json::json!({ "error": "No hay actualización lista: descarga primero" })
+                    .to_string(),
+                origin_ref,
+            ));
+            return;
+        }
+        crate::update::arm_restart();
+        mgr.log(&format!(
+            "[LocalMind] Reinicio para instalar OMNI {}: la app se cerrará y reabrirá sola.",
+            snap.latest
+        ));
+        let _ = req.respond(json_response_for_origin(
+            200,
+            serde_json::json!({ "status": "restarting", "version": snap.latest }).to_string(),
+            origin_ref,
+        ));
+        return;
+    }
+
     // Export del anillo de logs en memoria (mismo contenido que /api/logs).
     if method == "GET" && url == "/api/logs/export" {
         let lines = mgr.get_recent_logs();

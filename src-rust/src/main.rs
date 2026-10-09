@@ -50,6 +50,18 @@ fn get_base_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Directorio de INSTALACIÓN para el swap del auto-update (P0 2026-10-09):
+/// siempre el directorio del ejecutable en ejecución, jamás el `base_dir` de
+/// datos (que en desarrollo apunta al repo con `models/` y el swap movería el
+/// árbol equivocado: la app quedaba pidiendo reinicio para siempre).
+/// Puro en decisión: `check_app_dir` (update.rs) lo valida al usar.
+fn app_dir() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default()
+}
+
 fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
     // Fase C (OMNI): icono nuevo con fallback al histórico durante la transición.
     for name in ["omni.ico", "localmind.ico"] {
@@ -332,14 +344,17 @@ fn main() {
     let tray_ok = tray_handles.is_some();
 
     let mgr_cleanup = Arc::clone(&process_mgr);
-    let base_cleanup = base_dir.clone();
 
     // Salida real compartida (X con `arm_quit`, `Salir` del tray, Destroyed):
-    // detiene el motor + aplica el update pendiente + sale.
-    let do_quit = move |mgr: &Arc<ProcessManager>, base: &std::path::PathBuf| {
+    // detiene el motor + aplica el update pendiente + sale. El swap opera
+    // sobre `app_dir()` (dir del exe), NO sobre `base_dir` (datos): en una
+    // instalación ambos pueden diferir y mover el equivocado deja la app
+    // pidiendo reinicio para siempre (P0 2026-10-09).
+    let do_quit = move |mgr: &Arc<ProcessManager>| {
         mgr.stop();
+        let app = app_dir();
         if let Some(pending) = crate::update::pending_update() {
-            match crate::update::prepare_install_on_exit(base) {
+            match crate::update::prepare_install_on_exit(&app) {
                 Ok(script) => {
                     let _ = std::process::Command::new("cmd.exe")
                         .args(["/C", &script.to_string_lossy().to_string()])
@@ -347,7 +362,7 @@ fn main() {
                 }
                 Err(e) => {
                     crate::filelog::write_log_line(
-                        &crate::filelog::log_file(base),
+                        &crate::filelog::log_file(&base_dir),
                         &format!(
                             "[LocalMind] No se pudo instalar la actualización {}: {}",
                             pending.version, e
@@ -363,6 +378,14 @@ fn main() {
         // aunque no haya eventos de ventana/ratón/teclado.
         *control_flow =
             ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        // Reinicio para instalar pedido por `POST /api/update/restart` (P0):
+        // mismo `do_quit` que Salir del tray (stop + swap + Exit). El script
+        // desacoplado relanza la app ya actualizada.
+        if crate::update::take_restart_armed() {
+            do_quit(&mgr_cleanup);
+            *control_flow = ControlFlow::Exit;
+            return;
+        }
         if let Some(h) = tray_handles.as_ref() {
             let st = mgr_cleanup.get_status();
             crate::tray::refresh_tray(h, &st.status, st.is_healthy, false);
@@ -416,7 +439,7 @@ fn main() {
                 }
                 Some(crate::tray::TrayAction::Quit) => {
                     crate::tray::arm_quit();
-                    do_quit(&mgr_cleanup, &base_cleanup);
+                    do_quit(&mgr_cleanup);
                     *control_flow = ControlFlow::Exit;
                     return;
                 }
@@ -431,7 +454,7 @@ fn main() {
             } => {
                 if crate::tray::quit_armed() || !tray_ok {
                     // Salida real: motor parado + update pendiente aplicado.
-                    do_quit(&mgr_cleanup, &base_cleanup);
+                    do_quit(&mgr_cleanup);
                     *control_flow = ControlFlow::Exit;
                 } else {
                     // Segundo plano: ocultar, NO parar nada. El lock
@@ -461,7 +484,7 @@ fn main() {
                 event: WindowEvent::Destroyed,
                 ..
             } => {
-                do_quit(&mgr_cleanup, &base_cleanup);
+                do_quit(&mgr_cleanup);
                 *control_flow = ControlFlow::Exit;
             }
             _ => {}

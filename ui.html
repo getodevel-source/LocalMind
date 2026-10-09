@@ -2192,7 +2192,7 @@
               <button class="tool-btn" type="button" id="cfg-update-check" onclick="checkUpdate()"><span data-i18n="settings.updateCheck">Buscar actualización</span> <span id="cfg-update-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
               <button class="tool-btn" type="button" id="cfg-update-dl" onclick="downloadUpdate()"><span data-i18n="settings.updateDownload">Descargar</span></button>
               <button class="tool-btn" type="button" id="cfg-update-cancel" onclick="cancelUpdate()"><span data-i18n="settings.updateCancel">Cancelar</span></button>
-            </div>
+              <button class="btn btn-primary" type="button" id="cfg-update-restart" onclick="restartToInstall()" style="display: none;"><span data-i18n="settings.updateRestart">Reiniciar e instalar</span></button>
             <label class="cfg-check" style="margin-top: 6px;"><input type="checkbox" id="cfg-update-startup" onchange="saveUpdateCfg()"> <span data-i18n="settings.updateStartup">Comprobar al arrancar</span></label>
             <div class="profile-hint" data-i18n="settings.updateHint">La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.</div>
             <div id="cfg-update-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
@@ -2482,7 +2482,8 @@
         'settings.updateAvailable': 'Disponible OMNI {ver}: pulsa Descargar.',
         'settings.updateDownloading': 'Descargando OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} listo: reinicia la app para instalarlo.',
-        'settings.updateChecking': 'Comprobando…',
+        'settings.updateRestart': 'Reiniciar e instalar',
+        'settings.updateRestarting': 'Cerrando para instalar… la app se reabrirá sola.',
         'settings.updateError': 'No se pudo actualizar: {msg}',
         'settings.logFailed': 'El log en disco no se escribe (disco lleno o sin permiso): los errores pueden perderse.',
         'unlock.title': 'Desbloquear',
@@ -2747,7 +2748,8 @@
         'settings.updateAvailable': 'OMNI {ver} available: press Download.',
         'settings.updateDownloading': 'Downloading OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} ready: restart the app to install it.',
-        'settings.updateChecking': 'Checking…',
+        'settings.updateRestart': 'Restart & install',
+        'settings.updateRestarting': 'Closing to install… the app will reopen itself.',
         'settings.updateError': 'Could not update: {msg}',
         'settings.logFailed': 'Disk log is not being written (disk full or no permission): errors may be lost.',
         'unlock.title': 'Unlock',
@@ -4027,7 +4029,8 @@
       if (bar) bar.style.display = (st.state === 'downloading') ? '' : 'none';
       if (dlBtn) dlBtn.disabled = (st.state !== 'available');
       if (cancelBtn) cancelBtn.disabled = !(st.state === 'downloading' || st.state === 'checking');
-      const banner = document.getElementById('update-banner');
+      const restartBtn = document.getElementById('cfg-update-restart');
+      if (restartBtn) restartBtn.style.display = (st.state === 'ready') ? '' : 'none';
       if (banner) {
         const show = (st.state === 'available' || st.state === 'ready');
         banner.style.display = show ? '' : 'none';
@@ -4109,6 +4112,30 @@
         if (res.ok && data) renderUpdate(data);
       } catch (e) {
         cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    // Reiniciar e instalar (P0): con staging listo, el servidor arma la
+    // salida ordenada y se cierra solo en ≤5 s; el swap relanza la app ya
+    // actualizada. Sin `ready` el servidor responde 409 y se muestra.
+    async function restartToInstall() {
+      cfgInlineError('cfg-update-error', null);
+      const btn = document.getElementById('cfg-update-restart');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('/api/update/restart', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          const status = document.getElementById('cfg-update-status');
+          if (status) status.textContent = T('settings.updateRestarting');
+          return; // la app se cierra sola; no hay más UI que actualizar.
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 

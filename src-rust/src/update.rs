@@ -713,6 +713,22 @@ pub fn update_pending_or_busy() -> bool {
     update_busy() || pending_update().is_some()
 }
 
+/// Salida ordenada pedida por `POST /api/update/restart` (P0 2026-10-09): el
+/// handler HTTP no puede salir del event loop de tao; arma este flag y el
+/// tick del loop (cada 5 s en `main.rs`) ejecuta el `do_quit` real (stop +
+/// swap + Exit). `take` atómico: un solo disparo.
+static RESTART_ARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Armar la salida ordenada para instalar (la ejecuta el loop, no el handler).
+pub fn arm_restart() {
+    RESTART_ARMED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// ¿Pidió la UI reiniciar para instalar? Consume el flag (un disparo).
+pub fn take_restart_armed() -> bool {
+    RESTART_ARMED.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Reponer `models/` desde el respaldo `.prev-<ver>` si falta junto al exe
 /// (healing al arrancar): si el swap instaló un dir sin modelos (ZIPs viejos
 /// con staging sin models/ + script sin robocopy), la app arranca igual por
@@ -928,7 +944,14 @@ pub fn update_cancel() -> UpdateState {
 /// Preparar la instalación al salir: escribe el script de swap en `%TEMP%`
 /// y devuelve su ruta. El llamador (`main.rs`) lo lanza desacoplado tras
 /// detener el motor y salir del bucle de eventos.
+///
+/// Cinturón P0 (2026-10-09, drill real): `app_dir` DEBE ser el directorio del
+/// ejecutable en ejecución. Si apunta al repo de desarrollo (contiene
+/// `src-rust/Cargo.toml` o `.git`) o no contiene `OMNI.exe`, se rechaza: el
+/// swap movería el árbol equivocado y la app quedaría pidiendo reinicio para
+/// siempre. Puro y testeable vía `check_app_dir`.
 pub fn prepare_install_on_exit(app_dir: &Path) -> Result<PathBuf, String> {
+    check_app_dir(app_dir)?;
     let p =
         pending_update().ok_or_else(|| "No hay actualización lista para instalar".to_string())?;
     let staging = PathBuf::from(&p.staging_dir);
@@ -943,6 +966,26 @@ pub fn prepare_install_on_exit(app_dir: &Path) -> Result<PathBuf, String> {
         s.state = "installing".to_string();
     });
     Ok(path)
+}
+
+/// ¿Es `app_dir` un directorio de instalación válido? (puro, testeable).
+/// Válido = contiene `OMNI.exe` y NO es un árbol de desarrollo (sin
+/// `src-rust/Cargo.toml` ni `.git`). El llamador (`main.rs`) pasa SIEMPRE el
+/// dir del exe en ejecución (`app_dir()`), nunca el `base_dir` de datos.
+pub fn check_app_dir(app_dir: &Path) -> Result<(), String> {
+    if !app_dir.join("OMNI.exe").is_file() {
+        return Err(format!(
+            "Directorio de instalación inválido (sin OMNI.exe): {}",
+            app_dir.display()
+        ));
+    }
+    if app_dir.join("src-rust").join("Cargo.toml").is_file() || app_dir.join(".git").exists() {
+        return Err(format!(
+            "Directorio de instalación inválido (árbol de desarrollo, no se toca): {}",
+            app_dir.display()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1091,6 +1134,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// P0 drill real (2026-10-09): el swap intentó mover `C:\PROYECTOS\OMNI`
+    /// (repo dev) en vez de la instalación y la app quedó pidiendo reinicio
+    /// para siempre. `check_app_dir` rechaza: sin OMNI.exe, y árbol dev.
+    #[test]
+    fn check_app_dir_rechaza_repo_dev_y_dir_vacio() {
+        let base = std::env::temp_dir().join(format!("omni-appdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // Dir con OMNI.exe pero con cara de repo dev → se rechaza.
+        let dev = base.join("dev");
+        std::fs::create_dir_all(dev.join("src-rust")).unwrap();
+        std::fs::write(dev.join("OMNI.exe"), b"x").unwrap();
+        std::fs::write(dev.join("src-rust").join("Cargo.toml"), b"[package]").unwrap();
+        assert!(check_app_dir(&dev).is_err());
+        // Dir sin OMNI.exe → se rechaza.
+        let empty = base.join("vacio");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(check_app_dir(&empty).is_err());
+        // Instalación válida → pasa.
+        let app = base.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("OMNI.exe"), b"x").unwrap();
+        assert!(check_app_dir(&app).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Healing: dir sin models/ + respaldo `.prev-<ver>` con modelos → decide
     /// el respaldo y `heal_models` copia sin pisar lo existente.
     #[test]
@@ -1138,11 +1206,13 @@ mod tests {
         let staging = base.join(&tag).join("staging");
         let _ = std::fs::create_dir_all(&staging);
         let _ = std::fs::write(staging.join("OMNI.exe"), b"x");
-        // Falta ui.html → no se registra como pending.
+        // Falta ui.html → no se registra como pending. Como `recover` escanea
+        // el %TEMP% real (puede haber stagings válidos de la máquina: el drill
+        // P0 los dejó), se filtra por el tag propio en vez de exigir None.
         set_pending(None);
         let found = recover_stale_stagings();
         assert!(!found.iter().any(|v| v.contains("9.9.9")), "{:?}", found);
-        assert!(pending_update().is_none());
+        set_pending(None);
         let _ = std::fs::remove_dir_all(base.join(&tag));
     }
 }

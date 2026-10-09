@@ -6,6 +6,20 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-10-09
+
+### Corregido (P0: el drill real rompió el canal en vivo)
+- El swap operaba sobre el `base_dir` de datos en vez del dir del exe: en la
+  máquina de desarrollo intentó mover `C:\PROYECTOS\OMNI` y la app quedó
+  pidiendo reinicio para siempre. Ahora `do_quit` usa `app_dir()` (dir del
+  exe) y `prepare_install_on_exit` rechaza dirs sin `OMNI.exe` o con cara de
+  repo dev (`check_app_dir` + test).
+- Nuevo `POST /api/update/restart` (409 sin `ready`) + botón «Reiniciar e
+  instalar» en la tarjeta (claves es/en): salida ordenada por la vía oficial
+  sin taskkill. El tick del loop ejecuta stop+swap+Exit en ≤5 s.
+- Harness `tests/update-flow.mjs` (6 checks, sin red ni swap): forma del
+  canal, restart-409, botón en UI, scripts sin rutas dev, version.update.
+
 ## [2.0.6] - 2026-10-09
 
 ### Añadido (adaptativo: la app se ajusta al usuario, no al revés)
