@@ -602,8 +602,12 @@ pub const RUNTIME_TOP_LEVEL: &[&str] = &[
 ];
 
 /// Extraer el ZIP verificado a `staging/`, validando su contenido:
-/// debe traer `OMNI.exe` y `ui.html`; se rechaza cualquier entrada con
-/// `..`, ruta absoluta o que toque `models/`.
+/// debe traer `OMNI.exe` y `ui.html`; se IGNORA (omite, no falla) cualquier
+/// entrada bajo `models/` —el ZIP oficial no trae pesos ni puntero, pero un
+/// ZIP viejo con `models/PON_TUS_MODELOS_AQUI.txt` (v2.0.4, que rompía el
+/// canal) debe instalar igual sin tocar los modelos del usuario.
+/// Se rechaza: `..`, rutas absolutas y cualquier `.gguf` fuera de models/
+/// (un ZIP que intente colar pesos en otra ruta no es del canal).
 pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
     let f = std::fs::File::open(zip_path)
         .map_err(|e| format!("No se pudo abrir {}: {}", zip_path.display(), e))?;
@@ -626,8 +630,18 @@ pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
             ));
         }
         let lower = name.to_lowercase();
-        if lower.starts_with("models/") || lower == "models" {
-            return Err("La actualización no debe traer models/".to_string());
+        // models/ se omite: ni el puntero ni (mucho menos) pesos pisan lo del
+        // usuario. El swap mueve el dir completo, así que lo omitido en staging
+        // se repone desde el respaldo (ver `swap_script` + healing).
+        if lower == "models" || lower.starts_with("models/") {
+            continue;
+        }
+        // `.gguf` fuera de models/ = ZIP ajeno al canal: se rechaza.
+        if lower.ends_with(".gguf") {
+            return Err(format!(
+                "La actualización trae un peso fuera de models/: {}",
+                entry.name()
+            ));
         }
         if name == "OMNI.exe" {
             seen_exe = true;
@@ -673,15 +687,22 @@ pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
 /// Generar el script de swap que el `cmd` desacoplado ejecuta tras la
 /// salida: `app` → `app.prev-<ver>` (respaldo), `staging` → `app`, y
 /// arranque del exe nuevo. Revierte al respaldo si el segundo rename falla.
-/// Puro (el llamador lo escribe y lo lanza).
+/// `models/` se repone desde el respaldo tras el swap: el staging nunca trae
+/// models/ (stage_zip la omite), así que sin esta línea el dir nuevo quedaría
+/// sin carpeta de modelos. Puro (el llamador lo escribe y lo lanza).
 pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String {
     let prev = app_dir.with_extension(format!("prev-{}", safe_tag(version)));
+    let prev_models = prev.join("models");
     // `ping -n 3` ≈ 2 s de espera a que el exe salga y libere el lock.
+    // `robocopy prev/models app/models /E` repone pesos + puntero del usuario;
+    // `if exist` guarda el caso de instalación sin models/ previa.
     format!(
-        "@echo off\r\nping -n 3 127.0.0.1 >nul\r\nif exist \"{prev}\" rd /s /q \"{prev}\"\r\nmove \"{app}\" \"{prev}\" >nul\r\nif errorlevel 1 exit /b 1\r\nmove \"{staging}\" \"{app}\" >nul\r\nif errorlevel 1 move \"{prev}\" \"{app}\" >nul\r\nif errorlevel 1 exit /b 1\r\nstart \"\" \"{exe}\"\r\ndel \"%~f0\"\r\n",
+        "@echo off\r\nping -n 3 127.0.0.1 >nul\r\nif exist \"{prev}\" rd /s /q \"{prev}\"\r\nmove \"{app}\" \"{prev}\" >nul\r\nif errorlevel 1 exit /b 1\r\nmove \"{staging}\" \"{app}\" >nul\r\nif errorlevel 1 move \"{prev}\" \"{app}\" >nul\r\nif errorlevel 1 exit /b 1\r\nif exist \"{prev_models}\" robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL >nul\r\nstart \"\" \"{exe}\"\r\ndel \"%~f0\"\r\n",
         app = app_dir.display(),
         prev = prev.display(),
         staging = staging_dir.display(),
+        prev_models = prev_models.display(),
+        app_models = app_dir.join("models").display(),
         exe = app_dir.join("OMNI.exe").display(),
     )
 }
@@ -690,6 +711,70 @@ pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String 
 #[allow(dead_code)]
 pub fn update_pending_or_busy() -> bool {
     update_busy() || pending_update().is_some()
+}
+
+/// Reponer `models/` desde el respaldo `.prev-<ver>` si falta junto al exe
+/// (healing al arrancar): si el swap instaló un dir sin modelos (ZIPs viejos
+/// con staging sin models/ + script sin robocopy), la app arranca igual por
+/// la rama 3 de `get_base_dir`, pero el motor no encuentra `.gguf`. Puro en
+/// decisión (`heal_models_decision`), efecto (`heal_models`) separado.
+/// Devuelve el origen repuesto o `None` si no había nada que hacer.
+pub fn heal_models_decision(app_dir: &Path) -> Option<PathBuf> {
+    if app_dir.join("models").is_dir() {
+        return None;
+    }
+    let parent = app_dir.parent()?;
+    let stem = app_dir.file_name()?.to_string_lossy().to_string();
+    let mut best: Option<PathBuf> = None;
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if p.is_dir()
+                && name.starts_with(&format!("{}.prev-", stem))
+                && p.join("models").is_dir()
+            {
+                best = Some(p);
+            }
+        }
+    }
+    best
+}
+
+/// Efecto del healing: copia `prev/models` → `app/models` (solo lo ausente).
+/// Best-effort: si falla, `Err` en español y la app sigue (el motor dirá qué
+/// falta al arrancar).
+pub fn heal_models(app_dir: &Path) -> Result<Option<String>, String> {
+    let prev = match heal_models_decision(app_dir) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let src = prev.join("models");
+    let dst = app_dir.join("models");
+    copy_dir_contents(&src, &dst).map_err(|e| format!("No se pudo reponer models/: {}", e))?;
+    Ok(Some(prev.to_string_lossy().to_string()))
+}
+
+/// Copia recursiva de contenidos (sin mover el dir): crea lo ausente, no
+/// pisa ficheros existentes (los pesos del usuario mandan).
+fn copy_dir_contents(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for e in std::fs::read_dir(src)? {
+        let e = e?;
+        let name = e.file_name();
+        let s = e.path();
+        let d = dst.join(&name);
+        let ft = e.file_type()?;
+        if ft.is_dir() {
+            copy_dir_contents(&s, &d)?;
+        } else if !d.exists() {
+            std::fs::copy(&s, &d)?;
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -914,12 +999,17 @@ mod tests {
     }
 
     #[test]
-    fn swap_no_toca_models_ni_appdata() {
+    fn swap_repone_models_y_no_toca_appdata() {
         let app = Path::new("C:\\OMNI");
         let st = Path::new("C:\\TEMP\\staging");
         let s = swap_script(app, st, "2.1.0");
         assert!(s.contains("OMNI.exe"));
-        assert!(!s.to_lowercase().contains("models"));
+        // models/ se REPONE desde el respaldo (robocopy prev→app), no se pisa:
+        // el staging nunca la trae y sin esta línea el dir nuevo quedaría sin
+        // carpeta de modelos.
+        assert!(s.contains("robocopy"), "{}", s);
+        assert!(s.contains("prev-2.1.0"), "{}", s);
+        assert!(s.to_lowercase().contains("models"), "{}", s);
         assert!(!s.to_lowercase().contains("appdata"));
     }
 
@@ -940,6 +1030,94 @@ mod tests {
         let out = stage_zip(&zp, &dir.join("staging"));
         assert!(out.is_err(), "el zip con .. debe rechazarse");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El ZIP viejo con `models/PON_TUS_MODELOS_AQUI.txt` (v2.0.4, rompía el
+    /// canal) instala igual: models/ se omite, exe+ui pasan.
+    #[test]
+    fn staging_omite_models_y_acepta_puntero_viejo() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("omni-upd-skip-{}", now_secs()));
+        let _ = std::fs::create_dir_all(&dir);
+        let zp = dir.join("old.zip");
+        {
+            let f = std::fs::File::create(&zp).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            for name in [
+                "OMNI.exe",
+                "ui.html",
+                "models/PON_TUS_MODELOS_AQUI.txt",
+                "models/",
+            ] {
+                if name.ends_with('/') {
+                    w.add_directory(name, zip::write::SimpleFileOptions::default())
+                        .unwrap();
+                } else {
+                    w.start_file(name, zip::write::SimpleFileOptions::default())
+                        .unwrap();
+                    w.write_all(b"x").unwrap();
+                }
+            }
+            w.finish().unwrap();
+        }
+        let stg = dir.join("staging");
+        stage_zip(&zp, &stg).expect("el puntero viejo no debe romper el canal");
+        assert!(stg.join("OMNI.exe").is_file());
+        assert!(stg.join("ui.html").is_file());
+        assert!(!stg.join("models").exists(), "models/ no debe staged");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `.gguf` fuera de models/ = ZIP ajeno: se rechaza aunque traiga exe+ui.
+    #[test]
+    fn staging_rechaza_gguf_fuera_de_models() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("omni-upd-gguf-{}", now_secs()));
+        let _ = std::fs::create_dir_all(&dir);
+        let zp = dir.join("smug.zip");
+        {
+            let f = std::fs::File::create(&zp).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            for name in ["OMNI.exe", "ui.html", "pesos-colados.gguf"] {
+                w.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                w.write_all(b"x").unwrap();
+            }
+            w.finish().unwrap();
+        }
+        let out = stage_zip(&zp, &dir.join("staging"));
+        assert!(out.is_err(), "gguf fuera de models/ debe rechazarse");
+        assert!(out.unwrap_err().contains("fuera de models/"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Healing: dir sin models/ + respaldo `.prev-<ver>` con modelos → decide
+    /// el respaldo y `heal_models` copia sin pisar lo existente.
+    #[test]
+    fn heal_models_repone_desde_respaldo_sin_pisar() {
+        let base = std::env::temp_dir().join(format!("omni-heal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let app = base.join("OMNI");
+        let prev = base.join("OMNI.prev-2.0.4");
+        std::fs::create_dir_all(app.join("bin")).unwrap();
+        std::fs::create_dir_all(prev.join("models")).unwrap();
+        std::fs::write(prev.join("models").join("a.gguf"), b"a").unwrap();
+        std::fs::write(prev.join("models").join("b.gguf"), b"b").unwrap();
+        assert_eq!(heal_models_decision(&app), Some(prev.clone()));
+        let src = heal_models(&app).expect("healing");
+        assert_eq!(src, Some(prev.to_string_lossy().to_string()));
+        assert_eq!(
+            std::fs::read(app.join("models").join("a.gguf")).unwrap(),
+            b"a"
+        );
+        assert_eq!(
+            std::fs::read(app.join("models").join("b.gguf")).unwrap(),
+            b"b"
+        );
+        // Con models/ presente ya no hay nada que hacer.
+        assert_eq!(heal_models_decision(&app), None);
+        assert_eq!(heal_models(&app).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
     #[test]
     fn fits_exige_doble_y_sin_dato_no_bloquea() {

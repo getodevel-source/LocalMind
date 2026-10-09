@@ -6,6 +6,19 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.5] - 2026-10-09
+
+### Corregido (canal auto-update: el drill v2.0.4 lo rompió en vivo)
+- `stage_zip` ya no falla si el ZIP trae `models/`: la omite (ni puntero ni
+  pesos pisan lo del usuario) y rechaza `.gguf` fuera de `models/`. Tests:
+  `staging_omite_models_y_acepta_puntero_viejo`,
+  `staging_rechaza_gguf_fuera_de_models`.
+- El ZIP portable ya no trae `models/` (ni el puntero): `get_base_dir` cae
+  al dir del exe igual (rama 3).
+- El swap repone `models/` desde el respaldo `.prev-<ver>` (robocopy) y al
+  arrancar hay healing (`heal_models`: copia lo ausente sin pisar). Test
+  `heal_models_repone_desde_respaldo_sin_pisar`.
+
 ## [2.0.4] - 2026-10-09
 
 ### Probado

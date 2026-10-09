@@ -115,16 +115,10 @@ try {
   Copy-Item (Join-Path $RepoRoot 'src-rust/ui_fallback.html') $Stage
   # llama.cpp runtime (whole dir; ~106 MB). Excludes nothing: bin/ is the runtime.
   Copy-Item (Join-Path $RepoRoot 'bin') (Join-Path $Stage 'bin') -Recurse
-  # Empty models/ dir so first run resolves base_dir to the portable folder
-  # (get_base_dir: exe dir wins when it contains models/). Compress-Archive
-  # skips truly empty dirs, so ship a pointer file that also tells the user
-  # where weights go.
-  $ModelsDir = New-Item -ItemType Directory -Path (Join-Path $Stage 'models') -Force
-  Set-Content -Path (Join-Path $ModelsDir 'PON_TUS_MODELOS_AQUI.txt') -Encoding UTF8 -Value @(
-    'Copia tus archivos .gguf en esta carpeta (models/ junto a OMNI.exe).',
-    'Esta carpeta NUNCA viaja dentro del ZIP (los pesos pesan ~14 GB).'
-  )
-
+  # NOTA: models/ NO viaja en el ZIP (ni siquiera el puntero): el updater
+  # (stage_zip) omite models/ y get_base_dir cae al dir del exe igual
+  # (rama 3: exe dir as-is). Meter el puntero rompía el canal (v2.0.4:
+  # "La actualización no debe traer models/").
   Set-Content -Path (Join-Path $Stage 'version.txt') -Encoding UTF8 -Value @(
     "OMNI $Version"
     "commit: $Commit"

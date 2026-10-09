@@ -212,6 +212,16 @@ fn main() {
             ver
         ));
     }
+    // Healing de modelos: si el swap dejó un dir sin models/ (canal viejo),
+    // reponerla desde el respaldo `.prev-<ver>` más próximo.
+    match crate::update::heal_models(&base_dir) {
+        Ok(Some(prev)) => process_mgr.log(&format!(
+            "[LocalMind] models/ repuesta desde el respaldo {} (el update no la traía).",
+            prev
+        )),
+        Ok(None) => {}
+        Err(e) => process_mgr.log(&format!("[LocalMind] [WARN] {}", e)),
+    }
     // Start embedded HTTP server
     let server = match HttpServer::start(
         Arc::clone(&process_mgr),
