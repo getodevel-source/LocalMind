@@ -96,13 +96,13 @@ pub fn log_usage(
     obj.insert(
         "prompt_tokens".to_string(),
         prompt_tokens
-            .map(|v| serde_json::Value::from(v))
+            .map(serde_json::Value::from)
             .unwrap_or(serde_json::Value::Null),
     );
     obj.insert(
         "completion_tokens".to_string(),
         completion_tokens
-            .map(|v| serde_json::Value::from(v))
+            .map(serde_json::Value::from)
             .unwrap_or(serde_json::Value::Null),
     );
     obj.insert("ms".to_string(), serde_json::json!(ms));

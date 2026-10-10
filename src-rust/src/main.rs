@@ -16,19 +16,18 @@ mod tray;
 mod update;
 mod usage;
 
+use config::ConfigStore;
+use process::ProcessManager;
+use server::HttpServer;
 use std::env;
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop};
 use tao::window::{Icon, WindowBuilder};
 use wry::WebViewBuilder;
-
-use config::ConfigStore;
-use process::ProcessManager;
-use server::HttpServer;
 
 fn get_base_dir() -> PathBuf {
     if let Ok(exe) = env::current_exe() {
@@ -63,7 +62,7 @@ fn app_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
-fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
+fn load_window_icon(base_dir: &Path) -> Option<Icon> {
     // Fase C (OMNI): icono nuevo con fallback al histórico durante la transición.
     for name in ["omni.ico", "localmind.ico"] {
         if let Ok(bytes) = std::fs::read(base_dir.join(name)) {
@@ -310,15 +309,13 @@ fn main() {
             crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
             let _ = rfd::MessageDialog::new()
                 .set_title("OMNI necesita WebView2")
-                .set_description(&format!(
-                    "{}\n\nInstala Microsoft Edge WebView2 y reintenta.",
-                    msg
+                .set_description(format!(
+                    "{msg}\n\nInstala Microsoft Edge WebView2 y reintenta."
                 ))
                 .show();
             return;
         }
     };
-
     // Keep webview alive during event loop
     let _wv = webview;
     let _ = cfg_now; // (leído para materializar el TOML default en el primer arranque)
@@ -382,7 +379,7 @@ fn main() {
                             "-ExecutionPolicy",
                             "Bypass",
                             "-File",
-                            &script.to_string_lossy().to_string(),
+                            script.to_string_lossy().as_ref(),
                         ])
                         .creation_flags(CREATE_NO_WINDOW)
                         .stdin(std::process::Stdio::null())

@@ -16,7 +16,7 @@
 //! 500 en español en vez de un falso 200. Todo lo testeable vive en funciones
 //! puras (sin diálogos ni red ni spawn).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Ids estables del selector único de la UI, en orden fijo.
 pub const AGENT_ORDER: [&str; 5] = ["pi", "omp", "opencode", "web", "deepseek"];
@@ -395,12 +395,12 @@ fn exe_suffixes() -> Vec<String> {
 }
 
 #[cfg(windows)]
-fn is_executable_file(p: &PathBuf) -> bool {
+fn is_executable_file(p: &Path) -> bool {
     p.is_file()
 }
 
 #[cfg(not(windows))]
-fn is_executable_file(p: &PathBuf) -> bool {
+fn is_executable_file(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     p.is_file()
         && std::fs::metadata(p)
@@ -480,6 +480,9 @@ pub fn effort_flag(effort: Option<&str>) -> &'static str {
 /// `agent_path` es el dir privado ya escrito por `agents::write_agent_dir`.
 /// `base_url` es la URL `/v1` del gateway que atiende (local o remoto).
 /// `served` = id del modelo realmente cargado (ver `cli_model`).
+/// CI (`-D warnings`): 8 args estables de constructor de comando; agruparlos
+/// en struct rompería los 4 llamadores sin beneficio.
+#[allow(clippy::too_many_arguments)]
 pub fn cli_inner_cmd(
     id: AgentId,
     cd_prefix: &str,

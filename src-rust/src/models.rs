@@ -1240,9 +1240,11 @@ pub fn model_capabilities(filename: &str) -> serde_json::Value {
     // la UI no limita y el motor manda por /props).
     let ctx_native: Option<usize> = if low.contains("qwen3") || low.contains("bonsai") {
         Some(262144)
-    } else if low.contains("qwen2.5") {
-        Some(131072)
-    } else if low.contains("llama-3.1") || low.contains("llama-3.2") || low.contains("llama3.1") {
+    } else if low.contains("qwen2.5")
+        || low.contains("llama-3.1")
+        || low.contains("llama-3.2")
+        || low.contains("llama3.1")
+    {
         Some(131072)
     } else if low.contains("llama-3") || low.contains("llama3") {
         Some(8192)

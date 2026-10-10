@@ -442,7 +442,11 @@ impl ProcessManager {
                         let is_ok = Self::health_check(port);
                         // Puerta de aceptación (D1): una sola vez por arranque, sin el lock
                         // cogido durante la request de verificación (el status sigue legible).
-                        let mut gate_outcome: Option<Result<(f64, u64, Vec<f64>), String>> = None;
+                        // CI (`-D warnings`): el alias no compensa para un local de 1 uso.
+                        #[allow(clippy::type_complexity)]
+                        let mut gate_outcome: Option<
+                            Result<(f64, u64, Vec<f64>), String>,
+                        > = None;
                         if is_ok && current_status == "starting" && !gate_done {
                             gate_done = true;
                             let my_epoch = seen_epoch;
@@ -746,10 +750,10 @@ impl ProcessManager {
     /// `Authorization: Bearer <clave>` en cada llamada al motor.
     #[allow(clippy::too_many_arguments)]
     fn build_engine_cmd(
-        llama_bin: &std::path::PathBuf,
-        base_dir: &std::path::PathBuf,
+        llama_bin: &std::path::Path,
+        base_dir: &std::path::Path,
         process_priority_class: u32,
-        model_path: &std::path::PathBuf,
+        model_path: &std::path::Path,
         context: usize,
         threads: usize,
         threads_batch: usize,
@@ -859,12 +863,14 @@ impl ProcessManager {
     /// (mismo arranque lógico), NO re-registra historial, NO revalida (ya
     /// validado), NO re-resuelve fallbacks, NO lee `st.context`/`st.model`.
     /// Reengancha stdout/stderr a los lectores; deja `starting` para la puerta.
+    /// CI (`-D warnings`): 10 args espejo de `start()`; struct rompería la paridad.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_child_nospec(
         child: &Arc<Mutex<Option<std::process::Child>>>,
         logs: &Arc<RwLock<VecDeque<LogEvent>>>,
         senders: &Arc<Mutex<Vec<mpsc::Sender<String>>>>,
         seq: &Arc<AtomicU64>,
-        log_file: &std::path::PathBuf,
+        log_file: &std::path::Path,
         status: &Arc<RwLock<ServerStatus>>,
         config: &Arc<ConfigStore>,
         bin_dir: std::path::PathBuf,
@@ -928,13 +934,13 @@ impl ProcessManager {
         logs: &Arc<RwLock<VecDeque<LogEvent>>>,
         senders: &Arc<Mutex<Vec<mpsc::Sender<String>>>>,
         seq: &Arc<AtomicU64>,
-        log_file: &std::path::PathBuf,
+        log_file: &std::path::Path,
     ) {
         if let Some(out) = stdout {
             let l_c = Arc::clone(logs);
             let s_c = Arc::clone(senders);
             let q_c = Arc::clone(seq);
-            let f_c = log_file.clone();
+            let f_c = log_file.to_path_buf();
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(out);
                 use std::io::BufRead;
@@ -962,7 +968,7 @@ impl ProcessManager {
             let l_c = Arc::clone(logs);
             let s_c = Arc::clone(senders);
             let q_c = Arc::clone(seq);
-            let f_c = log_file.clone();
+            let f_c = log_file.to_path_buf();
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(err);
                 use std::io::BufRead;
@@ -2303,6 +2309,8 @@ fn resolve_model_filename(
 /// una sesión vieja): 1) `req_ctx` explícito; 2) perfil explícito en el request
 /// → contexto de ESE perfil; 3) sin perfil explícito y última sesión con el
 /// mismo perfil+modelo → contexto guardado; 4) contexto del perfil resuelto.
+/// CI (`-D warnings`): 8 args de precedencia documentada 1-4; struct oscurece.
+#[allow(clippy::too_many_arguments)]
 fn resolve_context(
     req_ctx: Option<usize>,
     req_profile: Option<&str>,
@@ -2347,7 +2355,7 @@ fn crash_summary(lines: &[String], status: &str) -> String {
             status
         );
     }
-    let tail: Vec<&str> = nonempty.iter().rev().take(30).rev().map(|s| *s).collect();
+    let tail: Vec<&str> = nonempty.iter().rev().take(30).rev().copied().collect();
     let mut picked: Vec<&str> = tail
         .iter()
         .filter(|l| {
@@ -2359,10 +2367,10 @@ fn crash_summary(lines: &[String], status: &str) -> String {
                 || lower.contains("out of")
                 || lower.contains("exception")
         })
-        .map(|s| *s)
+        .copied()
         .collect();
     if picked.is_empty() {
-        picked = tail.iter().rev().take(5).rev().map(|s| *s).collect();
+        picked = tail.iter().rev().take(5).rev().copied().collect();
     }
     let mut joined = picked.join(" | ");
     if joined.chars().count() > 600 {

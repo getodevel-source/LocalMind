@@ -765,6 +765,8 @@ fn puerta_auth_exige_clave(method: &str, url: &str) -> bool {
 /// WebView local eso es auto-login por diseño; en un loopback compartido otro
 /// proceso local podría recogerla. Endurecerlo (pedir clave también en `/`)
 /// rompería el arranque sin fricción y queda como decisión pendiente.
+/// CI (`-D warnings`): 8 args de contexto por request; struct por request no compensa.
+#[allow(clippy::too_many_arguments)]
 fn handle_request(
     mut req: tiny_http::Request,
     method: String,
@@ -2450,10 +2452,10 @@ fn handle_request(
             .ok()
             .and_then(|v| v.get("overwrite").and_then(|o| o.as_bool()))
             .unwrap_or(false);
+        // El diálogo nativo bloquea: hilo propio, nunca el hilo HTTP; espera
         // acotada (120 s) para no dejar la conexión colgada. Al vencer se
         // responde `cancelled/timeout` y el hilo del diálogo queda inofensivo
         // (su resultado ya nadie lo lee).
-        let models_dir = mgr.models_dir().to_path_buf();
         let (tx, rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
             let picked = rfd::FileDialog::new()
@@ -2527,7 +2529,7 @@ fn handle_request(
             .filter_map(|kv| {
                 let mut it = kv.splitn(2, '=');
                 match (it.next(), it.next()) {
-                    (Some(k), Some(val)) if k == "limit" => val.parse::<usize>().ok(),
+                    (Some("limit"), Some(val)) => val.parse::<usize>().ok(),
                     _ => None,
                 }
             })
@@ -2684,7 +2686,7 @@ fn handle_launch_generic(
             let _ = req.respond(json_response_for_origin(409, r#"{"error":"modo_guest_sin_motor_local","message":"En modo Guest no hay motor local: usa el Chat contra el Oráculo."}"#.into(), origin.as_deref()));
             return;
         }
-        open_browser_action(&mgr);
+        open_browser_action(mgr);
         let _ = req.respond(json_response_for_origin(
             200,
             r#"{"status":"ok"}"#.into(),
@@ -2701,7 +2703,7 @@ fn handle_launch_generic(
     // vive en `launcher`, testeado). `task` solo la usa `deepseek`.
     match crate::launcher::launch_action_for(id, crate::launcher::deepseek_installed()) {
         crate::launcher::LaunchAction::Web => {
-            open_browser_action(&mgr);
+            open_browser_action(mgr);
             let _ = req.respond(json_response_for_origin(
                 200,
                 r#"{"status":"ok"}"#.into(),

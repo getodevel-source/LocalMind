@@ -39,7 +39,7 @@ impl EventReader {
             let pad = min - s.len() - 3;
             s.push_str(": ");
             s.push_str(&" ".repeat(pad));
-            s.push_str("\n");
+            s.push('\n');
         }
         s.into_bytes()
     }

@@ -658,7 +658,7 @@ pub struct EnginePrevDefaults {
 /// dueño puso); v4 trae 90/3 pero sin `slow_gate_tps`; v5 es la actual.
 pub fn previous_engine_defaults(version: u32) -> EnginePrevDefaults {
     match version {
-        0 | 1 | 2 | 3 => EnginePrevDefaults {
+        0..=3 => EnginePrevDefaults {
             idle_timeout_secs: Some(1500),
             start_cooldown_secs: None,
             max_starts_per_hour: None,
@@ -898,14 +898,13 @@ impl ConfigStore {
                 }
             }
         }
-        let store = Self {
+        Self {
             path,
             inner: Arc::new(RwLock::new(cfg)),
             // La nota de ilegibilidad pisa a la de migración: solo una de las
             // dos puede ocurrir, y perder la config es lo grave.
             pending_note: Arc::new(RwLock::new(ilegible_note.or(tuned_note))),
-        };
-        store
+        }
     }
 
     fn config_path(base_dir: &Path) -> PathBuf {
