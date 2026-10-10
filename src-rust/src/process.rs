@@ -3098,12 +3098,16 @@ mod tests {
     /// (`DEPRECATED: argument ... specified multiple times`).
     #[test]
     fn argv_no_repite_las_flags_del_motor() {
-        let mut engine = crate::config::EngineConfig::default();
-        engine.reasoning_preserve = true;
-        engine.extra_flags = vec!["--jinja".to_string(), "--no-warmup".to_string()];
-        let mut profile = crate::config::HardwareProfile::default();
-        profile.cache_ram = 8192;
-        profile.extra_flags = vec!["--mlock".to_string()];
+        let engine = crate::config::EngineConfig {
+            reasoning_preserve: true,
+            extra_flags: vec!["--jinja".to_string(), "--no-warmup".to_string()],
+            ..crate::config::EngineConfig::default()
+        };
+        let profile = crate::config::HardwareProfile {
+            cache_ram: 8192,
+            extra_flags: vec!["--mlock".to_string()],
+            ..crate::config::HardwareProfile::default()
+        };
 
         let tokens = argv_tokens(&engine, &profile, 32768, false);
         let count = |flag: &str| tokens.iter().filter(|t| t.as_str() == flag).count();
@@ -3145,10 +3149,14 @@ mod tests {
     /// flag que depende de un valor debe ir seguida del suyo.
     #[test]
     fn argv_no_repite_los_valores_de_las_flags() {
-        let mut engine = crate::config::EngineConfig::default();
-        engine.reasoning_preserve = true;
-        let mut profile = crate::config::HardwareProfile::default();
-        profile.cache_ram = 8192;
+        let engine = crate::config::EngineConfig {
+            reasoning_preserve: true,
+            ..crate::config::EngineConfig::default()
+        };
+        let profile = crate::config::HardwareProfile {
+            cache_ram: 8192,
+            ..crate::config::HardwareProfile::default()
+        };
 
         let tokens = argv_tokens(&engine, &profile, 32768, false);
         let values = |flag: &str| -> Vec<String> {
@@ -3656,9 +3664,10 @@ mod tests {
     }
 
     fn spec_engine() -> crate::config::EngineConfig {
-        let mut e = crate::config::EngineConfig::default();
-        e.speculation = Some(crate::config::SpeculationConfig::default());
-        e
+        crate::config::EngineConfig {
+            speculation: Some(crate::config::SpeculationConfig::default()),
+            ..crate::config::EngineConfig::default()
+        }
     }
 
     fn ctx_profile(context: usize) -> crate::config::HardwareProfile {

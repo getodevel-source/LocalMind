@@ -1627,22 +1627,22 @@ mod tests {
         let f2 = dir.join("b.gguf");
         std::fs::write(&f1, b"gguf-a").unwrap();
         std::fs::write(&f2, b"gguf-b").unwrap();
-        let names = copy_picked(&models, &[f1.clone(), f2.clone()], false).unwrap();
+        let names = copy_picked(&models, &[f1.clone(), f2], false).unwrap();
         assert_eq!(names, vec!["a.gguf".to_string(), "b.gguf".to_string()]);
         // Sin overwrite, el segundo intento falla con "ya existe".
-        let err = copy_picked(&models, &[f1.clone()], false).unwrap_err();
+        let err = copy_picked(&models, std::slice::from_ref(&f1), false).unwrap_err();
         assert!(err.is_exists(), "{}", err);
         // Con overwrite, pisa sin dejar tmps.
         std::fs::write(&f1, b"gguf-a2").unwrap();
         assert_eq!(
-            copy_picked(&models, &[f1.clone()], true).unwrap(),
+            copy_picked(&models, std::slice::from_ref(&f1), true).unwrap(),
             vec!["a.gguf".to_string()]
         );
         assert_eq!(std::fs::read(models.join("a.gguf")).unwrap(), b"gguf-a2");
         // Self-import: el fichero que ya vive en models/ es no-op.
         let ya = models.join("b.gguf");
         assert_eq!(
-            copy_picked(&models, &[ya.clone()], false).unwrap(),
+            copy_picked(&models, std::slice::from_ref(&ya), false).unwrap(),
             vec!["b.gguf".to_string()]
         );
         // Sin parciales: ningún `.tmp-*` en models/.

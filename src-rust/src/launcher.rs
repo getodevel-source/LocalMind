@@ -990,10 +990,10 @@ mod tests {
         let dest = opencode_config_path(&home);
         assert!(dest.to_string_lossy().contains("opencode.json"));
         assert!(dest.starts_with(&home));
-        assert_eq!(write_opencode_config(&home, &a).unwrap(), true);
+        assert!(write_opencode_config(&home, &a).unwrap());
         assert!(dest.is_file());
-        assert_eq!(write_opencode_config(&home, &a).unwrap(), false);
-        assert_eq!(write_opencode_config(&home, &b).unwrap(), true);
+        assert!(!write_opencode_config(&home, &a).unwrap());
+        assert!(write_opencode_config(&home, &b).unwrap());
         // `cmd_set_json` documenta el escape roto (se conserva, no se usa).
         assert_eq!(cmd_set_json("{\"a\":1}"), "{\\\"a\\\":1}");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1040,11 +1040,11 @@ mod tests {
         // Escritura solo-si-cambia: segunda vez no toca el fichero.
         let dir = std::env::temp_dir().join(format!("lm-ds-patch-{}", std::process::id()));
         let home = dir.join("deepseek");
-        assert_eq!(write_deepseek_patch(&home, &a).unwrap(), true);
+        assert!(write_deepseek_patch(&home, &a).unwrap());
         let dest = deepseek_patch_path(&home);
         assert!(dest.is_file());
-        assert_eq!(write_deepseek_patch(&home, &a2).unwrap(), false);
-        assert_eq!(write_deepseek_patch(&home, &b).unwrap(), true);
+        assert!(!write_deepseek_patch(&home, &a2).unwrap());
+        assert!(write_deepseek_patch(&home, &b).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

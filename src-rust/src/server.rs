@@ -4467,10 +4467,7 @@ mod proxy {
                 store.save()?;
                 Ok(en)
             };
-            assert_eq!(
-                apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap(),
-                false
-            );
+            assert!(!apply(&store, r#"{"engine":{"speculation":{"enabled":false}}}"#).unwrap());
             assert_eq!(
                 store.get().engine.speculation.as_ref().map(|s| s.enabled),
                 Some(false)
