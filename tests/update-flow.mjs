@@ -86,6 +86,21 @@ async function main() {
     }
     const alive = await req("/api/update");
     report(alive.status === 200, "app viva tras restart-409", `status=${alive.status}`);
+    // 2b. Invariante P0-2: si dice `ready`, el staging existe en disco.
+    try {
+      const u = JSON.parse(alive.text);
+      if (u.state === "ready") {
+        const fs2 = await import("node:fs");
+        const path2 = await import("node:path");
+        const os2 = await import("node:os");
+        const st = fs2.readdirSync(path2.join(os2.tmpdir(), "omni-update"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        report(st.length > 0, "ready con staging en disco", `dirs: ${st.slice(0, 4).join(",")}`);
+      } else {
+        report(true, "ready con staging en disco", `state=${u.state} (no aplica)`);
+      }
+    } catch (e) {
+      report(false, "ready con staging en disco", String(e.message).slice(0, 120));
+    }
   } catch (e) {
     report(false, "POST /api/update/restart", `request failed: ${e.message}`);
   }

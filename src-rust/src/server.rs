@@ -1055,7 +1055,18 @@ fn handle_request(
     if method == "POST" && url == "/api/update/restart" {
         let _ = req.as_reader().read_to_string(&mut String::new());
         let snap = crate::update::update_snapshot();
-        if snap.state != "ready" || crate::update::pending_update().is_none() {
+        // Invariante P0-2: `ready` exige pending + staging VÁLIDO en disco
+        // (con OMNI.exe+ui.html). Si el staging se perdió (limpieza de %TEMP%),
+        // se auto-repara a error con motivo en vez de reiniciar en falso.
+        let staged_ok = crate::update::pending_update().is_some_and(|p| {
+            let st = PathBuf::from(&p.staging_dir);
+            st.is_dir() && st.join("OMNI.exe").is_file() && st.join("ui.html").is_file()
+        });
+        if snap.state != "ready" || !staged_ok {
+            if snap.state == "ready" {
+                // Auto-repair: el estado mentía (staging perdido) → error honesto.
+                crate::update::mark_staging_lost();
+            }
             let _ = req.respond(json_response_for_origin(
                 409,
                 serde_json::json!({ "error": "No hay actualización lista: descarga primero" })
@@ -1064,7 +1075,6 @@ fn handle_request(
             ));
             return;
         }
-        crate::update::arm_restart();
         mgr.log(&format!(
             "[LocalMind] Reinicio para instalar OMNI {}: la app se cerrará y reabrirá sola.",
             snap.latest

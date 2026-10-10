@@ -216,6 +216,10 @@ struct UpdateInner {
     cancel: AtomicBool,
     bytes_n: std::sync::atomic::AtomicU64,
     last_check_secs: std::sync::atomic::AtomicU64,
+    /// Cuándo se tomó `busy` (epoch s). Watchdog: si un worker muere sin
+    /// liberarlo, el próximo `spawn_*` lo recupera tras 10 min en vez de
+    /// dar 409 para siempre.
+    busy_since_secs: std::sync::atomic::AtomicU64,
     pending: Mutex<Option<PendingUpdate>>,
 }
 
@@ -237,6 +241,7 @@ static UPD: LazyLock<UpdateInner> = LazyLock::new(|| UpdateInner {
     cancel: AtomicBool::new(false),
     bytes_n: std::sync::atomic::AtomicU64::new(0),
     last_check_secs: std::sync::atomic::AtomicU64::new(0),
+    busy_since_secs: std::sync::atomic::AtomicU64::new(0),
     pending: Mutex::new(None),
 });
 
@@ -273,6 +278,30 @@ fn update_set(f: impl FnOnce(&mut UpdateState)) {
 /// ¿Hay trabajo de update en curso? (para 409 ante un segundo POST).
 pub fn update_busy() -> bool {
     inner().busy.load(Ordering::Relaxed)
+}
+
+/// Tomar `busy` o recuperarlo por watchdog (P0-2): si estaba tomado hace más
+/// de 10 min, el worker murió sin liberarlo (pánico) y se recupera en vez de
+/// bloquear el canal para siempre. Devuelve `false` si había trabajo VIVO
+/// (el llamador responde 409). Puro en decisión salvo los atómicos.
+fn take_busy_or_recover() -> bool {
+    if !inner().busy.swap(true, Ordering::SeqCst) {
+        inner().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        return true;
+    }
+    let since = inner().busy_since_secs.load(Ordering::Relaxed);
+    if since > 0 && now_secs().saturating_sub(since) >= 600 {
+        inner().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        inner().cancel.store(false, Ordering::Relaxed);
+        return true;
+    }
+    false
+}
+
+/// Liberar `busy` al terminar un worker (éxito, error o cancelación).
+fn release_busy() {
+    inner().busy_since_secs.store(0, Ordering::Relaxed);
+    inner().busy.store(false, Ordering::SeqCst);
 }
 
 pub fn pending_update() -> Option<PendingUpdate> {
@@ -694,10 +723,17 @@ pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String 
     let prev = app_dir.with_extension(format!("prev-{}", safe_tag(version)));
     let prev_models = prev.join("models");
     // `ping -n 3` ≈ 2 s de espera a que el exe salga y libere el lock.
-    // `robocopy prev/models app/models /E` repone pesos + puntero del usuario;
-    // `if exist` guarda el caso de instalación sin models/ previa.
+    // Traza a %TEMP%\omni-swap-<ver>.log (veredicto auditable: el swap corre
+    // sin consola y nadie lo ve; el log dice OK/FAIL con el paso). El `del`
+    // del script va en TODAS las salidas (antes solo al final feliz: un fallo
+    // dejaba el .cmd huérfano y la UI no sabía qué pasó).
+    // `robocopy prev/models app/models /E` repone pesos del usuario; `if
+    // exist` guarda instalación sin models/ previa.
+    let log = std::env::temp_dir().join(format!("omni-swap-{}.log", safe_tag(version)));
     format!(
-        "@echo off\r\nping -n 3 127.0.0.1 >nul\r\nif exist \"{prev}\" rd /s /q \"{prev}\"\r\nmove \"{app}\" \"{prev}\" >nul\r\nif errorlevel 1 exit /b 1\r\nmove \"{staging}\" \"{app}\" >nul\r\nif errorlevel 1 move \"{prev}\" \"{app}\" >nul\r\nif errorlevel 1 exit /b 1\r\nif exist \"{prev_models}\" robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL >nul\r\nstart \"\" \"{exe}\"\r\ndel \"%~f0\"\r\n",
+        "@echo off\r\nset LOG=\"{log}\"\r\necho [%date% %time%] swap {ver} start>>%LOG%\r\nping -n 3 127.0.0.1 >nul\r\nif exist \"{prev}\" rd /s /q \"{prev}\"\r\nmove \"{app}\" \"{prev}\" >>%LOG% 2>&1\r\nif errorlevel 1 echo FAIL move-app-prev>>%LOG% & del \"%~f0\" & exit /b 1\r\nmove \"{staging}\" \"{app}\" >>%LOG% 2>&1\r\nif errorlevel 1 move \"{prev}\" \"{app}\" >>%LOG% 2>&1\r\nif errorlevel 1 echo FAIL move-staging-app>>%LOG% & del \"%~f0\" & exit /b 1\r\nif exist \"{prev_models}\" robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL >>%LOG% 2>&1\r\nif exist \"{exe}\" echo OK>>%LOG% & start \"\" \"{exe}\" & del \"%~f0\" & exit /b 0\r\necho FAIL exe-missing>>%LOG% & del \"%~f0\" & exit /b 1\r\n",
+        log = log.display(),
+        ver = version,
         app = app_dir.display(),
         prev = prev.display(),
         staging = staging_dir.display(),
@@ -802,10 +838,9 @@ fn copy_dir_contents(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// `log`: logger con niveles por prefijo (`[ERROR]`/`[WARN]` van a disco con
 /// nivel; el resto como INFO). Los llama `server.rs` con `mgr.log_*`.
 pub fn spawn_check(feed: String, auto: bool, log: Arc<dyn Fn(String) + Send + Sync>) {
-    if inner().busy.swap(true, Ordering::SeqCst) {
+    if !take_busy_or_recover() {
         return;
     }
-    inner().cancel.store(false, Ordering::Relaxed);
     let current = env!("CARGO_PKG_VERSION").to_string();
     update_set(|s| {
         s.state = "checking".to_string();
@@ -860,7 +895,7 @@ pub fn spawn_check(feed: String, auto: bool, log: Arc<dyn Fn(String) + Send + Sy
                 }
             }
         }
-        inner().busy.store(false, Ordering::SeqCst);
+        release_busy();
     });
 }
 
@@ -875,11 +910,10 @@ pub fn spawn_download(
     notes: String,
     log: Arc<dyn Fn(String) + Send + Sync>,
 ) {
-    if inner().busy.swap(true, Ordering::SeqCst) {
+    if !take_busy_or_recover() {
         return;
     }
     inner().cancel.store(false, Ordering::Relaxed);
-    inner().bytes_n.store(0, Ordering::Relaxed);
     update_set(|s| {
         s.state = "downloading".to_string();
         s.latest = version.clone();
@@ -931,7 +965,7 @@ pub fn spawn_download(
                 ));
             }
         }
-        inner().busy.store(false, Ordering::SeqCst);
+        release_busy();
     });
 }
 
@@ -939,6 +973,19 @@ pub fn spawn_download(
 pub fn update_cancel() -> UpdateState {
     inner().cancel.store(true, Ordering::Relaxed);
     update_snapshot()
+}
+
+/// Auto-repair P0-2: el estado decía `ready` pero el staging se perdió
+/// (limpieza de %TEMP% entre la descarga y el reinicio). Limpia el pending
+/// huérfano y deja `error` honesto en vez de reiniciar en falso. Puro en
+/// decisión salvo los Mutex globales (mismo patrón que el resto).
+pub fn mark_staging_lost() {
+    set_pending(None);
+    update_set(|s| {
+        s.state = "error".to_string();
+        s.error =
+            "El paquete descargado ya no está (staging perdido): vuelve a descargar.".to_string();
+    });
 }
 
 /// Preparar la instalación al salir: escribe el script de swap en `%TEMP%`
@@ -1053,7 +1100,13 @@ mod tests {
         assert!(s.contains("robocopy"), "{}", s);
         assert!(s.contains("prev-2.1.0"), "{}", s);
         assert!(s.to_lowercase().contains("models"), "{}", s);
-        assert!(!s.to_lowercase().contains("appdata"));
+        assert!(s.contains("omni-swap-2.1.0.log"), "{}", s);
+        assert!(s.contains("del \"%~f0\""), "{}", s);
+        assert!(s.contains("OK"), "{}", s);
+        assert!(s.contains("FAIL"), "{}", s);
+        // No toca %APPDATA%\LocalMind (config/claves): el %TEMP% del log no
+        // cuenta (es temporal del propio swap, no datos del usuario).
+        assert!(!s.to_lowercase().contains("localmind"), "{}", s);
     }
 
     #[test]
@@ -1214,5 +1267,23 @@ mod tests {
         assert!(!found.iter().any(|v| v.contains("9.9.9")), "{:?}", found);
         set_pending(None);
         let _ = std::fs::remove_dir_all(base.join(&tag));
+    }
+
+    /// Watchdog P0-2: `busy` tomado hace >10 min (worker muerto) se recupera;
+    /// tomado hace poco bloquea (409). Sin `since` (0) no se toca.
+    #[test]
+    fn busy_watchdog_recupera_clavado_y_respeta_vivo() {
+        // Limpio: se toma normal.
+        inner().busy.store(false, Ordering::SeqCst);
+        assert!(take_busy_or_recover());
+        // Recién tomado: segundo intento bloquea.
+        assert!(!take_busy_or_recover());
+        // Simular muerte hace 11 min: se recupera.
+        inner()
+            .busy_since_secs
+            .store(now_secs().saturating_sub(660), Ordering::Relaxed);
+        assert!(take_busy_or_recover());
+        release_busy();
+        assert!(!update_busy());
     }
 }

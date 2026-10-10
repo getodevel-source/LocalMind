@@ -6,6 +6,18 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.11] - 2026-10-10
+
+### Corregido (canal perfecto: sin consola, sin estados rotos, sin 409 eternos)
+- Swap silencioso: `cmd` con `CREATE_NO_WINDOW` + stdio a null (nada visible).
+  El script vuelca traza a `%TEMP%\omni-swap-<ver>.log` (OK/FAIL por paso) y
+  se autoborra en TODAS las salidas. El fallo de spawn queda en el log.
+- Invariante `ready` ⇒ staging válido: `POST /restart` valida el dir en disco
+  y auto-repara a `error` honesto (`mark_staging_lost`) si se perdió.
+- Watchdog de `busy` (10 min): un worker muerto ya no bloquea el canal con
+  409 para siempre (`take_busy_or_recover` + test).
+- Harness `update-flow.mjs` con check 2b (ready con staging en disco): 7/7.
+
 ## [2.0.10] - 2026-10-09
 
 ### Añadido (auditoría: que la suite pesque lo que se vio en vivo)

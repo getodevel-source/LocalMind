@@ -17,6 +17,7 @@ mod update;
 mod usage;
 
 use std::env;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tao::dpi::LogicalSize;
@@ -356,9 +357,31 @@ fn main() {
         if let Some(pending) = crate::update::pending_update() {
             match crate::update::prepare_install_on_exit(&app) {
                 Ok(script) => {
-                    let _ = std::process::Command::new("cmd.exe")
+                    // Silencioso (P0-2): sin consola visible. El script vuelca
+                    // su traza a omni-swap-<ver>.log en %TEMP% (veredicto
+                    // auditable) y se autoborra al final (ver `swap_script`).
+                    // Si el spawn falla, queda en el log de la app: antes se
+                    // ignoraba y la instalación se perdía en silencio.
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    match std::process::Command::new("cmd.exe")
                         .args(["/C", &script.to_string_lossy().to_string()])
-                        .spawn();
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            crate::filelog::write_log_line(
+                                &crate::filelog::log_file(&base_dir),
+                                &format!(
+                                    "[LocalMind] No se pudo lanzar la instalación {}: {}",
+                                    pending.version, e
+                                ),
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     crate::filelog::write_log_line(
