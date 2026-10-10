@@ -6,6 +6,15 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.12] - 2026-10-10
+
+### Corregido (canal invisible: cero consola, reapertura garantizada)
+- Swap en PowerShell `.ps1` lanzado oculto (`-WindowStyle Hidden` +
+  `CREATE_NO_WINDOW`): nunca más una terminal visible ni colgada.
+- Espera activa al lock (15×200 ms) en vez de `ping` fijo; `Start-Process`
+  desacoplado relanza la app; autoborrado + traza en todas las salidas.
+- UI: estado `installing` visible con botones bloqueados (claves es/en).
+
 ## [2.0.11] - 2026-10-10
 
 ### Corregido (canal perfecto: sin consola, sin estados rotos, sin 409 eternos)

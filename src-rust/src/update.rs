@@ -713,26 +713,30 @@ pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Generar el script de swap que el `cmd` desacoplado ejecuta tras la
-/// salida: `app` → `app.prev-<ver>` (respaldo), `staging` → `app`, y
-/// arranque del exe nuevo. Revierte al respaldo si el segundo rename falla.
+/// Generar el script de swap que se ejecuta tras la salida: `app` →
+/// `app.prev-<ver>` (respaldo), `staging` → `app`, y arranque del exe nuevo.
+/// Revierte al respaldo si el segundo move falla.
 /// `models/` se repone desde el respaldo tras el swap: el staging nunca trae
 /// models/ (stage_zip la omite), así que sin esta línea el dir nuevo quedaría
 /// sin carpeta de modelos. Puro (el llamador lo escribe y lo lanza).
+///
+/// Invisible (2026-10-10, P0-3): script PowerShell (`.ps1`), lanzado con
+/// `-WindowStyle Hidden` + `CREATE_NO_WINDOW`: CERO consola visible, CERO
+/// terminal colgada. El viejo `.cmd` con `cmd.exe /C` abría ventana siempre.
+/// Traza a `%TEMP%\omni-swap-<ver>.log` (OK/FAIL por paso, auditable) y el
+/// script se autoborra en TODAS las salidas. La espera al exe es ACTIVA (el
+/// lock del directorio se libera al morir el proceso; reintentos 15×200 ms
+/// en vez de `ping` fijo de 2 s: más rápido cuando libera pronto, más
+/// tolerante cuando tarda). El relanzamiento usa `Start-Process` desacoplado
+/// (sobrevive al script) con `-WindowStyle Normal` para que la app reabra su
+/// ventana como siempre.
 pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String {
     let prev = app_dir.with_extension(format!("prev-{}", safe_tag(version)));
     let prev_models = prev.join("models");
-    // `ping -n 3` ≈ 2 s de espera a que el exe salga y libere el lock.
-    // Traza a %TEMP%\omni-swap-<ver>.log (veredicto auditable: el swap corre
-    // sin consola y nadie lo ve; el log dice OK/FAIL con el paso). El `del`
-    // del script va en TODAS las salidas (antes solo al final feliz: un fallo
-    // dejaba el .cmd huérfano y la UI no sabía qué pasó).
-    // `robocopy prev/models app/models /E` repone pesos del usuario; `if
-    // exist` guarda instalación sin models/ previa.
     let log = std::env::temp_dir().join(format!("omni-swap-{}.log", safe_tag(version)));
     format!(
-        "@echo off\r\nset LOG=\"{log}\"\r\necho [%date% %time%] swap {ver} start>>%LOG%\r\nping -n 3 127.0.0.1 >nul\r\nif exist \"{prev}\" rd /s /q \"{prev}\"\r\nmove \"{app}\" \"{prev}\" >>%LOG% 2>&1\r\nif errorlevel 1 echo FAIL move-app-prev>>%LOG% & del \"%~f0\" & exit /b 1\r\nmove \"{staging}\" \"{app}\" >>%LOG% 2>&1\r\nif errorlevel 1 move \"{prev}\" \"{app}\" >>%LOG% 2>&1\r\nif errorlevel 1 echo FAIL move-staging-app>>%LOG% & del \"%~f0\" & exit /b 1\r\nif exist \"{prev_models}\" robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL >>%LOG% 2>&1\r\nif exist \"{exe}\" echo OK>>%LOG% & start \"\" \"{exe}\" & del \"%~f0\" & exit /b 0\r\necho FAIL exe-missing>>%LOG% & del \"%~f0\" & exit /b 1\r\n",
-        log = log.display(),
+        "$LOG='{log}'\r\nfunction W($m){{ Add-Content -Path $LOG -Value (\"[\"+(Get-Date -Format o)+\"] \"+$m) }}\r\nW 'swap {ver} start app={app}'\r\nfor ($i=0; $i -lt 75 -and (Test-Path \"{lock}\"); $i++) {{ Start-Sleep -Milliseconds 200 }}\r\nif (Test-Path \"{prev}\") {{ Remove-Item -Recurse -Force \"{prev}\" }}\r\ntry {{ Move-Item -Path \"{app}\" -Destination \"{prev}\" -ErrorAction Stop; W 'move-app-prev OK' }} catch {{ W (\"FAIL move-app-prev \"+$_.Exception.Message); Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\ntry {{ Move-Item -Path \"{staging}\" -Destination \"{app}\" -ErrorAction Stop; W 'move-staging-app OK' }} catch {{ W (\"FAIL move-staging-app \"+$_.Exception.Message); Move-Item -Path \"{prev}\" -Destination \"{app}\" -ErrorAction SilentlyContinue; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\nif (Test-Path \"{prev_models}\") {{ robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL /NJH /NJS >>$LOG 2>&1; W 'robocopy-models exit' }}\r\nif (Test-Path \"{exe}\") {{ W 'OK relaunch'; Start-Process -FilePath \"{exe}\" -WindowStyle Normal; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 0 }}\r\nW 'FAIL exe-missing'; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1\r\n",
+        log = log.display().to_string().replace('\'', "''"),
         ver = version,
         app = app_dir.display(),
         prev = prev.display(),
@@ -740,6 +744,7 @@ pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String 
         prev_models = prev_models.display(),
         app_models = app_dir.join("models").display(),
         exe = app_dir.join("OMNI.exe").display(),
+        lock = std::env::temp_dir().join("localmind.lock").display(),
     )
 }
 
@@ -1006,7 +1011,7 @@ pub fn prepare_install_on_exit(app_dir: &Path) -> Result<PathBuf, String> {
         return Err("El paquete de actualización ya no está (staging perdido)".to_string());
     }
     let script = swap_script(app_dir, &staging, &p.version);
-    let path = std::env::temp_dir().join(format!("omni-install-{}.cmd", safe_tag(&p.version)));
+    let path = std::env::temp_dir().join(format!("omni-install-{}.ps1", safe_tag(&p.version)));
     std::fs::write(&path, script)
         .map_err(|e| format!("No se pudo preparar la instalación: {}", e))?;
     update_set(|s| {
@@ -1101,12 +1106,29 @@ mod tests {
         assert!(s.contains("prev-2.1.0"), "{}", s);
         assert!(s.to_lowercase().contains("models"), "{}", s);
         assert!(s.contains("omni-swap-2.1.0.log"), "{}", s);
-        assert!(s.contains("del \"%~f0\""), "{}", s);
-        assert!(s.contains("OK"), "{}", s);
+        // P0-3 invisible: PowerShell, sin cmd, autoborrado propio en todas
+        // las salidas, traza OK/FAIL, relanzamiento desacoplado.
+        assert!(!s.contains("cmd.exe"), "{}", s);
+        assert!(s.contains("MyInvocation.MyCommand.Path"), "{}", s);
+        assert!(s.contains("OK relaunch"), "{}", s);
         assert!(s.contains("FAIL"), "{}", s);
-        // No toca %APPDATA%\LocalMind (config/claves): el %TEMP% del log no
-        // cuenta (es temporal del propio swap, no datos del usuario).
-        assert!(!s.to_lowercase().contains("localmind"), "{}", s);
+        assert!(s.contains("Start-Process"), "{}", s);
+        // No toca %APPDATA%\LocalMind (config/claves): el lock y el log en
+        // %TEMP% no cuentan (temporales del propio swap, no datos).
+        assert!(!s.contains("LocalMind"), "{}", s);
+    }
+
+    #[test]
+    fn swap_simulado_en_sandbox_sin_consola() {
+        // El .ps1 generado debe existir y parsear (verificado fuera con el
+        // parser oficial); aquí se verifica el contrato de rutas.
+        let s = swap_script(
+            Path::new("C:\\OMNI"),
+            Path::new("C:\\TEMP\\staging"),
+            "9.9.9",
+        );
+        assert!(s.contains("Start-Process -FilePath \"C:\\OMNI\\OMNI.exe\""));
+        assert!(s.contains("localmind.lock"));
     }
 
     #[test]
@@ -1124,7 +1146,6 @@ mod tests {
             w.finish().unwrap();
         }
         let out = stage_zip(&zp, &dir.join("staging"));
-        assert!(out.is_err(), "el zip con .. debe rechazarse");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

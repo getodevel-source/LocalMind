@@ -357,14 +357,23 @@ fn main() {
         if let Some(pending) = crate::update::pending_update() {
             match crate::update::prepare_install_on_exit(&app) {
                 Ok(script) => {
-                    // Silencioso (P0-2): sin consola visible. El script vuelca
-                    // su traza a omni-swap-<ver>.log en %TEMP% (veredicto
-                    // auditable) y se autoborra al final (ver `swap_script`).
-                    // Si el spawn falla, queda en el log de la app: antes se
-                    // ignoraba y la instalación se perdía en silencio.
+                    // Invisible (P0-3): PowerShell con `-WindowStyle Hidden` +
+                    // `CREATE_NO_WINDOW` + stdio a null: CERO consola, CERO
+                    // terminal colgada. El `.ps1` hace el swap, relanza con
+                    // `Start-Process` desacoplado y se autoborra (ver
+                    // `swap_script`). Si el spawn falla, queda en el log.
                     const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    match std::process::Command::new("cmd.exe")
-                        .args(["/C", &script.to_string_lossy().to_string()])
+                    match std::process::Command::new("powershell.exe")
+                        .args([
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            &script.to_string_lossy().to_string(),
+                        ])
                         .creation_flags(CREATE_NO_WINDOW)
                         .stdin(std::process::Stdio::null())
                         .stdout(std::process::Stdio::null())

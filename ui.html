@@ -2493,6 +2493,7 @@
         'settings.updateDownloading': 'Descargando OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} listo: reinicia la app para instalarlo.',
         'settings.updateChecking': 'Comprobando…',
+        'settings.updateInstalling': 'Instalando OMNI {ver}… la app se reabrirá sola.',
         'settings.updateRestart': 'Reiniciar e instalar',
         'settings.updateRestarting': 'Cerrando para instalar… la app se reabrirá sola.',
         'settings.updateError': 'No se pudo actualizar: {msg}',
@@ -2768,8 +2769,9 @@
         'settings.updateDownloading': 'Downloading OMNI {ver}… {pct}%.',
         'settings.updateReady': 'OMNI {ver} ready: restart the app to install it.',
         'settings.updateChecking': 'Checking…',
-        'settings.updateRestart': 'Restart & install',
+        'settings.updateInstalling': 'Installing OMNI {ver}… the app will reopen itself.',
         'settings.updateRestarting': 'Closing to install… the app will reopen itself.',
+        'settings.updateRestart': 'Restart & install',
         'settings.updateError': 'Could not update: {msg}',
         'settings.logFailed': 'Disk log is not being written (disk full or no permission): errors may be lost.',
         'unlock.title': 'Unlock',
@@ -2868,7 +2870,6 @@
       } catch (e) {}
       try { renderModelsTable(lastModelsCache); } catch (e) {}
     }
-
     let isServerRunning = false;
     let autoScrollTerminal = true;
     const chatHistory = [];
@@ -4041,16 +4042,20 @@
       else if (st.state === 'downloading') text = T('settings.updateDownloading', { ver, pct: (st.percent != null ? st.percent : 0) });
       else if (st.state === 'ready') text = T('settings.updateReady', { ver });
       else if (st.state === 'checking') text = T('settings.updateChecking');
+      else if (st.state === 'installing') text = T('settings.updateInstalling', { ver });
       else if (st.state === 'error') text = T('settings.updateError', { msg: st.error || ('HTTP ?') });
       else text = T('settings.updateIdle', { cur: cur || '?' });
       if (status) status.textContent = text;
       const pct = (typeof st.percent === 'number' && isFinite(st.percent)) ? Math.max(0, Math.min(100, st.percent)) : 0;
       if (fill) fill.style.width = pct + '%';
       if (bar) bar.style.display = (st.state === 'downloading') ? '' : 'none';
-      if (dlBtn) dlBtn.disabled = (st.state !== 'available');
-      if (cancelBtn) cancelBtn.disabled = !(st.state === 'downloading' || st.state === 'checking');
+      const installing = (st.state === 'installing');
+      if (dlBtn) dlBtn.disabled = (st.state !== 'available') || installing;
+      if (cancelBtn) cancelBtn.disabled = (!(st.state === 'downloading' || st.state === 'checking')) || installing;
       const restartBtn = document.getElementById('cfg-update-restart');
-      if (restartBtn) restartBtn.style.display = (st.state === 'ready') ? '' : 'none';
+      if (restartBtn) restartBtn.style.display = (st.state === 'ready' && !installing) ? '' : 'none';
+      const checkBtn = document.getElementById('cfg-update-check');
+      if (checkBtn) checkBtn.disabled = !!installing;
       const banner = document.getElementById('update-banner');
       if (banner) {
         const show = (st.state === 'available' || st.state === 'ready');
