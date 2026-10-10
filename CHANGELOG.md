@@ -6,6 +6,8 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-10
+
 ### Añadido
 - Topes anti-OOM: 25 MB en `/v1/*` (413 si excede) y 64 KiB en los JSON
   pequeños (`/api/unlock`, `/api/import_model`, `/api/config`…).
