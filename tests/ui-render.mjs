@@ -53,7 +53,7 @@ const stubs = [{}, {}, {}];
 
 function load(script, doc, storage, nav, fetchImpl) {
   const factory = new Function('document', 'window', 'localStorage', 'navigator', 'EventSource', 'fetch', 'setInterval', 'setTimeout', 'performance', 'clearTimeout',
-    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache, getProfileFallback, servedModelName, updateLauncherHint };');
+    script + '\n;return { renderStatus, renderDownloadState, modelLabel, refreshUsage, refreshSettings, renderCfgProfiles, renderAppConfig, loadProfileIntoEditor, cfgEditorValues, cfgResolveCurrentId, saveProfileEdit, saveGenerationCfg, saveEngineCfg, deleteProfileEdit, renderLauncherAgents, launcherAgentLabel, onLauncherAgentChange, openLauncherAgent, refreshLauncherAgents, launcherCurrent, getSelectedCliEffort, initCliEffort, persistCliEffort, startEngine, setLanguage, getLanguage, T, I18N, lastModelsCache, getProfileFallback, servedModelName, updateLauncherHint, renderUpdate, checkUpdate, downloadUpdate, restartToInstall };');
   return factory(doc, mkWindow(), storage || mkStorage(), nav || mkNav(), mkES, fetchImpl || stubFetch, () => 0, (fn) => 0, { now: () => 0 }, () => 0);
 }
 
@@ -798,4 +798,37 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   a3.renderStatus({ status: 'starting' });
   ok('un intento nuevo limpia el error anterior', b3.style.display === 'none' && String(b3.textContent || '') === '',
     JSON.stringify({ display: b3.style.display, text: String(b3.textContent || '').slice(0, 60) }));
+}
+
+// ---- P0 (2026-10-09, `banner is not defined` en vivo): renderUpdate con
+// CADA estado no debe lanzar. El bug pasó la suite porque renderUpdate ni
+// siquiera estaba exportada en el factory: la función rota jamás se ejecutó.
+{
+  const states = [
+    { state: 'idle', current: '2.0.8', latest: '2.0.8' },
+    { state: 'checking', current: '2.0.8', latest: '' },
+    { state: 'available', current: '2.0.8', latest: '2.0.9' },
+    { state: 'downloading', current: '2.0.8', latest: '2.0.9', percent: 42 },
+    { state: 'ready', current: '2.0.8', latest: '2.0.9' },
+    { state: 'error', current: '2.0.8', latest: '', error: 'boom' },
+    { state: 'installing', current: '2.0.8', latest: '2.0.9' },
+  ];
+  let threw = null;
+  const d = makeDoc();
+  const a = load(script, d, mkStorage(), mkNav());
+  for (const st of states) {
+    try {
+      a.renderUpdate(st);
+    } catch (e) {
+      threw = st.state + ': ' + (e && e.message);
+      break;
+    }
+  }
+  ok('renderUpdate no lanza con ningún estado', threw === null, threw || '7/7 estados OK');
+  // Y el estado `checking` pinta texto traducido, no la clave cruda.
+  const d2 = makeDoc();
+  const a2 = load(script, d2, mkStorage(), mkNav());
+  a2.renderUpdate({ state: 'checking', current: '2.0.8', latest: '' });
+  const txt = String(d2.getElementById('cfg-update-status').textContent || '');
+  ok('checking muestra texto traducido', txt.includes('Comprobando'), JSON.stringify(txt));
 }

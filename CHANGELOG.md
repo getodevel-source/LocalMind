@@ -6,6 +6,14 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+## [2.0.10] - 2026-10-09
+
+### Añadido (auditoría: que la suite pesque lo que se vio en vivo)
+- `renderUpdate` exportada en el factory de `tests/ui-render.mjs` + barrido
+  de los 7 estados (cualquier excepción futura rompe la suite). Probado en
+  negativo contra el `ui.html` de v2.0.8: lanza `banner is not defined` y
+  devuelve la clave cruda, como en la captura del dueño.
+
 ## [2.0.9] - 2026-10-09
 
 ### Corregido (tu captura: tarjeta de update rota al buscar)
