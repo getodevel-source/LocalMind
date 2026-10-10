@@ -3,17 +3,21 @@
 mod agents;
 mod auth;
 mod config;
+mod engine_gate;
 mod filelog;
 mod launcher;
 mod meta;
 mod models;
 mod notify;
 mod process;
-mod profiles;
 mod server;
-mod translate;
+mod sse;
+mod tray;
+mod update;
 mod usage;
+
 use std::env;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tao::dpi::LogicalSize;
@@ -47,12 +51,32 @@ fn get_base_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Directorio de INSTALACIÓN para el swap del auto-update (P0 2026-10-09):
+/// siempre el directorio del ejecutable en ejecución, jamás el `base_dir` de
+/// datos (que en desarrollo apunta al repo con `models/` y el swap movería el
+/// árbol equivocado: la app quedaba pidiendo reinicio para siempre).
+/// Puro en decisión: `check_app_dir` (update.rs) lo valida al usar.
+fn app_dir() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default()
+}
+
 fn load_window_icon(base_dir: &PathBuf) -> Option<Icon> {
-    let ico_path = base_dir.join("localmind.ico");
-    let bytes = std::fs::read(ico_path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    Icon::from_rgba(img.into_raw(), width, height).ok()
+    // Fase C (OMNI): icono nuevo con fallback al histórico durante la transición.
+    for name in ["omni.ico", "localmind.ico"] {
+        if let Ok(bytes) = std::fs::read(base_dir.join(name)) {
+            if let Ok(img) = image::load_from_memory(&bytes) {
+                let img = img.to_rgba8();
+                let (width, height) = img.dimensions();
+                if let Ok(icon) = Icon::from_rgba(img.into_raw(), width, height) {
+                    return Some(icon);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Formatear la línea que el hook de pánico escribe en el log (D-46).
@@ -113,13 +137,37 @@ fn install_panic_hook(log_file: PathBuf) {
 
 /// Single-instance: intento crear un lock file exclusivo en %TEMP%; si ya existe,
 /// enfocar la ventana existente (trae al frente vía PowerShell) y salir.
+///
+/// Sin carrera D-14: primero se intenta abrir con `create_new` SIN borrar. Solo
+/// si el archivo ya existe se sondea si el dueño sigue vivo (abrir en lectura:
+/// con `share_mode(0)` del dueño, falla si vive y pasa si es huérfano de un
+/// crash). Solo el huérfano confirmado se borra antes de reintentar.
 fn acquire_single_instance() -> Option<std::fs::File> {
-    let lock_path = env::temp_dir().join("localmind.lock");
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
-    // share_mode(0) → lock exclusivo mientras el proceso viva; el handle se libera al morir,
-    // pero el archivo remanente necesita limpieza con create_new.
-    let _ = std::fs::remove_file(&lock_path); // lock huérfano de un crash previo
+    let lock_path = env::temp_dir().join("localmind.lock");
+    // Intento 1: crear sin tocar nada (caso feliz, sin carrera).
+    if let Ok(f) = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .share_mode(0)
+        .open(&lock_path)
+    {
+        return Some(f);
+    }
+    // El archivo existe: ¿hay dueño vivo? Abrir en lectura: con el `share_mode(0)`
+    // del dueño, falla si vive → enfocar+salir; pasa si es huérfano de un crash
+    // → borrar y crear de nuevo.
+    let live = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&lock_path)
+        .is_err();
+    if live {
+        focus_existing_instance();
+        return None;
+    }
+    let _ = std::fs::remove_file(&lock_path); // huérfano confirmado de un crash previo
     match OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -128,19 +176,26 @@ fn acquire_single_instance() -> Option<std::fs::File> {
     {
         Ok(f) => Some(f),
         Err(_) => {
-            // Ya vive otra instancia: enfocar ventana existente y salir.
-            let _ = std::process::Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "$h = Get-Process LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
-                     Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);' -Name U32 -Namespace W; \
-                     [W.U32]::SetForegroundWindow($h.MainWindowHandle)",
-                ])
-                .spawn();
+            // Otro proceso ganó la carrera entre la sonda y el create: enfocar y salir.
+            focus_existing_instance();
             None
         }
     }
+}
+
+/// Traer al frente la ventana de la instancia viva (best-effort).
+fn focus_existing_instance() {
+    // Fase C (OMNI): el exe instalado se llama OMNI.exe; se acepta el
+    // nombre histórico para no romper el foco durante la transición.
+    let _ = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "$h = Get-Process OMNI,LocalMind -ErrorAction SilentlyContinue | Select-Object -First 1; \
+             Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);' -Name U32 -Namespace W; \
+             [W.U32]::SetForegroundWindow($h.MainWindowHandle)",
+        ])
+        .spawn();
 }
 
 fn main() {
@@ -162,12 +217,39 @@ fn main() {
     if let Some(note) = config.take_migration_note() {
         process_mgr.log(&note);
     }
-
+    // Update interrumpido (apagón entre descarga y swap): si quedó un staging
+    // válido en %TEMP%, registrarlo como pendiente para instalar al salir.
+    for ver in crate::update::recover_stale_stagings() {
+        process_mgr.log(&format!(
+            "[LocalMind] Actualización {} recuperada de un staging previo: se instalará al reiniciar la app.",
+            ver
+        ));
+    }
+    // Healing de modelos: si el swap dejó un dir sin models/ (canal viejo),
+    // reponerla desde el respaldo `.prev-<ver>` más próximo.
+    match crate::update::heal_models(&base_dir) {
+        Ok(Some(prev)) => process_mgr.log(&format!(
+            "[LocalMind] models/ repuesta desde el respaldo {} (el update no la traía).",
+            prev
+        )),
+        Ok(None) => {}
+        Err(e) => process_mgr.log(&format!("[LocalMind] [WARN] {}", e)),
+    }
     // Start embedded HTTP server
-    let server = match HttpServer::start(Arc::clone(&process_mgr), Arc::clone(&config), base_dir.clone()) {
+    let server = match HttpServer::start(
+        Arc::clone(&process_mgr),
+        Arc::clone(&config),
+        base_dir.clone(),
+    ) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error al iniciar servidor HTTP: {}", e);
+            let msg = format!("Error al iniciar servidor HTTP: {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            // Sin consola (GUI): el fallo debe verse. `rfd` ya es dependencia.
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI no pudo arrancar")
+                .set_description(&msg)
+                .show();
             return;
         }
     };
@@ -175,20 +257,32 @@ fn main() {
     let port = server.port();
     let server_url = format!("http://127.0.0.1:{}", port);
 
-    let args: Vec<String> = env::args().collect();
-    if args.iter().any(|a| a == "--server-only" || a == "--headless") {
-        println!("LocalMind server-only escuchando en {}", server_url);
-        // Modo headless: mantener vivo el proceso mientras el manager exista.
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(3600));
-        }
+    // Actualización automática (Fase Prod): chequeo silencioso al arrancar
+    // (30 s de gracia para no competir con el motor) + re-chequeo cada 6 h
+    // si `check_on_startup`. Con `auto_download`, una novedad se descarga
+    // sola (la instalación siempre espera al reinicio y la pide el dueño).
+    {
+        let cfg_bg = Arc::clone(&config);
+        let mgr_bg = Arc::clone(&process_mgr);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let log: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                std::sync::Arc::new(move |line: String| mgr_bg.log(&line));
+            loop {
+                let c = cfg_bg.get();
+                if c.update.check_on_startup {
+                    crate::update::spawn_check(c.update.feed.clone(), true, Arc::clone(&log));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+            }
+        });
     }
 
     // Native Window Mode
     let event_loop = EventLoop::new();
 
     let mut window_builder = WindowBuilder::new()
-        .with_title("LocalMind Studio")
+        .with_title("OMNI")
         .with_inner_size(LogicalSize::new(1180.0, 820.0))
         .with_min_inner_size(LogicalSize::new(960.0, 680.0));
 
@@ -199,7 +293,12 @@ fn main() {
     let window = match window_builder.build(&event_loop) {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("Error al crear ventana: {}", e);
+            let msg = format!("Error al crear ventana: {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI no pudo arrancar")
+                .set_description(&msg)
+                .show();
             return;
         }
     };
@@ -207,7 +306,15 @@ fn main() {
     let webview = match WebViewBuilder::new(&window).with_url(&server_url).build() {
         Ok(wv) => wv,
         Err(e) => {
-            eprintln!("Error al crear webview: {}", e);
+            let msg = format!("Error al crear webview (falta WebView2): {}", e);
+            crate::filelog::write_log_line(&crate::filelog::log_file(&base_dir), &msg);
+            let _ = rfd::MessageDialog::new()
+                .set_title("OMNI necesita WebView2")
+                .set_description(&format!(
+                    "{}\n\nInstala Microsoft Edge WebView2 y reintenta.",
+                    msg
+                ))
+                .show();
             return;
         }
     };
@@ -218,18 +325,211 @@ fn main() {
 
     window.set_focus();
 
+    // Bandeja (segundo plano real): X/minimizar ocultan, no salen. Si la
+    // bandeja falla (entorno sin tray), la app sigue con cierre clásico.
+    // Los handles NO son `Send`: viven en este hilo (event-loop), nunca en
+    // workers. El refresco va por `WaitUntil(5 s)` en el propio loop.
+    let tray_handles: Option<crate::tray::TrayHandles> = match crate::tray::build_tray(&base_dir) {
+        Ok(h) => {
+            process_mgr.log("[LocalMind] OMNI en segundo plano: cerrar la ventana no detiene el motor (Salir desde la bandeja).");
+            Some(h)
+        }
+        Err(e) => {
+            crate::filelog::write_log_line(
+                &crate::filelog::log_file(&base_dir),
+                &format!("[LocalMind] [WARN] Sin bandeja (cierre clásico): {}", e),
+            );
+            None
+        }
+    };
+    let tray_ok = tray_handles.is_some();
+
     let mgr_cleanup = Arc::clone(&process_mgr);
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+    // Salida real compartida (X con `arm_quit`, `Salir` del tray, Destroyed):
+    // detiene el motor + aplica el update pendiente + sale. El swap opera
+    // sobre `app_dir()` (dir del exe), NO sobre `base_dir` (datos): en una
+    // instalación ambos pueden diferir y mover el equivocado deja la app
+    // pidiendo reinicio para siempre (P0 2026-10-09).
+    // Idempotente (P0 2026-10-10, re-auditoría): `CloseRequested→Exit` suele
+    // venir seguido de `Destroyed`, y restart armado + cierre manual también
+    // se combinan. Sin guard, cada ruta lanzaba su propio swap concurrente
+    // (doble move + doble relanzamiento). Un solo disparo por proceso.
+    static QUIT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let do_quit = move |mgr: &Arc<ProcessManager>| {
+        if QUIT_DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        // P0 producción: parar el motor ANTES del swap/salida. Sin esto el
+        // `llama-server` quedaba huérfano reteniendo VRAM y puerto, y el
+        // relanzamiento post-update chocaba con la instancia vieja.
+        mgr.stop();
+        let app = app_dir();
+        if let Some(pending) = crate::update::pending_update() {
+            match crate::update::prepare_install_on_exit(&app) {
+                Ok(script) => {
+                    // `CREATE_NO_WINDOW` + stdio a null: CERO consola, CERO
+                    // terminal colgada. El `.ps1` hace el swap, relanza con
+                    // `Start-Process` desacoplado y se autoborra (ver
+                    // `swap_script`). Si el spawn falla, queda en el log.
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    match std::process::Command::new("powershell.exe")
+                        .args([
+                            "-NoProfile",
+                            "-NonInteractive",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            &script.to_string_lossy().to_string(),
+                        ])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            crate::filelog::write_log_line(
+                                &crate::filelog::log_file(&base_dir),
+                                &format!(
+                                    "[LocalMind] No se pudo lanzar la instalación {}: {}",
+                                    pending.version, e
+                                ),
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    crate::filelog::write_log_line(
+                        &crate::filelog::log_file(&base_dir),
+                        &format!(
+                            "[LocalMind] No se pudo instalar la actualización {}: {}",
+                            pending.version, e
+                        ),
+                    );
+                }
+            }
+        }
+    };
 
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested | WindowEvent::Destroyed,
-            ..
-        } = event
-        {
-            mgr_cleanup.stop();
+    event_loop.run(move |event, _, control_flow| {
+        // Tick cada 5 s para refrescar el tray (tooltip + Iniciar/Detener)
+        // aunque no haya eventos de ventana/ratón/teclado.
+        *control_flow =
+            ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        // Reinicio para instalar pedido por `POST /api/update/restart` (P0):
+        // mismo `do_quit` que Salir del tray (stop + swap + Exit). El script
+        // desacoplado relanza la app ya actualizada.
+        if crate::update::take_restart_armed() {
+            do_quit(&mgr_cleanup);
             *control_flow = ControlFlow::Exit;
+            return;
+        }
+        if let Some(h) = tray_handles.as_ref() {
+            let st = mgr_cleanup.get_status();
+            crate::tray::refresh_tray(h, &st.status, st.is_healthy, false);
+        }
+
+        // `try_recv` en bucle: pueden acumularse varios eventos por tick.
+        while let Ok(ev) = tray_icon::TrayIconEvent::receiver().try_recv() {
+            use tray_icon::TrayIconEvent;
+            let open = match ev {
+                TrayIconEvent::Click {
+                    button,
+                    button_state,
+                    ..
+                } => {
+                    use tray_icon::{MouseButton, MouseButtonState};
+                    button == MouseButton::Left && button_state == MouseButtonState::Up
+                }
+                TrayIconEvent::DoubleClick { .. } => true,
+                _ => false,
+            };
+            if open {
+                window.set_visible(true);
+                window.set_minimized(false);
+                window.set_focus();
+            }
+        }
+        // Menú del tray: Abrir / Iniciar / Detener / Salir.
+        while let Ok(mev) = muda::MenuEvent::receiver().try_recv() {
+            match crate::tray::action_for_menu_id(mev.id.0.as_str()) {
+                Some(crate::tray::TrayAction::Open) => {
+                    window.set_visible(true);
+                    window.set_minimized(false);
+                    window.set_focus();
+                }
+                Some(crate::tray::TrayAction::Start) => {
+                    // Arranque con la última config (igual que el botón de la
+                    // UI sin cuerpo): el `start()` resuelve modelo/perfil.
+                    let mgr = Arc::clone(&mgr_cleanup);
+                    std::thread::spawn(move || {
+                        let _ = mgr.start(crate::process::StartRequest {
+                            model: None,
+                            profile: None,
+                            context: None,
+                            threads: None,
+                            priority: None,
+                        });
+                    });
+                }
+                Some(crate::tray::TrayAction::Stop) => {
+                    mgr_cleanup.stop();
+                }
+                Some(crate::tray::TrayAction::Quit) => {
+                    crate::tray::arm_quit();
+                    do_quit(&mgr_cleanup);
+                    *control_flow = ControlFlow::Exit;
+                    return;
+                }
+                None => {}
+            }
+        }
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                if crate::tray::quit_armed() || !tray_ok {
+                    // Salida real: motor parado + update pendiente aplicado.
+                    do_quit(&mgr_cleanup);
+                    *control_flow = ControlFlow::Exit;
+                } else {
+                    // Segundo plano: ocultar, NO parar nada. El lock
+                    // single-instance sigue tomado (el proceso vive).
+                    window.set_visible(false);
+                    // Aviso único: la X no cierra (gateway+motor vivos, VRAM
+                    // retenida). Salir de verdad = `Salir` en la bandeja.
+                    static TRAY_HINT_ONCE: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !TRAY_HINT_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let ncfg = mgr_cleanup.config_snapshot().notifications.clone();
+                        if crate::notify::should_notify(ncfg.enabled, true) {
+                            let logf = mgr_cleanup.log_file_path();
+                            std::thread::spawn(move || {
+                                crate::notify::notify(
+                                    "OMNI sigue en segundo plano",
+                                    "La ventana se ocultó; el motor sigue en marcha. Salir de verdad: botón derecho en la bandeja → Salir.",
+                                    "tray-background",
+                                    |err| crate::filelog::write_log_line(&logf, err),
+                                );
+                            });
+                        }
+                    }
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Destroyed,
+                ..
+            } => {
+                do_quit(&mgr_cleanup);
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
         }
     });
 }
@@ -272,9 +572,45 @@ mod tests {
         // `write_log_line` antepone SU propio epoch UTC (no el de la línea) y
         // `format_line` sanea \n, \r y \0 a espacio: el archivo tiene UNA línea
         // lógica, que es lo que permite seguir un pánico al leer el log.
-        assert!(text.contains("[LocalMind] PANIC: a b c (f.rs:9)"), "{:?}", text);
+        assert!(
+            text.contains("[LocalMind] PANIC: a b c (f.rs:9)"),
+            "{:?}",
+            text
+        );
         assert_eq!(text.matches('\n').count(), 1, "una sola linea: {:?}", text);
         assert!(!text.contains('\0'), "{:?}", text);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// D-14: el lock NO se borra a ciegas. Con dueño vivo (handle abierto con
+    /// `share_mode(0)`), la sonda de lectura falla → hay instancia viva.
+    /// Sin dueño (huérfano de crash), la sonda abre bien → se puede reclamar.
+    #[test]
+    fn lock_con_dueno_vivo_rechaza_y_huerfano_pasa() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("lm-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("localmind.lock");
+        let probe_live = || {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&p)
+                .is_err()
+        };
+        // Huérfano (archivo cerrado): la sonda pasa → reclamable.
+        std::fs::write(&p, b"x").unwrap();
+        assert!(!probe_live(), "huérfano debe sondar libre");
+        // Dueño vivo: la sonda falla → hay que enfocar+salir, no borrar.
+        let owner = std::fs::OpenOptions::new()
+            .create_new(false)
+            .write(true)
+            .share_mode(0)
+            .open(&p)
+            .unwrap();
+        assert!(probe_live(), "con dueño vivo la sonda debe fallar");
+        drop(owner);
+        assert!(!probe_live(), "tras soltar, vuelve a sondar libre");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

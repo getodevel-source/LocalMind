@@ -1,6 +1,6 @@
 [package]
 name = "localmind"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 
 [dependencies]
@@ -17,6 +17,11 @@ rfd = "0.17.2"
 # sha256 de verificación de descargas (P6/P9): una sola crate pequeña, sin
 # runtime extra; la alternativa sería ~300 líneas de SHA-256 propio.
 sha2 = "0.10"
+semver = "1"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+getrandom = "0.2"
+tray-icon = "0.26"
+muda = "0.21"
 [profile.release]
 opt-level = 3
 lto = true

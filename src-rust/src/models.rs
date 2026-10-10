@@ -55,11 +55,14 @@ fn hex_of(bytes: &[u8]) -> String {
 /// sha256 hex de un fichero por streaming (trozo a trozo, sin cargarlo entero).
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     use sha2::Digest;
-    let mut f = std::fs::File::open(path).map_err(|e| format!("No se pudo leer {}: {}", path.display(), e))?;
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| format!("No se pudo leer {}: {}", path.display(), e))?;
     let mut h = sha2::Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
-        let n = f.read(&mut buf).map_err(|e| format!("Error al leer {}: {}", path.display(), e))?;
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| format!("Error al leer {}: {}", path.display(), e))?;
         if n == 0 {
             break;
         }
@@ -95,10 +98,22 @@ pub fn read_verified(models_dir: &Path, filename: &str) -> Option<VerifiedRecord
     let raw = std::fs::read_to_string(record_path(models_dir, filename)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     Some(VerifiedRecord {
-        sha256: v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        sha256: v
+            .get("sha256")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         size: v.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
-        repo: v.get("repo").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-        revision: v.get("revision").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        repo: v
+            .get("repo")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        revision: v
+            .get("revision")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         at: v.get("at").and_then(|x| x.as_i64()).unwrap_or(0),
     })
 }
@@ -169,7 +184,11 @@ pub fn parse_tree(body: &serde_json::Value) -> Result<Vec<TreeFile>, String> {
         if e.get("type").and_then(|t| t.as_str()) != Some("file") {
             continue;
         }
-        let path = e.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+        let path = e
+            .get("path")
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_string();
         if path.is_empty() {
             continue;
         }
@@ -209,7 +228,10 @@ pub fn check_repo(repo: &str) -> Result<(), String> {
 /// ¿SHA de 40 hex?
 pub fn check_revision(rev: &str) -> Result<(), String> {
     if rev.len() != 40 || !rev.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Revision inválida '{}': se espera un SHA de 40 hex", rev));
+        return Err(format!(
+            "Revision inválida '{}': se espera un SHA de 40 hex",
+            rev
+        ));
     }
     Ok(())
 }
@@ -218,6 +240,33 @@ pub fn check_revision(rev: &str) -> Result<(), String> {
 // Token de HF: env `HF_TOKEN` o `%APPDATA%\LocalMind\hf.token`
 // ---------------------------------------------------------------------------
 
+/// Ruta del token persistido (`%APPDATA%\LocalMind\hf.token`).
+/// `None` sin `APPDATA` (entorno mínimo): el token solo vive en `HF_TOKEN`.
+pub fn hf_token_path() -> Option<PathBuf> {
+    std::env::var("APPDATA")
+        .map(|a| PathBuf::from(a).join("LocalMind").join("hf.token"))
+        .ok()
+}
+
+/// Guardar el token de HF en disco con la misma ACL que `gateway.key`.
+/// P1 producción: reutiliza `auth::restrict_key_file` tras escribir (antes
+/// el fichero quedaba con la ACL heredada, legible para otros usuarios);
+/// si `icacls` falla ya avisa por stderr. Núcleo testeable con ruta inyectada.
+/// Hoy sin llamador en prod (el token solo se lee de `HF_TOKEN`/archivo):
+/// primitiva lista para el endpoint de token de repos privados.
+#[allow(dead_code)]
+pub fn save_hf_token_at(path: &Path, token: &str) -> Result<(), String> {
+    let content = format!("{}\n", token.trim());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("No se pudo crear {}: {}", parent.display(), e))?;
+    }
+    std::fs::write(path, &content)
+        .map_err(|e| format!("No se pudo escribir {}: {}", path.display(), e))?;
+    crate::auth::restrict_key_file(path);
+    Ok(())
+}
+
 pub fn hf_token() -> Option<String> {
     if let Ok(t) = std::env::var("HF_TOKEN") {
         let t = t.trim().to_string();
@@ -225,9 +274,7 @@ pub fn hf_token() -> Option<String> {
             return Some(t);
         }
     }
-    let p = std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("hf.token"))
-        .ok()?;
+    let p = hf_token_path()?;
     let raw = std::fs::read_to_string(p).ok()?;
     let t = raw.trim().to_string();
     if t.is_empty() {
@@ -256,9 +303,11 @@ fn hf_get(url: &str) -> Result<ureq::Response, String> {
 pub fn resolve_main_sha(repo: &str) -> Result<String, String> {
     let url = format!("https://huggingface.co/api/models/{}", repo);
     let resp = hf_get(&url)?;
-    let body = resp.into_string().map_err(|e| format!("Error al leer metadatos de {}: {}", repo, e))?;
-    let v: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("Metadatos inválidos de {}: {}", repo, e))?;
+    let body = resp
+        .into_string()
+        .map_err(|e| format!("Error al leer metadatos de {}: {}", repo, e))?;
+    let v: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Metadatos inválidos de {}: {}", repo, e))?;
     let sha = v
         .get("sha")
         .and_then(|s| s.as_str())
@@ -270,21 +319,128 @@ pub fn resolve_main_sha(repo: &str) -> Result<String, String> {
 
 /// Listar el árbol en un revision ya fijado.
 pub fn fetch_tree(repo: &str, rev: &str) -> Result<Vec<TreeFile>, String> {
-    let url = format!("https://huggingface.co/api/models/{}/tree/{}?recursive=1", repo, rev);
+    let url = format!(
+        "https://huggingface.co/api/models/{}/tree/{}?recursive=1",
+        repo, rev
+    );
     let resp = hf_get(&url)?;
-    let body = resp.into_string().map_err(|e| format!("Error al leer el árbol de {}: {}", repo, e))?;
+    let body = resp
+        .into_string()
+        .map_err(|e| format!("Error al leer el árbol de {}: {}", repo, e))?;
     let v: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("Árbol inválido de {}: {}", repo, e))?;
     parse_tree(&v)
 }
 
+/// Asesor de compatibilidad (portabilidad, estilo canirun.ai pero honesto):
+/// dado el árbol de un repo HF y el HW del host, decide si el modelo cabe y
+/// qué perfil conviene. Puro y testeable (sin red: el llamador ya trajo el
+/// árbol). Reglas:
+/// - Solo cuentan los `.gguf` (el resto del repo no pesa para el motor).
+/// - Si se pide un fichero concreto (`only_file`), solo ese; si no, el mayor
+///   `.gguf` (peor caso honesto: es el que probablemente quieran arrancar).
+/// - `verdict`: `"fits"` (cabe en VRAM al 90%), `"tight"` (cabe con KV en
+///   RAM: necesita `cache_ram`), `"no_fit"` (ni con RAM de respaldo alcanza).
+/// - `profile`: sugerencia (`velocidad`/`multi_doc`/`libros`) según lo que el
+///   peso permite en la VRAM.
+/// - Sin dato de VRAM (`None`) el veredicto es `"unknown"` (no se inventa).
+pub fn advise_fit(
+    tree: &[TreeFile],
+    only_file: Option<&str>,
+    vram_total_mb: Option<u64>,
+    ram_total_mb: Option<u64>,
+) -> serde_json::Value {
+    let ggufs: Vec<&TreeFile> = tree
+        .iter()
+        .filter(|f| f.path.to_lowercase().ends_with(".gguf"))
+        .collect();
+    if ggufs.is_empty() {
+        return serde_json::json!({
+            "verdict": "no_gguf",
+            "detail": "El repo no trae ningún .gguf en este revision.",
+        });
+    }
+    let target: &TreeFile = match only_file {
+        Some(f) => match ggufs.iter().find(|g| {
+            g.path == f
+                || g.path
+                    .to_lowercase()
+                    .ends_with(&format!("/{}", f.to_lowercase()))
+                || g.path.eq_ignore_ascii_case(f)
+        }) {
+            Some(t) => t,
+            None => {
+                return serde_json::json!({
+                    "verdict": "no_file",
+                    "detail": format!("El repo no trae '{}' en este revision.", f),
+                })
+            }
+        },
+        None => ggufs.iter().max_by_key(|g| g.size).unwrap_or(&ggufs[0]),
+    };
+    let model_mb = target.size / (1024 * 1024);
+    let vram = match vram_total_mb {
+        Some(v) => v,
+        None => {
+            return serde_json::json!({
+                "verdict": "unknown",
+                "file": target.path,
+                "size_mb": model_mb,
+                "detail": "Sin dato de VRAM en este equipo: no se puede estimar. El guard avisará al arrancar.",
+            })
+        }
+    };
+    let budget = vram * 9 / 10;
+    // KV a 32K por defecto (perfil recomendado): 1024 MB techo.
+    let kv32 = 1024u64;
+    if model_mb + kv32 <= budget {
+        return serde_json::json!({
+            "verdict": "fits",
+            "file": target.path,
+            "size_mb": model_mb,
+            "profile": "velocidad",
+            "detail": format!("Cabe en VRAM ({} MB + KV 32K frente a {} MB útiles). Perfil sugerido: Recomendado 32K.", model_mb, budget),
+        });
+    }
+    // ¿Cabe con KV desbordado a RAM? El peso debe caber en VRAM y el KV 128K
+    // (techo 4096 MB) entre VRAM libre + mitad de la RAM como techo prudente.
+    let ram = ram_total_mb.unwrap_or(0);
+    let kv128 = 4096u64;
+    let ram_help = ram / 2;
+    if model_mb <= budget && model_mb + kv128 <= budget + ram_help {
+        let ctx =
+            if model_mb + kv128 <= budget + ram_help && model_mb + 2048 <= budget + ram_help / 2 {
+                131072
+            } else {
+                65536
+            };
+        let profile = if ctx >= 131072 { "libros" } else { "multi_doc" };
+        return serde_json::json!({
+            "verdict": "tight",
+            "file": target.path,
+            "size_mb": model_mb,
+            "profile": profile,
+            "detail": format!("El peso cabe en VRAM pero el KV debe desbordar a RAM. Perfil sugerido: {} (parte del KV en DDR5, ~5-20% menos t/s).", profile),
+        });
+    }
+    serde_json::json!({
+        "verdict": "no_fit",
+        "file": target.path,
+        "size_mb": model_mb,
+        "detail": format!("No cabe: {} MB (peso) superan la VRAM útil ({} MB de {} instalados) y ni con RAM de respaldo alcanza para el KV mínimo. Busca una cuantización menor.", model_mb, budget, vram),
+        "hint_quant": "Prueba el mismo modelo en Q3_K_M o IQ3_XS, o baja a 7-8B: suelen ocupar la mitad.",
+    })
+}
+
 fn snippet(s: &str) -> String {
     const MAX: usize = 300;
     let t = s.trim();
-    if t.len() <= MAX {
+    // Por chars, no por bytes: `&t[..MAX]` parte un char multibyte y panica
+    // (misma clase que el P0 de update.rs; ver `snippet` allí).
+    if t.chars().count() <= MAX {
         t.to_string()
     } else {
-        format!("{}…", &t[..MAX])
+        format!("{}…", t.chars().take(MAX).collect::<String>())
     }
 }
 
@@ -350,6 +506,10 @@ struct JobInner {
     busy: AtomicBool,
     cancel: AtomicBool,
     bytes_done: AtomicU64,
+    /// Cuándo se tomó `busy` (epoch s). Watchdog (P1 producción, espejo de
+    /// `update.rs`): si el worker muere sin liberarlo, el próximo `start_job`
+    /// lo recupera tras 10 min en vez de dar 409 para siempre.
+    busy_since_secs: AtomicU64,
 }
 
 static JOB: LazyLock<JobInner> = LazyLock::new(|| JobInner {
@@ -357,6 +517,7 @@ static JOB: LazyLock<JobInner> = LazyLock::new(|| JobInner {
     busy: AtomicBool::new(false),
     cancel: AtomicBool::new(false),
     bytes_done: AtomicU64::new(0),
+    busy_since_secs: AtomicU64::new(0),
 });
 
 fn job() -> &'static JobInner {
@@ -364,7 +525,11 @@ fn job() -> &'static JobInner {
 }
 
 pub fn job_snapshot() -> JobState {
-    let mut s = job().state.lock().map(|g| g.clone()).unwrap_or_else(|p| p.into_inner().clone());
+    let mut s = job()
+        .state
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|p| p.into_inner().clone());
     s.bytes_done = job().bytes_done.load(Ordering::Relaxed);
     s
 }
@@ -379,6 +544,41 @@ fn job_set(f: impl FnOnce(&mut JobState)) {
 /// Usada por la ruta `POST /api/models/download/cancel` (server.rs).
 pub fn job_busy() -> bool {
     job().busy.load(Ordering::Relaxed)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Tomar `busy` o recuperarlo por watchdog (P1 producción, espejo de
+/// `update.rs`): si estaba tomado hace más de 10 min, el worker murió sin
+/// liberarlo y se recupera en vez de dar 409 para siempre. `true` = vía libre.
+fn take_busy_or_recover() -> bool {
+    if !job().busy.swap(true, Ordering::SeqCst) {
+        job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        return true;
+    }
+    let since = job().busy_since_secs.load(Ordering::Relaxed);
+    if since > 0 && now_secs().saturating_sub(since) >= 600 {
+        job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        job().cancel.store(false, Ordering::Relaxed);
+        return true;
+    }
+    false
+}
+
+/// Latido del worker: marca `busy` como vivo para que el watchdog no lo robe
+/// a mitad de una descarga lenta. Llamar por chunk/no-op periódico.
+fn heartbeat_busy() {
+    job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+}
+
+fn release_busy() {
+    job().busy.store(false, Ordering::SeqCst);
+    job().busy_since_secs.store(0, Ordering::Relaxed);
 }
 
 pub fn job_cancel() -> JobState {
@@ -422,23 +622,52 @@ pub fn dest_for(models_dir: &Path, repo: &str, files: &[TreeFile]) -> Result<Pat
 }
 
 fn check_inside(models_dir: &Path, p: &Path) -> Result<(), String> {
-    // Comparación por componentes normalizados (sin tocar disco).
-    let root: Vec<_> = models_dir.components().collect();
-    let mut cur: Vec<_> = Vec::new();
+    // Contención por prefijo real: normalizar ambas rutas (sin `.`, `..`
+    // replegado) y exigir `starts_with`. La vieja comparación de longitudes
+    // aceptaba `C:/<largo>/x.gguf` (absoluta larga) como contenida.
+    fn normalizar(base: &Path) -> PathBuf {
+        use std::path::Component;
+        let mut out = PathBuf::new();
+        for c in base.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                _ => out.push(c.as_os_str()),
+            }
+        }
+        out
+    }
+    // `..` explícito jamás se repliega: es escape, no normalización.
     for c in p.components() {
         use std::path::Component;
-        match c {
-            Component::ParentDir => {
-                return Err(format!("Ruta fuera de models/: {}", p.display()));
-            }
-            Component::CurDir => {}
-            _ => cur.push(c),
+        if matches!(c, Component::ParentDir) {
+            return Err(format!("Ruta fuera de models/: {}", p.display()));
         }
     }
-    if cur.len() < root.len() {
+    let root = normalizar(models_dir);
+    let cur = normalizar(p);
+    if !cur.starts_with(&root) {
         return Err(format!("Ruta fuera de models/: {}", p.display()));
     }
     Ok(())
+}
+/// Pre-chequeo de espacio (P1 producción): ¿cabe `need` bytes en el volumen
+/// de `models_dir` con margen 2× (misma regla que `update::fits_download`)?
+/// Reutiliza `update::free_bytes_for` + `update::fits_download` (ver
+/// update.rs:359-403 como modelo). `None` = sin veredicto (sin dato medido el
+/// llamador NO bloquea). Puro en decisión salvo la medición best-effort.
+pub fn models_space_ok(models_dir: &Path, need: u64) -> Option<bool> {
+    crate::update::fits_download(Some(need), crate::update::free_bytes_for(models_dir))
+}
+
+/// Mensaje 507 en español con el tamaño que no cabe (P1 producción).
+pub fn models_no_space_msg(need: u64) -> String {
+    format!(
+        "Sin espacio en el disco de modelos para descargar {:.1} GB (se exigen el doble libres): libera espacio o cambia la carpeta de modelos.",
+        need as f64 / (1024.0 * 1024.0 * 1024.0)
+    )
 }
 
 /// Descargar un fichero con resume y verificación. Devuelve bytes finales.
@@ -457,11 +686,19 @@ fn download_one(
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("No se pudo crear {}: {}", parent.display(), e))?;
     }
+    // P1 producción: pre-chequeo por fichero (un resume a mitad de un .gguf
+    // de 15GB también se queda sin disco). Error temprano con mensaje 507.
+    if models_space_ok(models_dir, tf.size) == Some(false) {
+        return Err(models_no_space_msg(tf.size));
+    }
     // Omitir lo ya verificado (mismo tamaño + mismo sha registrado).
     if dest.exists() {
         if let Ok(meta) = std::fs::metadata(dest) {
             if meta.len() == tf.size {
-                let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 if let Some(rec) = read_verified(models_dir, &name) {
                     let oid_ok = tf.oid.as_ref().map(|o| o == &rec.sha256).unwrap_or(true);
                     if oid_ok && rec.size == tf.size && rec.repo == repo && rec.revision == rev {
@@ -529,7 +766,9 @@ fn download_one(
             // El `.part` queda para resumir la próxima vez.
             return Err("cancelado".to_string());
         }
-        let n = reader.read(&mut buf).map_err(|e| format!("Error al descargar {}: {}", tf.path, e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Error al descargar {}: {}", tf.path, e))?;
         if n == 0 {
             break;
         }
@@ -537,10 +776,12 @@ fn download_one(
             .map_err(|e| format!("Error al guardar {}: {}", part.display(), e))?;
         written += n as u64;
         job().bytes_done.fetch_add(n as u64, Ordering::Relaxed);
+        // Latido: la descarga sigue viva aunque sea lenta (watchdog 10 min).
+        heartbeat_busy();
     }
     drop(out);
-    // Verificar tamaño y sha256 antes del rename atómico.
-    let meta = std::fs::metadata(&part).map_err(|e| format!("No se pudo medir {}: {}", part.display(), e))?;
+    let meta = std::fs::metadata(&part)
+        .map_err(|e| format!("No se pudo medir {}: {}", part.display(), e))?;
     if meta.len() != tf.size {
         let _ = std::fs::remove_file(&part);
         return Err(format!(
@@ -554,9 +795,15 @@ fn download_one(
         let got = sha256_file(&part)?;
         if got != oid.to_lowercase() {
             let _ = std::fs::remove_file(&part);
-            return Err(format!("SHA-256 no coincide en {} (descarga corrupta)", tf.path));
+            return Err(format!(
+                "SHA-256 no coincide en {} (descarga corrupta)",
+                tf.path
+            ));
         }
-        let name = dest.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = dest
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         write_verified(
             models_dir,
             &name,
@@ -582,7 +829,7 @@ pub fn start_job(
     revision: Option<String>,
     only_file: Option<String>,
 ) -> Result<(), String> {
-    if job().busy.swap(true, Ordering::SeqCst) {
+    if !take_busy_or_recover() {
         return Err("Ya hay una descarga en curso".to_string());
     }
     job().cancel.store(false, Ordering::Relaxed);
@@ -601,7 +848,18 @@ pub fn start_job(
         }
     });
     std::thread::spawn(move || {
-        let err = run_job(&models_dir, &repo, revision.as_deref(), only_file.as_deref(), &log);
+        // P0 producción (panic=abort): el worker libera `busy` aunque
+        // `run_job` panique; si no, el canal quedaba en 409 para siempre.
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_job(
+                &models_dir,
+                &repo,
+                revision.as_deref(),
+                only_file.as_deref(),
+                &log,
+            )
+        }))
+        .unwrap_or_else(|_| Some("el worker de descarga abortó (pánico interno)".to_string()));
         match err {
             None => {
                 job_set(|s| {
@@ -622,7 +880,7 @@ pub fn start_job(
                 log(format!("[LocalMind] Error al descargar modelo: {}", e));
             }
         }
-        job().busy.store(false, Ordering::SeqCst);
+        release_busy();
     });
     Ok(())
 }
@@ -651,7 +909,11 @@ fn run_job(
         s.revision = rev.clone();
         s.state = "downloading".to_string();
     });
-    log(format!("[LocalMind] Descargando {} @ {} …", repo, &rev[..8.min(rev.len())]));
+    log(format!(
+        "[LocalMind] Descargando {} @ {} …",
+        repo,
+        &rev[..8.min(rev.len())]
+    ));
     // 2. Árbol.
     let mut files = match fetch_tree(repo, &rev) {
         Ok(f) => f,
@@ -664,7 +926,12 @@ fn run_job(
         let before = files.len();
         files.retain(|f| f.path == one);
         if files.is_empty() {
-            return Some(format!("El fichero '{}' no está en el repo {} @ {}", one, repo, &rev[..8.min(rev.len())]));
+            return Some(format!(
+                "El fichero '{}' no está en el repo {} @ {}",
+                one,
+                repo,
+                &rev[..8.min(rev.len())]
+            ));
         }
         let _ = before;
     }
@@ -680,6 +947,12 @@ fn run_job(
         s.files_total = files.len();
         s.bytes_total = total;
     });
+    // P1 producción: pre-chequeo de espacio ANTES de bajar ~15GB. Con dato
+    // medido y sin 2× se aborta temprano con el mismo mensaje del 507 (el
+    // handler lo mapea a 507). Sin dato no se bloquea.
+    if models_space_ok(models_dir, total) == Some(false) {
+        return Some(models_no_space_msg(total));
+    }
     // 3. Descarga + verificación, fichero a fichero.
     // `single` = mismo criterio que `dest_for`: UN solo `.gguf` → plano.
     let single = files.len() == 1 && files[0].path.to_lowercase().ends_with(".gguf");
@@ -785,34 +1058,149 @@ pub fn list_gguf_files(models_dir: &Path) -> Vec<(String, PathBuf, u64)> {
 }
 
 // ---------------------------------------------------------------------------
+// import: primitiva compartida (wave-4: `import_model_from_path` en process.rs
+// y `copy_picked` debajo usan ESTO; antes cada vía tenía su propia copia con
+// propiedades distintas — parcial visible, sin self-check — según qué camino
+// se auditara).
+/// Error tipado de importación (ABIERTO-1 wave-6): el 409 (`Exists`) se mapea
+/// por VARIANTE, nunca por substring del mensaje. Sin esto, un fichero
+/// llamado `ya existe.txt` (u otro error con esas palabras en la ruta)
+/// producía un 409 espurio donde tocaba 400.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportError {
+    /// El destino ya existe y `overwrite=false` → HTTP 409.
+    Exists(String),
+    /// Nombre/extensión inválidos → HTTP 400.
+    Invalid(String),
+    /// Fallo de I/O (crear dir, copiar, renombrar) → HTTP 400.
+    Io(String),
+}
+impl std::fmt::Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImportError::Exists(m) | ImportError::Invalid(m) | ImportError::Io(m) => {
+                write!(f, "{}", m)
+            }
+        }
+    }
+}
+impl ImportError {
+    /// ¿Es colisión con `overwrite=false`? Único caso que mapea a HTTP 409.
+    pub fn is_exists(&self) -> bool {
+        matches!(self, ImportError::Exists(_))
+    }
+}
+/// Validar nombre + resolver destino de un `.gguf` para `models_dir`.
+/// Pura salvo `dest.exists()`/`canonicalize` (lecturas, sin escritura).
+/// - `Err(Invalid)` si no es `.gguf` (case-insensitive) o el nombre es hostil.
+/// - Self-import (`src` canónico == `dest` canónico) → `Ok((nombre, dest, true))`.
+/// - `exists && !overwrite` → `Err(Exists)` (el handler→409 por variante).
+pub fn resolve_import_dest(
+    models_dir: &Path,
+    source_path: &Path,
+    overwrite: bool,
+) -> Result<(String, PathBuf, bool), ImportError> {
+    let name = source_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| ImportError::Invalid("Nombre de archivo inválido".to_string()))?;
+    if !name.to_lowercase().ends_with(".gguf") {
+        return Err(ImportError::Invalid(format!("'{}' no es un .gguf", name)));
+    }
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err(ImportError::Invalid(format!("Nombre rechazado: {}", name)));
+    }
+    let dest = models_dir.join(&name);
+    if let (Ok(src_c), Ok(dst_c)) = (source_path.canonicalize(), dest.canonicalize()) {
+        if src_c == dst_c {
+            return Ok((name, dest, true));
+        }
+    }
+    if dest.exists() && !overwrite {
+        return Err(ImportError::Exists(format!(
+            "'{}' ya existe (marque sobreescribir para reemplazarlo)",
+            name
+        )));
+    }
+    Ok((name, dest, false))
+}
+
+/// Copia atómica tmp+rename a un destino ya resuelto. Jamás deja un parcial
+/// en `dest`: el parcial vive en `<dest>.tmp-<pid>` (hermano, mismo volumen
+/// → `rename` atómico en Windows; `list_models` solo enumera `*.gguf`, así
+/// que nunca es visible/lanzable) y en cualquier fallo se limpia.
+pub fn copy_atomic_tmp(src: &Path, dest: &Path) -> Result<(), ImportError> {
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "modelo".to_string());
+    let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ImportError::Io(format!("Error al copiar {}: {}", name, e)));
+    }
+    if let Err(e) = std::fs::rename(&tmp, dest) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ImportError::Io(format!("Error al copiar {}: {}", name, e)));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // import_pick: diálogo nativo + copia (corrección de D-10)
 /// Copiar ficheros elegidos a `models/`. Sin sobreescribir salvo `overwrite`.
-/// Devuelve los nombres copiados.
-pub fn copy_picked(models_dir: &Path, files: &[PathBuf], overwrite: bool) -> Result<Vec<String>, String> {
+/// Vía `resolve_import_dest` + `copy_atomic_tmp`: mismas garantías que la vía
+/// `POST /api/import_model` (self-import no-op, tmp+rename sin parciales).
+/// Devuelve los nombres copiados. SIN lock: el llamador (`import_pick` en el
+/// handler corre en su hilo; `import_model_from_path` aporta el suyo) — para
+/// `copy_picked` multi-fichero el lock vive en el llamador si lo necesita.
+pub fn copy_picked(
+    models_dir: &Path,
+    files: &[PathBuf],
+    overwrite: bool,
+) -> Result<Vec<String>, ImportError> {
     if let Err(e) = std::fs::create_dir_all(models_dir) {
-        return Err(format!("No se pudo crear {}: {}", models_dir.display(), e));
+        return Err(ImportError::Io(format!(
+            "No se pudo crear {}: {}",
+            models_dir.display(),
+            e
+        )));
     }
     let mut done = Vec::new();
     for src in files {
-        let name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .filter(|n| !n.is_empty())
-            .ok_or_else(|| "Nombre de archivo inválido".to_string())?;
-        if !name.to_lowercase().ends_with(".gguf") {
-            return Err(format!("'{}' no es un .gguf", name));
+        let (name, dest, self_import) = resolve_import_dest(models_dir, src, overwrite)?;
+        if self_import {
+            done.push(name);
+            continue;
         }
-        if name.contains("..") || name.contains('/') || name.contains('\\') {
-            return Err(format!("Nombre rechazado: {}", name));
-        }
-        let dest = models_dir.join(&name);
-        if dest.exists() && !overwrite {
-            return Err(format!("'{}' ya existe (marque sobreescribir para reemplazarlo)", name));
-        }
-        std::fs::copy(src, &dest).map_err(|e| format!("Error al copiar {}: {}", name, e))?;
+        copy_atomic_tmp(src, &dest)?;
         done.push(name);
     }
     Ok(done)
+}
+
+/// Valida y resuelve el destino de importación de un modelo desde ruta local.
+///
+/// Delega en `resolve_import_dest` (misma resolución que el interior,
+/// incluido self-import no-op): previo e interior nunca divergen.
+/// - Si el fichero destino ya existe y `overwrite` es `false`, devuelve
+///   `Err((409, mensaje))`.
+/// - En caso de nombre o extensión inválidos, devuelve `Err((400, mensaje))`.
+/// - Si es válido, devuelve `Ok((nombre_limpio, ruta_destino))`.
+pub fn check_import_dest(
+    models_dir: &Path,
+    source_path: &Path,
+    overwrite: bool,
+) -> Result<(String, PathBuf), (u16, String)> {
+    // UX temprana del handler: misma resolución que el interior (incluido el
+    // self-import no-op de wave-4), así que previo e interior nunca divergen
+    // (BUG-1 wave-4: el previo decía 409 donde el interior decía ok).
+    match resolve_import_dest(models_dir, source_path, overwrite) {
+        Ok((name, dest, _)) => Ok((name, dest)),
+        Err(ImportError::Exists(m)) => Err((409, m)),
+        Err(e) => Err((400, e.to_string())),
+    }
 }
 
 /// Decisión de timeout del diálogo `import_pick`: espera acotada (120 s) para
@@ -828,26 +1216,95 @@ pub fn import_pick_timed_out(elapsed_secs: u64) -> bool {
 }
 
 /// Enriquecer una ficha `ModelInfo` serializada con `size_bytes`, `sha256`,
-/// `verified` y `source` (sin tocar las claves existentes).
-pub fn enrich_model_entry(models_dir: &Path, mut v: serde_json::Value, size_bytes: u64) -> serde_json::Value {
-    let filename = v.get("filename").and_then(|f| f.as_str()).unwrap_or("").to_string();
+/// `verified`, `source` y `capabilities` (sin tocar las claves existentes).
+/// `capabilities` es heurística HONESTA por nombre de archivo (NO se lee el
+/// header GGUF: decisión explícita, sin parser binario):
+/// `{family, ctx_native, thinking}` donde `ctx_native` es el contexto nativo
+/// conocido de la familia (`null` si se desconoce) y `thinking` si la familia
+/// suele traer plantilla con razonamiento. La UI lo usa para adaptar
+/// opciones; el motor confirma el `n_ctx` real por `/props` al arrancar.
+pub fn model_capabilities(filename: &str) -> serde_json::Value {
+    let low = filename.to_lowercase();
+    // Familia (mismo vocabulario que el sampler del gateway).
+    let family = if low.contains("qwen") || low.contains("qwq") || low.contains("bonsai") {
+        "qwen"
+    } else if low.contains("llama") {
+        "llama"
+    } else if low.contains("mistral") || low.contains("mixtral") {
+        "mistral"
+    } else {
+        // `phi`/`gemma`/desconocido comparten capacidades genéricas.
+        "generic"
+    };
+    // Contexto nativo por familia/generación conocida (null = se desconoce,
+    // la UI no limita y el motor manda por /props).
+    let ctx_native: Option<usize> = if low.contains("qwen3") || low.contains("bonsai") {
+        Some(262144)
+    } else if low.contains("qwen2.5") {
+        Some(131072)
+    } else if low.contains("llama-3.1") || low.contains("llama-3.2") || low.contains("llama3.1") {
+        Some(131072)
+    } else if low.contains("llama-3") || low.contains("llama3") {
+        Some(8192)
+    } else if low.contains("mistral") && (low.contains("v0.3") || low.contains("0.3")) {
+        Some(131072)
+    } else if low.contains("mistral") || low.contains("mixtral") {
+        Some(32768)
+    } else if low.contains("phi-4") || low.contains("gemma-3") {
+        Some(131072)
+    } else {
+        None
+    };
+    // Thinking: familias con plantilla de razonamiento conocida.
+    let thinking = low.contains("qwen3") || low.contains("qwq") || low.contains("bonsai");
+    serde_json::json!({
+        "family": family,
+        "ctx_native": ctx_native,
+        "thinking": thinking,
+    })
+}
+pub fn enrich_model_entry(
+    models_dir: &Path,
+    mut v: serde_json::Value,
+    size_bytes: u64,
+) -> serde_json::Value {
+    let filename = v
+        .get("filename")
+        .and_then(|f| f.as_str())
+        .unwrap_or("")
+        .to_string();
     let rec = if filename.is_empty() {
         None
     } else {
         read_verified(models_dir, &filename)
     };
     if let Some(obj) = v.as_object_mut() {
-        obj.insert("size_bytes".to_string(), serde_json::Value::from(size_bytes));
+        obj.insert(
+            "size_bytes".to_string(),
+            serde_json::Value::from(size_bytes),
+        );
         obj.insert(
             "sha256".to_string(),
-            rec.as_ref().map(|r| serde_json::Value::from(r.sha256.clone())).unwrap_or(serde_json::Value::Null),
+            rec.as_ref()
+                .map(|r| serde_json::Value::from(r.sha256.clone()))
+                .unwrap_or(serde_json::Value::Null),
         );
-        obj.insert("verified".to_string(), serde_json::Value::from(rec.is_some()));
+        obj.insert(
+            "verified".to_string(),
+            serde_json::Value::from(rec.is_some()),
+        );
         obj.insert(
             "source".to_string(),
-            rec.map(|r| serde_json::Value::from(if r.repo.is_empty() { "local".to_string() } else { r.repo }))
-                .unwrap_or_else(|| serde_json::Value::from("local".to_string())),
+            rec.map(|r| {
+                serde_json::Value::from(if r.repo.is_empty() {
+                    "local".to_string()
+                } else {
+                    r.repo
+                })
+            })
+            .unwrap_or_else(|| serde_json::Value::from("local".to_string())),
         );
+        obj.insert("capabilities".to_string(), model_capabilities(&filename));
     }
     v
 }
@@ -879,7 +1336,10 @@ mod tests {
         ]);
         let files = parse_tree(&body).unwrap();
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].oid.as_deref(), Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        assert_eq!(
+            files[0].oid.as_deref(),
+            Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
         assert!(files[1].oid.is_none());
         // Rutas peligrosas: el parse las rechaza.
         let evil = serde_json::json!([{"type": "file", "path": "../fuera.gguf", "size": 1}]);
@@ -888,7 +1348,10 @@ mod tests {
         assert!(parse_tree(&abs).is_err());
         assert!(check_repo("owner/name").is_ok());
         assert!(check_repo("sin-barra").is_err());
-        assert!(check_revision("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad0123").is_err());
+        assert!(check_revision(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad0123"
+        )
+        .is_err());
         assert!(check_revision("abc").is_err());
         assert!(check_revision("0000000000000000000000000000000000000000").is_ok());
     }
@@ -911,13 +1374,87 @@ mod tests {
         assert_eq!(back.size, 42);
         assert_eq!(back.repo, "owner/name");
         // Ficha enriquecida: conserva claves y añade las nuevas.
-        let base = serde_json::json!({"filename": "m.gguf", "name": "m", "size_gb": 0.0, "path": "x"});
+        let base =
+            serde_json::json!({"filename": "m.gguf", "name": "m", "size_gb": 0.0, "path": "x"});
         let enriched = enrich_model_entry(&models, base, 42);
         assert_eq!(enriched["filename"], serde_json::json!("m.gguf"));
         assert_eq!(enriched["size_bytes"], serde_json::json!(42));
         assert_eq!(enriched["verified"], serde_json::json!(true));
         assert_eq!(enriched["source"], serde_json::json!("owner/name"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Capacidades por nombre: Qwen3→262K+thinking, Llama3.1→128K sin
+    /// thinking, desconocido→null sin thinking (la UI no limita, el motor
+    /// confirma por /props).
+    #[test]
+    fn capacidades_por_nombre_honestas() {
+        let q = model_capabilities("Qwen3.8-27B-IQ4_XS_4BPW.gguf");
+        assert_eq!(q["family"], serde_json::json!("qwen"));
+        assert_eq!(q["ctx_native"], serde_json::json!(262144));
+        assert_eq!(q["thinking"], serde_json::json!(true));
+        let l = model_capabilities("Llama-3.1-8B-Q4_K_M.gguf");
+        assert_eq!(l["family"], serde_json::json!("llama"));
+        assert_eq!(l["ctx_native"], serde_json::json!(131072));
+        assert_eq!(l["thinking"], serde_json::json!(false));
+        let g = model_capabilities("Algo-Raro-13B-Q5.gguf");
+        assert_eq!(g["family"], serde_json::json!("generic"));
+        assert!(g["ctx_native"].is_null());
+        assert_eq!(g["thinking"], serde_json::json!(false));
+    }
+
+    /// Asesor: fits en 16 GB, tight con KV en RAM, no_fit en 8 GB con 27B,
+    /// unknown sin dato, no_gguf sin pesos. Números de la máquina del dueño
+    /// como referencia (27B = 14336 MB).
+    #[test]
+    fn asesor_veredictos_por_hardware() {
+        let tree = vec![
+            TreeFile {
+                path: "grande.gguf".to_string(),
+                size: 14336 * 1024 * 1024,
+                oid: None,
+            },
+            TreeFile {
+                path: "config.json".to_string(),
+                size: 1000,
+                oid: None,
+            },
+        ];
+        // 27B en 16 GB: 14336+1024(KV32K) = 15360 > 14745 → tight con perfil
+        // (coherente con cache_ram 6144 real de esta máquina).
+        let v = advise_fit(&tree, None, Some(16384), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("tight"));
+        assert!(v["profile"].is_string());
+        // 7B (~4 GB) en 16 GB: 4096+1024 = 5120 <= 14745 → fits velocidad.
+        let small = vec![TreeFile {
+            path: "chico.gguf".to_string(),
+            size: 4096 * 1024 * 1024,
+            oid: None,
+        }];
+        let v = advise_fit(&small, None, Some(16384), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("fits"));
+        assert_eq!(v["profile"], serde_json::json!("velocidad"));
+        // 8 GB: el peso (14336) supera el budget (7372) → no_fit con guía.
+        let v = advise_fit(&tree, None, Some(8192), Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("no_fit"));
+        assert!(v["hint_quant"].is_string());
+        // Sin VRAM → unknown, sin inventar.
+        let v = advise_fit(&tree, None, None, Some(32768));
+        assert_eq!(v["verdict"], serde_json::json!("unknown"));
+        let v = advise_fit(
+            &[TreeFile {
+                path: "a.json".to_string(),
+                size: 1,
+                oid: None,
+            }],
+            None,
+            Some(16384),
+            None,
+        );
+        assert_eq!(v["verdict"], serde_json::json!("no_gguf"));
+        // Fichero concreto que no existe → no_file.
+        let v = advise_fit(&tree, Some("otro.gguf"), Some(16384), None);
+        assert_eq!(v["verdict"], serde_json::json!("no_file"));
     }
 
     #[test]
@@ -931,20 +1468,68 @@ mod tests {
         // Destino: UN solo .gguf (aunque venga en subcarpeta) → plano en
         // models/<fichero>; multi → models/<repo>/.
         let root = PathBuf::from("C:/m/models");
-        let one = vec![TreeFile { path: "a.gguf".to_string(), size: 1, oid: None }];
+        let one = vec![TreeFile {
+            path: "a.gguf".to_string(),
+            size: 1,
+            oid: None,
+        }];
         assert_eq!(dest_for(&root, "o/r", &one).unwrap(), root.join("a.gguf"));
-        let nested_one = vec![TreeFile { path: "tinyllamas/stories260K.gguf".to_string(), size: 1, oid: None }];
+        let nested_one = vec![TreeFile {
+            path: "tinyllamas/stories260K.gguf".to_string(),
+            size: 1,
+            oid: None,
+        }];
         assert_eq!(
             dest_for(&root, "ggml-org/models", &nested_one).unwrap(),
             root.join("stories260K.gguf")
         );
         let multi = vec![
-            TreeFile { path: "a.gguf".to_string(), size: 1, oid: None },
-            TreeFile { path: "b.json".to_string(), size: 1, oid: None },
+            TreeFile {
+                path: "a.gguf".to_string(),
+                size: 1,
+                oid: None,
+            },
+            TreeFile {
+                path: "b.json".to_string(),
+                size: 1,
+                oid: None,
+            },
         ];
         assert_eq!(dest_for(&root, "o/r", &multi).unwrap(), root.join("r"));
         // Escape sigue rechazado.
         assert!(check_inside(&root, &PathBuf::from("C:/m/models/../fuera")).is_err());
+    }
+
+    /// Misma clase que el ZipSlip de `stage_zip` (2026-10-10): la vieja
+    /// `check_inside` comparaba longitudes, así que una ruta fuera del root
+    /// pero igual o más larga pasaba como "contenida". Hoy se exige prefijo
+    /// real (`starts_with` sobre rutas normalizadas).
+    #[test]
+    fn check_inside_exige_prefijo() {
+        let root = PathBuf::from("C:/m/models");
+        // Fuera del root pero larga: el chequeo por longitud la aceptaba.
+        assert!(check_inside(&root, &PathBuf::from("C:/m/models-vecina/x.gguf")).is_err());
+        assert!(check_inside(&root, &PathBuf::from("C:/m/otro/camino/largo/x.gguf")).is_err());
+        // Dentro: pasa (plano y anidado).
+        assert!(check_inside(&root, &root.join("a.gguf")).is_ok());
+        assert!(check_inside(&root, &root.join("sub").join("b.gguf")).is_ok());
+    }
+
+    /// P1 producción: el token persistido queda con la ACL del dueño (vía
+    /// `auth::restrict_key_file`, mismo endurecer que `gateway.key`) y el
+    /// contenido coincide. En Linux `icacls` no existe: el aviso va por
+    /// stderr pero el guardado sigue válido.
+    #[test]
+    fn save_hf_token_escribe_y_relee() {
+        let dir = std::env::temp_dir().join(format!("lm-hftok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("LocalMind").join("hf.token");
+        save_hf_token_at(&path, "  tok-secreto-1  ").expect("guarda");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-secreto-1\n");
+        // Re-guardar idempotente: mismo contenido, sin error.
+        save_hf_token_at(&path, "tok-secreto-1").expect("re-guarda");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-secreto-1\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -964,8 +1549,16 @@ mod tests {
         let names: Vec<&str> = found.iter().map(|(n, _, _)| n.as_str()).collect();
         assert!(names.contains(&"plano.gguf"), "raíz: {:?}", names);
         assert!(names.contains(&"anidado.gguf"), "un nivel: {:?}", names);
-        assert!(!names.contains(&"oculto.gguf"), ".cache excluido: {:?}", names);
-        assert!(!names.contains(&"registro.gguf"), ".verified excluido: {:?}", names);
+        assert!(
+            !names.contains(&"oculto.gguf"),
+            ".cache excluido: {:?}",
+            names
+        );
+        assert!(
+            !names.contains(&"registro.gguf"),
+            ".verified excluido: {:?}",
+            names
+        );
         assert!(!names.contains(&"nota.txt"), "solo .gguf: {:?}", names);
         assert_eq!(found.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
@@ -978,5 +1571,133 @@ mod tests {
         assert!(import_pick_timed_out(IMPORT_PICK_TIMEOUT_SECS));
         assert!(import_pick_timed_out(IMPORT_PICK_TIMEOUT_SECS + 999));
         assert_eq!(IMPORT_PICK_TIMEOUT_SECS, 120);
+    }
+
+    #[test]
+    fn check_import_dest_overwrite_y_case_insensitive() {
+        let dir = std::env::temp_dir().join(format!("lm-dest-{}", std::process::id()));
+        let models = dir.join("models");
+        let _ = std::fs::create_dir_all(&models);
+
+        // 1. Caso insensitive pasa (.GGUF mayúsculas).
+        let src_upper = PathBuf::from("C:/downloads/Model-Q4.GGUF");
+        let (name, dest) = check_import_dest(&models, &src_upper, false).unwrap();
+        assert_eq!(name, "Model-Q4.GGUF");
+        assert_eq!(dest, models.join("Model-Q4.GGUF"));
+
+        // 2. Extensión no gguf da 400.
+        let src_bad = PathBuf::from("C:/downloads/Model.bin");
+        let err_bad = check_import_dest(&models, &src_bad, false).unwrap_err();
+        assert_eq!(err_bad.0, 400);
+        assert!(err_bad.1.contains("no es un .gguf"));
+
+        // 3. Destino existente sin overwrite da 409.
+        let target = models.join("existente.gguf");
+        let _ = std::fs::write(&target, b"dummy");
+        let src_exist = PathBuf::from("D:/otra/existente.gguf");
+        let err_exist = check_import_dest(&models, &src_exist, false).unwrap_err();
+        assert_eq!(err_exist.0, 409);
+        assert!(err_exist.1.contains("ya existe"));
+
+        // 4. Con overwrite=true pasa aunque exista.
+        let ok_overwrite = check_import_dest(&models, &src_exist, true).unwrap();
+        assert_eq!(ok_overwrite.0, "existente.gguf");
+
+        // 5. ABIERTO-1 wave-6: un nombre con "ya existe" en OTRO error no da
+        // 409 espurio — el mapeo es por variante, no por substring.
+        let src_trampa = PathBuf::from("C:/downloads/ya existe.txt");
+        let err_trampa = check_import_dest(&models, &src_trampa, false).unwrap_err();
+        assert_eq!(err_trampa.0, 400, "falso positivo 409: {:?}", err_trampa);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Wave-4 B1: `copy_picked` (vía `import_pick`) con las mismas garantías
+    /// que `import_model_from_path`: self-import no-op, 409 sin overwrite,
+    /// tmp+rename sin parciales visibles.
+    #[test]
+    fn copy_picked_atomico_sin_parciales() {
+        let dir = std::env::temp_dir().join(format!("lm-picked-{}", std::process::id()));
+        let models = dir.join("models");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&models);
+        let f1 = dir.join("a.gguf");
+        let f2 = dir.join("b.gguf");
+        std::fs::write(&f1, b"gguf-a").unwrap();
+        std::fs::write(&f2, b"gguf-b").unwrap();
+        let names = copy_picked(&models, &[f1.clone(), f2.clone()], false).unwrap();
+        assert_eq!(names, vec!["a.gguf".to_string(), "b.gguf".to_string()]);
+        // Sin overwrite, el segundo intento falla con "ya existe".
+        let err = copy_picked(&models, &[f1.clone()], false).unwrap_err();
+        assert!(err.is_exists(), "{}", err);
+        // Con overwrite, pisa sin dejar tmps.
+        std::fs::write(&f1, b"gguf-a2").unwrap();
+        assert_eq!(
+            copy_picked(&models, &[f1.clone()], true).unwrap(),
+            vec!["a.gguf".to_string()]
+        );
+        assert_eq!(std::fs::read(models.join("a.gguf")).unwrap(), b"gguf-a2");
+        // Self-import: el fichero que ya vive en models/ es no-op.
+        let ya = models.join("b.gguf");
+        assert_eq!(
+            copy_picked(&models, &[ya.clone()], false).unwrap(),
+            vec!["b.gguf".to_string()]
+        );
+        // Sin parciales: ningún `.tmp-*` en models/.
+        let restos: Vec<_> = std::fs::read_dir(&models)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+            .filter(|n| n.contains("tmp-"))
+            .collect();
+        assert!(restos.is_empty(), "tmps sin limpiar: {:?}", restos);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Candado para los tests que tocan `busy`/`busy_since_secs` globales:
+    /// `cargo test` corre en hilos y sin esto se pisan entre sí.
+    static TEST_JOB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Watchdog (P1 producción, espejo de `update.rs`): clavado hace 11 min
+    /// se recupera; vivo se respeta; `release_busy` deja libre.
+    #[test]
+    fn job_watchdog_recupera_clavado_y_respeta_vivo() {
+        let _g = TEST_JOB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        job().busy.store(false, Ordering::SeqCst);
+        assert!(take_busy_or_recover());
+        assert!(!take_busy_or_recover());
+        job()
+            .busy_since_secs
+            .store(now_secs().saturating_sub(660), Ordering::Relaxed);
+        assert!(take_busy_or_recover());
+        heartbeat_busy();
+        assert!(!take_busy_or_recover(), "tras latido el busy está vivo");
+        release_busy();
+        assert!(!job_busy());
+    }
+
+    /// Gemelo del P0 de update.rs: `snippet` no debe partir un char multibyte
+    /// (tildes/emoji en errores HF) aunque el corte caiga a medias.
+    #[test]
+    fn snippet_no_corta_utf8_a_medias() {
+        let s = format!("{}é", "a".repeat(299));
+        let out = snippet(&s);
+        assert!(out.chars().count() <= 301, "{}", out.chars().count());
+        let e = "😀".repeat(400);
+        let out2 = snippet(&e);
+        assert_eq!(out2.chars().count(), 301, "300 + …");
+    }
+    /// P1 producción: el mensaje 507 nombra los GB y la regla 2× se hereda
+    /// de `update::fits_download` (sin dato no se bloquea).
+    #[test]
+    fn espacio_mensaje_y_regla_doble() {
+        let msg = models_no_space_msg(15 * 1024 * 1024 * 1024);
+        assert!(msg.contains("Sin espacio"), "{}", msg);
+        assert!(msg.contains("15.0 GB"), "{}", msg);
+        assert!(msg.contains("doble"), "{}", msg);
+        assert_eq!(
+            crate::update::fits_download(Some(100), Some(199)),
+            Some(false)
+        );
+        assert!(models_space_ok(&std::env::temp_dir(), u64::MAX) != Some(true));
     }
 }

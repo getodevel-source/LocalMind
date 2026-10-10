@@ -25,6 +25,11 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-rust/Cargo.toml
 
+      - name: Rust fmt
+        run: cargo fmt --check --manifest-path src-rust/Cargo.toml
+
+      - name: Clippy (warnings deny)
+        run: cargo clippy --manifest-path src-rust/Cargo.toml --all-targets -- -D warnings
       - name: Node 20+
         uses: actions/setup-node@v4
         with:

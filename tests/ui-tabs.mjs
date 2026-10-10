@@ -16,13 +16,13 @@
 //   node tests/ui-tabs.mjs [baseUrl] [--browser <path>] [--help]
 //   baseUrl defaults to http://127.0.0.1:17860
 //
-// Exit code: 0 when all 7 tabs paint, 1 on any failure (incl. app/browser
+// Exit code: 0 when all 4 tabs paint, 1 on any failure (incl. app/browser
 // unavailable — with a clear message, never a stack dump as the verdict).
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-const TABS = ['dashboard', 'chat', 'models', 'usage', 'terminal', 'info', 'settings'];
+const TABS = ['dashboard', 'chat', 'conexion', 'settings'];
 
 function usage() {
   console.log(`usage: node tests/ui-tabs.mjs [baseUrl] [--browser <path>] [--help]

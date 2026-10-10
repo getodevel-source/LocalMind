@@ -11,7 +11,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::ConfigStore;
-use crate::profiles::HardwareProfile;
+use crate::config::HardwareProfile;
+use crate::engine_gate::{
+    engine_lost, eta_secs, gate_is_slow, load_key, should_auto_stop, vram_total_mb, vram_used_mb,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -46,11 +49,11 @@ pub struct ServerStatus {
     pub eta_secs: u64,
     #[serde(default)]
     pub decode_tps: Option<f64>,
-    /// Las 3 muestras de la puerta (mediana en `decode_tps`); vacías si no
-    /// hubo puerta en este arranque. Para que la UI vea la dispersión.
+    /// Las 2 muestras de la puerta (mínimo en `decode_tps`, conservador);
+    /// vacías si no hubo puerta en este arranque. Para que la UI vea la dispersión.
     #[serde(default)]
     pub decode_tps_samples: Vec<f64>,
-    /// true si la mediana de la puerta quedó bajo `[engine] slow_gate_tps`
+    /// true si el mínimo de la puerta quedó bajo `[engine] slow_gate_tps`
     /// (default 20). Solo informativo: sin reintentos (LM-NF-3). Mensaje UI:
     /// `El motor cargó lento (N t/s); puede mejorarse reiniciándolo una vez`.
     #[serde(default)]
@@ -97,6 +100,19 @@ pub struct HardwareInfo {
     pub cpu_cores: usize,
     pub cpu_name: String,
     pub gpus: Vec<GpuDevice>,
+    /// Núcleos FÍSICOS estimados (lógicos / 2 con SMT, best-effort): para
+    /// sugerir hilos sin copiar la config del dueño (6 = su Ryzen, no el
+    /// del usuario). `None` si no se puede estimar.
+    #[serde(default)]
+    pub cpu_physical: Option<usize>,
+    /// RAM total del sistema en MB (best-effort, WMI): para dimensionar KV
+    /// desbordado a RAM. `None` sin dato.
+    #[serde(default)]
+    pub ram_total_mb: Option<u64>,
+    /// VRAM total dedicada en MB (máximo entre GPUs dedicadas, best-effort):
+    /// número para el guard y la UI, no texto libre. `None` sin dato.
+    #[serde(default)]
+    pub vram_total_mb: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,7 +140,7 @@ pub struct LogEvent {
 struct ResolvedStart {
     model_filename: String,
     model_path: PathBuf,
-    profile: crate::profiles::HardwareProfile,
+    profile: crate::config::HardwareProfile,
     profile_id: String,
     context: usize,
     threads: usize,
@@ -164,6 +180,16 @@ pub struct ProcessManager {
     /// `stop()`/transición final. El reintento usa ESTO, nunca el status.
     pending_start: Arc<Mutex<Option<ResolvedStart>>>,
     base_dir: PathBuf,
+    /// Lock global de arranque (P1-seg): `start()` lo toma con `try_lock` al
+    /// abrir y lo sostiene hasta volver; si está ocupado devuelve
+    /// `Err("...en curso...")` sin tocar estado. Hace atómico el
+    /// check→spawn: dos `POST /api/start` concurrentes (el gateway atiende
+    /// cada request en su hilo) no pueden validar y lanzar dos hijos a la vez.
+    start_lock: Arc<Mutex<()>>,
+    /// Lock de importación (P1 2026-10-10, re-auditoría B): `import_model_from_path`
+    /// lo sostiene durante check+copy para que dos `POST /api/import_model`
+    /// concurrentes con el mismo nombre no pasen ambos el 409 y se pisen.
+    import_lock: Arc<Mutex<()>>,
     bin_dir: PathBuf,
     models_dir: PathBuf,
 }
@@ -180,11 +206,7 @@ impl ProcessManager {
     /// (`new()`) y el núcleo puro recibe el path, porque los tests corren en
     /// paralelo y `set_var` sería una data race. No es una API pública: solo la
     /// usan `new()` y los tests de este módulo.
-    fn new_with_log_file(
-        base_dir: PathBuf,
-        config: Arc<ConfigStore>,
-        log_file: PathBuf,
-    ) -> Self {
+    fn new_with_log_file(base_dir: PathBuf, config: Arc<ConfigStore>, log_file: PathBuf) -> Self {
         let bin_dir = base_dir.join("bin");
         let models_dir = base_dir.join("models");
 
@@ -220,9 +242,12 @@ impl ProcessManager {
         let start_history: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
         let mtp_retry_done = Arc::new(AtomicBool::new(false));
         let pending_start: Arc<Mutex<Option<ResolvedStart>>> = Arc::new(Mutex::new(None));
+        let start_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+        let import_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
         let load_times_path = Self::load_times_path();
-        let load_times: Arc<Mutex<HashMap<String, u64>>> =
-            Arc::new(Mutex::new(load_times_load(&load_times_path).unwrap_or_default()));
+        let load_times: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(
+            load_times_load(&load_times_path).unwrap_or_default(),
+        ));
 
         // Background poller: monitors health AND child process liveness
         let status_clone = Arc::clone(&status);
@@ -369,14 +394,14 @@ impl ProcessManager {
                     }
                     if let Some((title, body, tag)) = crash_notify {
                         let ncfg = cfg_poll.get().notifications;
-                        if crate::notify::should_notify(ncfg.enabled, ncfg.on_failure) {
-                            let logf = log_file_poll.clone();
-                            std::thread::spawn(move || {
-                                crate::notify::notify(&title, &body, &tag, |err| {
-                                    crate::filelog::write_log_line(&logf, err);
-                                });
-                            });
-                        }
+                        spawn_notify(
+                            title,
+                            body,
+                            tag,
+                            ncfg.enabled,
+                            ncfg.on_failure,
+                            log_file_poll.clone(),
+                        );
                     }
                 } else {
                     // 2. Poll health endpoint if still starting or running
@@ -397,10 +422,18 @@ impl ProcessManager {
                         };
                         {
                             let mut st = status_clone.write();
-                            st.starting_for_secs = if current_status == "starting" { elapsed_secs } else { 0 };
+                            st.starting_for_secs = if current_status == "starting" {
+                                elapsed_secs
+                            } else {
+                                0
+                            };
                             if current_status == "starting" {
-                                let stored = load_times_poll.lock().get(&load_key(&model_snapshot, context_snapshot)).copied();
-                                let size_gb = Self::model_size_gb(&models_dir_poll, &model_snapshot);
+                                let stored = load_times_poll
+                                    .lock()
+                                    .get(&load_key(&model_snapshot, context_snapshot))
+                                    .copied();
+                                let size_gb =
+                                    Self::model_size_gb(&models_dir_poll, &model_snapshot);
                                 st.eta_secs = eta_secs(stored, size_gb);
                             } else {
                                 st.eta_secs = 0;
@@ -454,7 +487,16 @@ impl ProcessManager {
                                             st.eta_secs = 0;
                                             st.decode_tps = Some(tps);
                                             st.decode_tps_samples = samples.clone();
-                                            st.engine_slow = gate_is_slow(tps, cfg_poll.get().engine.slow_gate_tps);
+                                            st.engine_slow = gate_is_slow(
+                                                tps,
+                                                crate::engine_gate::slow_threshold(
+                                                    cfg_poll.get().engine.slow_gate_tps,
+                                                    Self::model_size_gb(
+                                                        &models_dir_poll,
+                                                        &st.model,
+                                                    ),
+                                                ),
+                                            );
                                             st.acceptance_ok = Some(false);
                                             st.acceptance_error = Some(msg.clone());
                                             st.last_error = Some(msg.clone());
@@ -469,8 +511,14 @@ impl ProcessManager {
                                                 .unwrap_or(0);
                                             let key = load_key(&st.model, st.context);
                                             load_times_poll.lock().insert(key.clone(), secs.max(1));
-                                            let _ = load_times_save(&load_times_path_poll, &load_times_poll.lock());
-                                            let slow_at = cfg_poll.get().engine.slow_gate_tps;
+                                            let _ = load_times_save(
+                                                &load_times_path_poll,
+                                                &load_times_poll.lock(),
+                                            );
+                                            let slow_at = crate::engine_gate::slow_threshold(
+                                                cfg_poll.get().engine.slow_gate_tps,
+                                                Self::model_size_gb(&models_dir_poll, &st.model),
+                                            );
                                             st.status = "running".to_string();
                                             st.verifying = false;
                                             st.starting_for_secs = 0;
@@ -483,11 +531,15 @@ impl ProcessManager {
                                             st.acceptance_ok = Some(true);
                                             st.acceptance_error = None;
                                             st.last_error = None;
-                                            pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mediana de {})", tps.round() as u64, samples.len()));
+                                            pending_ok_log = Some(format!("[LocalMind] Verificación de arranque OK: {} t/s (mínimo de {})", tps.round() as u64, samples.len()));
                                             // Aviso P20: motor listo con modelo y velocidad.
                                             pending_notify = Some((
                                                 "Motor listo".to_string(),
-                                                format!("«{}» cargando en la GPU ({} t/s)", st.model, tps.round() as u64),
+                                                format!(
+                                                    "«{}» cargando en la GPU ({} t/s)",
+                                                    st.model,
+                                                    tps.round() as u64
+                                                ),
                                                 "engine-ready".to_string(),
                                             ));
                                         }
@@ -512,12 +564,17 @@ impl ProcessManager {
                                     }
                                 }
                             }
-                            consecutive_failures = if is_ok { 0 } else { consecutive_failures.saturating_add(1) };
+                            consecutive_failures = if is_ok {
+                                0
+                            } else {
+                                consecutive_failures.saturating_add(1)
+                            };
                             // 10 fallos seguidos (~10s) con status running → el hijo murió sin exit visible
-                            if consecutive_failures >= 10 && st.status == "running" {
+                            if engine_lost(consecutive_failures, st.status == "running") {
                                 st.status = "error".to_string();
-                                st.last_error =
-                                    Some("El motor dejó de responder el endpoint /health".to_string());
+                                st.last_error = Some(
+                                    "El motor dejó de responder el endpoint /health".to_string(),
+                                );
                             }
                             // Auto-stop por inactividad (solo si está running y healthy)
                             let timeout = cfg_poll.get().engine.idle_timeout_secs;
@@ -531,19 +588,64 @@ impl ProcessManager {
                                 if is_busy {
                                     // El motor está trabajando activamente: refrescar marca de actividad
                                     last_activity_poll.store(now, Ordering::Relaxed);
+                                } else if should_auto_stop(
+                                    timeout,
+                                    last_activity_poll.load(Ordering::Relaxed),
+                                    now,
+                                ) {
+                                    st.status = "stopped".to_string();
+                                    st.is_healthy = false;
+                                    st.pid = None;
+                                    auto_stop = true;
                                 } else {
-                                    let last = last_activity_poll.load(Ordering::Relaxed);
-                                    if last > 0 && now.saturating_sub(last) >= timeout {
-                                        st.status = "stopped".to_string();
-                                        st.is_healthy = false;
-                                        st.pid = None;
-                                        auto_stop = true;
+                                    // Pre-aviso único 5 min antes: cualquier request
+                                    // proxyeado refresca `last_activity` y lo cancela.
+                                    let elapsed = now
+                                        .saturating_sub(last_activity_poll.load(Ordering::Relaxed));
+                                    let left = timeout.saturating_sub(elapsed);
+                                    if left <= 300 && left > 0 {
+                                        static WARNED_ONCE: std::sync::atomic::AtomicU64 =
+                                            std::sync::atomic::AtomicU64::new(0);
+                                        // Marcar por ventana de 5 min (evita spam
+                                        // del poller cada 500 ms).
+                                        let mark = now / 300;
+                                        if WARNED_ONCE
+                                            .swap(mark, std::sync::atomic::Ordering::Relaxed)
+                                            != mark
+                                        {
+                                            let ncfg = cfg_poll.get().notifications;
+                                            if crate::notify::should_notify(
+                                                ncfg.enabled,
+                                                ncfg.on_autostop,
+                                            ) {
+                                                let logf = log_file_poll.clone();
+                                                let mins = left / 60;
+                                                let secs = left % 60;
+                                                std::thread::spawn(move || {
+                                                    crate::notify::notify(
+                                                        "El motor se apagará pronto",
+                                                        &format!(
+                                                            "Sin actividad {}m {}s: se apagará solo y liberará la VRAM. Usa el chat o un agente para mantenerlo vivo.",
+                                                            mins, secs
+                                                        ),
+                                                        "engine-autostop-soon",
+                                                        |err| crate::filelog::write_log_line(&logf, err),
+                                                    );
+                                                });
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                         if let Some(msg) = pending_ok_log {
-                            Self::push_log_to(&recent_logs_clone, &senders_clone, &seq_clone, &msg, Some(&log_file_poll));
+                            Self::push_log_to(
+                                &recent_logs_clone,
+                                &senders_clone,
+                                &seq_clone,
+                                &msg,
+                                Some(&log_file_poll),
+                            );
                         }
                         // Avisos P20 (fuera del lock): respeta la config viva.
                         if let Some((title, body, tag)) = pending_notify {
@@ -553,14 +655,14 @@ impl ProcessManager {
                                 "engine-failure" => ncfg.on_failure,
                                 _ => true,
                             };
-                            if crate::notify::should_notify(ncfg.enabled, flag) {
-                                let logf = log_file_poll.clone();
-                                std::thread::spawn(move || {
-                                    crate::notify::notify(&title, &body, &tag, |err| {
-                                        crate::filelog::write_log_line(&logf, err);
-                                    });
-                                });
-                            }
+                            spawn_notify(
+                                title,
+                                body,
+                                tag,
+                                ncfg.enabled,
+                                flag,
+                                log_file_poll.clone(),
+                            );
                         }
                     }
                 }
@@ -576,7 +678,10 @@ impl ProcessManager {
                         tk.args(["/F", "/T", "/PID", &pid.to_string()]);
                         tk.creation_flags(CREATE_NO_WINDOW);
                         let _ = tk.output();
-                        let _ = child_clone.lock().take().map(|mut c| { let _ = c.kill(); let _ = c.wait(); });
+                        let _ = child_clone.lock().take().map(|mut c| {
+                            let _ = c.kill();
+                            let _ = c.wait();
+                        });
                         Self::push_log_to(&recent_logs_clone, &senders_clone, &seq_clone,
                             "[LocalMind] Auto-stop: motor apagado por inactividad. VRAM y memoria liberadas.",
                             Some(&log_file_poll));
@@ -613,8 +718,10 @@ impl ProcessManager {
             log_file,
             start_history,
             mtp_retry_done,
-            config,
             pending_start,
+            import_lock,
+            start_lock,
+            config,
             base_dir,
             bin_dir,
             models_dir,
@@ -629,7 +736,14 @@ impl ProcessManager {
     /// D-47: esta es la FUENTE ÚNICA de las flags del motor. `start()` ya no
     /// las vuelve a anexar: cada flag llega al hijo exactamente una vez y el
     /// argv del log es, por fin, el argv del hijo. `api_key` es la clave del
-    /// gateway, que el motor exige vía `--api-key` (D-45).
+    /// gateway, que el motor exige SIN ir en argv (P1-seg): viaja por la
+    /// variable de entorno del hijo `LLAMA_API_KEY` (D-45). El build 10743
+    /// documenta `(env: LLAMA_API_KEY)` junto a `--api-key` en su `--help`,
+    /// así que el soporte vía env está verificado contra el binario real.
+    /// Motivo: el argv es legible por cualquier proceso local (Task Manager,
+    /// `wmic process get commandline`, ETW); el env del hijo solo lo lee su
+    /// propio proceso. El proxy interno sigue mandando
+    /// `Authorization: Bearer <clave>` en cada llamada al motor.
     #[allow(clippy::too_many_arguments)]
     fn build_engine_cmd(
         llama_bin: &std::path::PathBuf,
@@ -641,7 +755,7 @@ impl ProcessManager {
         threads_batch: usize,
         priority: &str,
         engine: &crate::config::EngineConfig,
-        profile: &crate::profiles::HardwareProfile,
+        profile: &crate::config::HardwareProfile,
         llama_port: u16,
         skip_spec: bool,
         api_key: &str,
@@ -700,14 +814,21 @@ impl ProcessManager {
             cmd.arg("--metrics");
         }
         // LM-NF-6 / P29: el puerto crudo del motor deja de ser una puerta
-        // abierta. El build 10743 acepta `--api-key` y rechaza sin el
-        // `Authorization: Bearer <clave>` (`unauthorized: Invalid API Key`),
-        // así que el mismo puerto deja de servir el modelo a cualquier proceso
-        // local sin credenciales. Reutiliza la clave del gateway: no se acuña
-        // una segunda. Los 8 puntos que hablan con el motor (health/slots/
-        // props/chat en `process.rs`, metrics/chat en `server.rs`) la envían.
-        cmd.args(["--api-key", api_key]);
-        if let Some(spec) = engine.speculation.as_ref().filter(|s| s.enabled && !skip_spec) {
+        // abierta. El build 10743 acepta la clave por `--api-key` o por su env
+        // `LLAMA_API_KEY` (`--help`: `(env: LLAMA_API_KEY)`), y rechaza sin el
+        // `Authorization: Bearer <clave>` (`unauthorized: Invalid API Key`).
+        // Se usa el ENV del hijo, no el argv: el argv lo lee cualquier proceso
+        // local y la clave quedaba expuesta en Task Manager / wmic / ETW.
+        // `Command::env` solo afecta al hijo (no toca el env del gateway).
+        // Reutiliza la clave del gateway: no se acuña una segunda. Los 8
+        // puntos que hablan con el motor (health/slots/props/chat en
+        // `process.rs`, metrics/chat en `server.rs`) la envían.
+        cmd.env("LLAMA_API_KEY", api_key);
+        if let Some(spec) = engine
+            .speculation
+            .as_ref()
+            .filter(|s| s.enabled && !skip_spec)
+        {
             cmd.args([
                 "--spec-type",
                 &spec.ty,
@@ -810,27 +931,57 @@ impl ProcessManager {
         log_file: &std::path::PathBuf,
     ) {
         if let Some(out) = stdout {
-            let l_c = Arc::clone(logs); let s_c = Arc::clone(senders); let q_c = Arc::clone(seq); let f_c = log_file.clone();
+            let l_c = Arc::clone(logs);
+            let s_c = Arc::clone(senders);
+            let q_c = Arc::clone(seq);
+            let f_c = log_file.clone();
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(out);
                 use std::io::BufRead;
                 for line in reader.lines().map_while(Result::ok) {
                     let s = q_c.fetch_add(1, Ordering::Relaxed);
-                    { let mut l = l_c.write(); if l.len() >= 250 { l.pop_front(); } l.push_back(LogEvent { seq: s, line: line.clone() }); }
-                    { let mut x = s_c.lock(); x.retain(|tx| tx.send(line.clone()).is_ok()); }
+                    {
+                        let mut l = l_c.write();
+                        if l.len() >= 250 {
+                            l.pop_front();
+                        }
+                        l.push_back(LogEvent {
+                            seq: s,
+                            line: line.clone(),
+                        });
+                    }
+                    {
+                        let mut x = s_c.lock();
+                        x.retain(|tx| tx.send(line.clone()).is_ok());
+                    }
                     crate::filelog::write_log_line(&f_c, &line);
                 }
             });
         }
         if let Some(err) = stderr {
-            let l_c = Arc::clone(logs); let s_c = Arc::clone(senders); let q_c = Arc::clone(seq); let f_c = log_file.clone();
+            let l_c = Arc::clone(logs);
+            let s_c = Arc::clone(senders);
+            let q_c = Arc::clone(seq);
+            let f_c = log_file.clone();
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(err);
                 use std::io::BufRead;
                 for line in reader.lines().map_while(Result::ok) {
                     let s = q_c.fetch_add(1, Ordering::Relaxed);
-                    { let mut l = l_c.write(); if l.len() >= 250 { l.pop_front(); } l.push_back(LogEvent { seq: s, line: line.clone() }); }
-                    { let mut x = s_c.lock(); x.retain(|tx| tx.send(line.clone()).is_ok()); }
+                    {
+                        let mut l = l_c.write();
+                        if l.len() >= 250 {
+                            l.pop_front();
+                        }
+                        l.push_back(LogEvent {
+                            seq: s,
+                            line: line.clone(),
+                        });
+                    }
+                    {
+                        let mut x = s_c.lock();
+                        x.retain(|tx| tx.send(line.clone()).is_ok());
+                    }
                     crate::filelog::write_log_line(&f_c, &line);
                 }
             });
@@ -865,7 +1016,10 @@ impl ProcessManager {
     fn check_slots_busy(port: u16) -> bool {
         let url = format!("http://127.0.0.1:{}/slots", port);
         if let Ok(resp) = ureq::get(&url)
-            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+            .set(
+                "Authorization",
+                &crate::auth::bearer(crate::auth::gateway_key()),
+            )
             .timeout(Duration::from_millis(400))
             .call()
         {
@@ -884,7 +1038,10 @@ impl ProcessManager {
     /// falta o el endpoint no responde (sin falso error).
     fn engine_n_ctx(port: u16) -> Option<usize> {
         let text = ureq::get(&format!("http://127.0.0.1:{}/props", port))
-            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+            .set(
+                "Authorization",
+                &crate::auth::bearer(crate::auth::gateway_key()),
+            )
             .timeout(Duration::from_secs(5))
             .call()
             .ok()?
@@ -908,18 +1065,21 @@ impl ProcessManager {
     /// Nunca paniquea: todo fallo se devuelve como `Err(detalle)` en español.
     /// La puerta usa `temperature: 0` FIJO a propósito (determinista): aunque
     /// `[generation]` (P16) exponga otra temperatura para el chat, la puerta no
-    /// la consume. Calienta con 1 request desechable y reporta la MEDIANA de
-    /// 3 muestras (la primera medida en frío no representa el estado
-    /// estacionario: bimodalidad 128K medida 34,8 vs 71,9 t/s prompt-eval).
+    /// la consume. Calienta con 1 request desechable y reporta el MÍNIMO de
+    /// 2 muestras (auditoría: con warmup previo la dispersión medida es ±1,5%,
+    /// así que el mínimo equivale a la mediana y ahorra ~8 s por arranque; el
+    /// mínimo además peca de precavido: ante degradación real falla antes que
+    /// una mediana. La bimodalidad en frío la absorbe el warmup, no las muestras).
     fn run_acceptance_gate(port: u16) -> Result<(f64, u64, Vec<f64>), String> {
         // Calentamiento desechable (mismo path de chat, pocos tokens): estabiliza
         // la primera medida. Solo en la puerta; con el motor en `running` no
         // hay re-calentamiento (la puerta solo corre en starting).
         let _ = Self::gate_sample(port, 16);
-        // 3 muestras iguales; la mediana es el `decode_tps` reportado.
+        // 2 muestras iguales; `gate_median` con 2 devuelve el mínimo
+        // (cota inferior, conservador). Veredicto en `decode_tps`.
         let mut samples = Vec::new();
         let mut last_err = String::new();
-        for _ in 0..3 {
+        for _ in 0..2 {
             match Self::gate_sample(port, 200) {
                 Ok((tps, _)) => samples.push(tps),
                 Err(e) => last_err = e,
@@ -927,7 +1087,8 @@ impl ProcessManager {
         }
         if samples.is_empty() {
             return Err(if last_err.is_empty() {
-                "El modelo no respondió durante la verificación de arranque (sin usage válido).".to_string()
+                "El modelo no respondió durante la verificación de arranque (sin usage válido)."
+                    .to_string()
             } else {
                 last_err
             });
@@ -949,7 +1110,10 @@ impl ProcessManager {
         });
         let start = Instant::now();
         let resp = ureq::post(&url)
-            .set("Authorization", &crate::auth::bearer(crate::auth::gateway_key()))
+            .set(
+                "Authorization",
+                &crate::auth::bearer(crate::auth::gateway_key()),
+            )
             .timeout(Duration::from_secs(120))
             .send_json(body);
         let elapsed_ms = start.elapsed().as_millis().max(1) as u64;
@@ -964,7 +1128,10 @@ impl ProcessManager {
         };
         let text = resp.into_string().unwrap_or_default();
         if text.is_empty() {
-            return Err("El modelo no respondió durante la verificación de arranque (respuesta vacía).".to_string());
+            return Err(
+                "El modelo no respondió durante la verificación de arranque (respuesta vacía)."
+                    .to_string(),
+            );
         }
         match parse_usage(&text) {
             Some((_, completion)) => match acceptance_verdict(completion, elapsed_ms) {
@@ -1016,7 +1183,10 @@ impl ProcessManager {
             if l.len() >= 250 {
                 l.pop_front();
             }
-            l.push_back(LogEvent { seq: seq.fetch_add(1, Ordering::Relaxed), line: msg.to_string() });
+            l.push_back(LogEvent {
+                seq: seq.fetch_add(1, Ordering::Relaxed),
+                line: msg.to_string(),
+            });
         }
         for tx in senders.lock().iter() {
             let _ = tx.send(msg.to_string());
@@ -1073,6 +1243,19 @@ impl ProcessManager {
         crate::filelog::write_log_line(&self.log_file, msg);
     }
 
+    /// Error que impide una operación (`[ERROR]` en disco; en memoria igual
+    /// que `log` para no romper los filtros de la UI).
+    pub fn log_error(&self, msg: &str) {
+        self.log(msg);
+        crate::filelog::write_error(&self.log_file, msg);
+    }
+
+    /// Degradación no bloqueante (`[WARN]` en disco).
+    pub fn log_warn(&self, msg: &str) {
+        self.log(msg);
+        crate::filelog::write_warn(&self.log_file, msg);
+    }
+
     pub fn get_status(&self) -> ServerStatus {
         let mut st = self.status.read().clone();
         let timeout = self.config.get().engine.idle_timeout_secs;
@@ -1096,7 +1279,11 @@ impl ProcessManager {
                 .map(|t| t.elapsed().as_secs())
                 .unwrap_or(0);
             st.starting_for_secs = elapsed;
-            let stored = self.load_times.lock().get(&load_key(&st.model, st.context)).copied();
+            let stored = self
+                .load_times
+                .lock()
+                .get(&load_key(&st.model, st.context))
+                .copied();
             st.eta_secs = eta_secs(stored, Self::model_size_gb(&self.models_dir, &st.model));
         } else {
             st.starting_for_secs = 0;
@@ -1140,34 +1327,93 @@ impl ProcessManager {
                 }
             }
         }
+        // D-21: consumo REAL de VRAM (Windows): `nvidia-smi` si hay NVIDIA.
+        // Sin NVIDIA (AMD/Intel) no hay contador de USO barato y estable desde
+        // aquí y no se inventa. El WMI `AdapterRAM` solo se usa como último
+        // recurso (sin dato del motor): si `--list-devices` ya trae la VRAM
+        // (texto con "MiB"/"GB"/"MB"), NO se anexa nada de WMI — sus drivers
+        // suelen saturar el uint32 (p. ej. 4095 MB falsos en una RX 6800 XT
+        // de 16 GB) y ensucia el dato real. Best-effort: sin dato se deja el
+        // texto del motor intacto.
+        if let Some(used) = vram_used_mb() {
+            for (i, g) in gpus.iter_mut().enumerate() {
+                if i == 0 {
+                    g.vram = format!("{} (en uso ~{} MB)", g.vram, used);
+                }
+            }
+        } else if gpus.is_empty() {
+            // Sin --list-devices (motor ausente): al menos el total WMI.
+            if let Some(total) = vram_total_mb() {
+                gpus.push(GpuDevice {
+                    id: "gpu0".to_string(),
+                    name: "GPU (WMI)".to_string(),
+                    vram: format!("{} MB instalados (uso no disponible en AMD/Intel)", total),
+                });
+            }
+        }
+        // Con dato del motor: nada de WMI (evita el "4095 MB instalados" falso).
         HardwareInfo {
             cpu_cores,
             cpu_name,
             gpus,
+            cpu_physical: physical_cores(cpu_cores),
+            ram_total_mb: ram_total_mb(),
+            vram_total_mb: crate::engine_gate::vram_total_mb(),
         }
     }
-
-    pub fn import_model_from_path(&self, source_path: &std::path::Path) -> Result<String, String> {
+    /// Importar un `.gguf` a `models/` con `overwrite` opt-in. Delega la
+    /// resolución+copia en la primitiva compartida de `models`
+    /// (`resolve_import_dest` + `copy_atomic_tmp`, wave-4): mismas garantías
+    /// en ambas vías de import (self-import no-op, tmp+rename sin parciales).
+    /// El `import_lock` serializa check+copy+rename del proceso (TOCTOU
+    /// 2026-10-10); `Exists` → el handler lo traduce a 409 por VARIANTE
+    /// (ABIERTO-1 wave-6: nunca por substring).
+    pub fn import_model_from_path(
+        &self,
+        source_path: &std::path::Path,
+        overwrite: bool,
+    ) -> Result<String, crate::models::ImportError> {
+        let _guard = self.import_lock.lock();
         if !source_path.exists() {
-            return Err(format!("Archivo no encontrado: {:?}", source_path));
+            return Err(crate::models::ImportError::Invalid(format!(
+                "Archivo no encontrado: {:?}",
+                source_path
+            )));
         }
-        let filename = source_path
-            .file_name()
-            .ok_or_else(|| "Nombre de archivo inválido".to_string())?
-            .to_string_lossy()
-            .to_string();
-        if !filename.ends_with(".gguf") {
-            return Err("El archivo debe ser un modelo con extensión .gguf".to_string());
+        let (filename, dest, self_import) =
+            crate::models::resolve_import_dest(&self.models_dir, source_path, overwrite)?;
+        if self_import {
+            return Ok(filename);
         }
-        let dest = self.models_dir.join(&filename);
-        std::fs::copy(source_path, &dest)
-            .map_err(|e| format!("Error al copiar modelo: {}", e))?;
+        crate::models::copy_atomic_tmp(source_path, &dest)?;
         self.log(&format!("[LocalMind] Modelo importado: {}", filename));
         Ok(filename)
     }
 
+    /// Vía `POST /api/models/import_pick` (ABIERTO-1 wave-5): mismo
+    /// `import_lock` que `import_model_from_path`, así que pick-vs-pick y
+    /// pick-vs-import_model no violan el 409 (`overwrite=false`).
+    pub fn import_picked(
+        &self,
+        files: &[std::path::PathBuf],
+        overwrite: bool,
+    ) -> Result<Vec<String>, crate::models::ImportError> {
+        let _guard = self.import_lock.lock();
+        crate::models::copy_picked(&self.models_dir, files, overwrite)
+    }
+
     pub fn models_dir(&self) -> &std::path::Path {
         &self.models_dir
+    }
+
+    /// Foto de la config viva (para avisos fuera del poller, p. ej. bandeja).
+    pub fn config_snapshot(&self) -> crate::config::AppConfig {
+        self.config.get()
+    }
+
+    /// Ruta del log con rotación (para el `log_on_fail` de los avisos).
+    pub fn log_file_path(&self) -> std::path::PathBuf {
+        self.log_file.clone()
     }
 
     pub fn list_models(&self) -> Vec<ModelInfo> {
@@ -1186,7 +1432,8 @@ impl ProcessManager {
                     continue;
                 };
                 let name = fname.to_string_lossy().to_string();
-                if name.ends_with(".gguf") && !name.to_lowercase().contains("mmproj") {
+                if name.to_lowercase().ends_with(".gguf") && !name.to_lowercase().contains("mmproj")
+                {
                     let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                     let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
                     models.push(ModelInfo {
@@ -1232,6 +1479,18 @@ impl ProcessManager {
     }
 
     pub fn start(&self, req: StartRequest) -> Result<u32, String> {
+        // Lock global de arranque (P1-seg): hace atómico el check→spawn. El
+        // gateway atiende cada request en su hilo, así que dos `POST
+        // /api/start` concurrentes llegaban juntos a validar y lanzar dos
+        // hijos. `try_lock` (no bloqueante): el segundo recibe
+        // `Err("...en curso...")` en vez de encolar y duplicar el motor. Se
+        // toma ANTES de tocar cualquier estado y se sostiene hasta volver
+        // (`_guard` vive toda la fn); los rechazos tempranos también quedan
+        // serializados, que es lo correcto: el epoch y la pizarra se mueven
+        // por intento. Sin pánicos: `try_lock` devuelve `None` si ocupado.
+        let _guard = self.start_lock.try_lock().ok_or_else(|| {
+            "Ya hay un arranque en curso: esperá a que termine antes de reintentar.".to_string()
+        })?;
         // Intento nuevo = pizarra de error limpia, y se limpia AL ABRIRLO, no
         // solo al lograrse (el `= None` de más abajo, tras el `spawn()`): una
         // validación rechazada devuelve ANTES de `stop()` y del `spawn()`, así
@@ -1284,7 +1543,12 @@ impl ProcessManager {
             let mut known_models = filenames;
             known_models.extend(names);
             known_models.extend(rels);
-            validate_req_model(req.model.as_deref(), &known_models, &[], &cfg.engine.aliases)?;
+            validate_req_model(
+                req.model.as_deref(),
+                &known_models,
+                &[],
+                &cfg.engine.aliases,
+            )?;
         }
         // Guardarraíles de energía (LM-NF-3): cooldown + tope horario + modo
         // seguro. Cada arranque lee ~13 GB a VRAM (el transitorio más grande
@@ -1318,15 +1582,17 @@ impl ProcessManager {
         let cfg = self.config.get();
         let engine = &cfg.engine;
         // Perfil: request > config.last > config.profiles
-        let profile: HardwareProfile = if let Some(id) = req.profile.as_ref().filter(|s| !s.is_empty()) {
-            crate::profiles::resolve_profile(&cfg.profiles, id)
-        } else if let Some(last) = cfg.last.profile.as_ref().filter(|s| !s.is_empty()) {
-            crate::profiles::resolve_profile(&cfg.profiles, last).clone()
-        } else {
-            cfg.profiles.first().cloned().unwrap_or_else(|| {
-                crate::profiles::resolve_profile(&cfg.profiles, crate::config::DEFAULT_PROFILE_ID).clone()
-            })
-        };
+        let profile: HardwareProfile =
+            if let Some(id) = req.profile.as_ref().filter(|s| !s.is_empty()) {
+                crate::config::resolve_profile(&cfg.profiles, id)
+            } else if let Some(last) = cfg.last.profile.as_ref().filter(|s| !s.is_empty()) {
+                crate::config::resolve_profile(&cfg.profiles, last).clone()
+            } else {
+                cfg.profiles.first().cloned().unwrap_or_else(|| {
+                    crate::config::resolve_profile(&cfg.profiles, crate::config::DEFAULT_PROFILE_ID)
+                        .clone()
+                })
+            };
         // `profile_id` es siempre un id real (resuelto arriba): nunca se
         // persiste ni se expone el fantasma (D-1) aunque el request o el TOML
         // traigan un id desconocido.
@@ -1347,10 +1613,45 @@ impl ProcessManager {
         // Acepta el basename plano (histórico) o el `rel` de /api/models
         // (`sub/model.gguf`); rechaza `..`, absolutas y escapes de models/.
         let model_path = resolve_model_path(&self.models_dir, &model_filename)?;
-
         // Precedencia de contexto: request explícito > perfil explícito > última
         // sesión (solo si coincide perfil+modelo) > contexto del perfil resuelto.
-        let req_profile_opt = req.profile.as_ref().filter(|s| !s.is_empty()).map(|s| s.as_str());
+        let req_profile_opt = req
+            .profile
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let context = resolve_context(
+            req.context,
+            req_profile_opt,
+            profile.context,
+            cfg.last.profile.as_deref(),
+            cfg.last.model.as_deref(),
+            cfg.last.context,
+            &profile.id,
+            &model_filename,
+        );
+        // Guard de VRAM (portabilidad): un tercero con 8 GB que pida un 27B
+        // (~14 GB) lo descubre por OOM si no se avisa. Se estima
+        // `modelo + KV(contexto resuelto)` contra la VRAM total; si no hay
+        // dato de VRAM (sin nvidia-smi ni WMI válido), NO se bloquea: sin dato
+        // no hay veredicto. El error nombra GB concretos. Va tras el contexto
+        // porque el KV depende del contexto resuelto, no del pedido.
+        if let Err(e) = crate::engine_gate::check_vram_fit(
+            &model_path,
+            context,
+            profile.cache_ram,
+            crate::engine_gate::vram_total_mb(),
+        ) {
+            self.log(&e);
+            return Err(e);
+        }
+        // Precedencia de contexto: request explícito > perfil explícito > última
+        // sesión (solo si coincide perfil+modelo) > contexto del perfil resuelto.
+        let req_profile_opt = req
+            .profile
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
         let context = resolve_context(
             req.context,
             req_profile_opt,
@@ -1413,7 +1714,8 @@ impl ProcessManager {
             &cfg.engine,
             &profile,
             llama_port,
-            self.mtp_retry_done.load(std::sync::atomic::Ordering::Relaxed),
+            self.mtp_retry_done
+                .load(std::sync::atomic::Ordering::Relaxed),
             api_key,
         );
 
@@ -1495,7 +1797,10 @@ impl ProcessManager {
                         if logs.len() >= 250 {
                             logs.pop_front();
                         }
-                        logs.push_back(LogEvent { seq, line: line.clone() });
+                        logs.push_back(LogEvent {
+                            seq,
+                            line: line.clone(),
+                        });
                     }
                     let mut s = s_c.lock();
                     s.retain(|tx| tx.send(line.clone()).is_ok());
@@ -1519,7 +1824,10 @@ impl ProcessManager {
                         if logs.len() >= 250 {
                             logs.pop_front();
                         }
-                        logs.push_back(LogEvent { seq, line: line.clone() });
+                        logs.push_back(LogEvent {
+                            seq,
+                            line: line.clone(),
+                        });
                     }
                     let mut s = s_c.lock();
                     s.retain(|tx| tx.send(line.clone()).is_ok());
@@ -1560,8 +1868,15 @@ impl ProcessManager {
             // Estado inicial de la puerta de aceptación (D1) y del progreso (D4).
             st.verifying = false;
             st.starting_for_secs = 0;
-            let stored = self.load_times.lock().get(&load_key(&model_filename, context)).copied();
-            st.eta_secs = eta_secs(stored, Self::model_size_gb(&self.models_dir, &model_filename));
+            let stored = self
+                .load_times
+                .lock()
+                .get(&load_key(&model_filename, context))
+                .copied();
+            st.eta_secs = eta_secs(
+                stored,
+                Self::model_size_gb(&self.models_dir, &model_filename),
+            );
             st.decode_tps = None;
             st.decode_tps_samples = Vec::new();
             st.engine_slow = false;
@@ -1635,6 +1950,43 @@ fn num_cpus() -> usize {
         .unwrap_or(6)
 }
 
+/// Núcleos físicos estimados (portabilidad): la mayoría x86 trae SMT×2, así
+/// que lógicos/2 con mínimo 1. Mejor que copiar el 6 del dueño: en un i3 de
+/// 4 hilos sugiere 2, en un 7950X de 32 sugiere 16. `None` si no hay dato.
+fn physical_cores(logical: usize) -> Option<usize> {
+    if logical == 0 {
+        return None;
+    }
+    Some((logical / 2).max(1))
+}
+
+/// RAM total del sistema en MB (Windows, best-effort): WMI
+/// `Win32_ComputerSystem.TotalPhysicalMemory`. `None` sin dato.
+fn ram_total_mb() -> Option<u64> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let out = std::process::Command::new("wmic")
+        .args(["computersystem", "get", "totalphysicalmemory", "/value"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let v = line.split('=').nth(1).unwrap_or("").trim();
+        let digits: String = v.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u64>() {
+            if n >= 512 * 1024 * 1024 {
+                return Some(n / (1024 * 1024));
+            }
+        }
+    }
+    None
+}
+// (extraídos a `engine_gate.rs`: `vram_used_mb`, `vram_total_mb`,
+// `parse_adapter_ram`. Se usan como `crate::engine_gate::`.)
+
 /// Resultado del guardarraíl de arranque (LM-NF-3): cuánto falta de cooldown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartGuardWait {
@@ -1656,7 +2008,9 @@ pub fn check_start_guard(
     if let Some(last) = history.iter().max() {
         let elapsed = now.saturating_sub(*last);
         if elapsed < cooldown_secs {
-            return Err(StartGuardWait { cooldown_left: cooldown_secs - elapsed });
+            return Err(StartGuardWait {
+                cooldown_left: cooldown_secs - elapsed,
+            });
         }
     }
     if max_per_hour > 0 && (history.len() as u32) >= max_per_hour {
@@ -1708,7 +2062,10 @@ fn parse_usage(body: &str) -> Option<(u64, u64)> {
 
 fn usage_from_value(v: &serde_json::Value) -> Option<(u64, u64)> {
     let usage = v.get("usage")?;
-    let prompt = usage.get("prompt_tokens").and_then(|n| n.as_u64()).unwrap_or(0);
+    let prompt = usage
+        .get("prompt_tokens")
+        .and_then(|n| n.as_u64())
+        .unwrap_or(0);
     let completion = usage
         .get("completion_tokens")
         .and_then(|n| n.as_u64())
@@ -1801,12 +2158,9 @@ fn validate_req_model(
     }
 }
 
-/// `engine_slow` (puro): true si la mediana queda bajo el umbral configurable.
-/// Solo informativo — el llamador nunca reintenta por esto (LM-NF-3).
-fn gate_is_slow(median_tps: f64, slow_at: f64) -> bool {
-    median_tps < slow_at
-}
-
+/// `engine_slow`, auto-stop, motor perdido, ETA, clave de duraciones y VRAM:
+/// viven en `engine_gate.rs` (extraído de este fichero). Uso cualificado
+/// `crate::engine_gate::`.
 /// Firma MTP-no-soportado (pura y testeable): el motor murió en el arranque
 /// porque el modelo no trae capas MTP (`creating MTP draft context` →
 /// `model doesn't contain MTP layers` / `failed to create MTP context`).
@@ -1850,23 +2204,28 @@ fn props_n_ctx(body: &str) -> Option<usize> {
     None
 }
 
-/// ETA en segundos: duración guardada para la misma clave; en frío,
-/// `6 s × tamaño del modelo en GB` (0 si se desconoce el tamaño).
-fn eta_secs(stored: Option<u64>, size_gb: f64) -> u64 {
-    if let Some(s) = stored {
-        return s;
-    }
-    if size_gb > 0.0 {
-        (size_gb * 6.0).round() as u64
-    } else {
-        0
-    }
-}
+// (extraídos a `engine_gate.rs`: `eta_secs`, `load_key`, `should_auto_stop`,
+// `engine_lost`. Se usan como `crate::engine_gate::`.)
 
-/// Clave del registro de duraciones: nombre del modelo + contexto pedido (D2:
-/// nunca se reduce el contexto a espaldas del usuario, así que la clave es exacta).
-fn load_key(model: &str, context: usize) -> String {
-    format!("{}|{}", model, context)
+/// Despacho único de avisos P20 (Fase A5): los dos puntos del poller
+/// (fallo de arranque y eventos en curso) hacían el mismo
+/// `should_notify` + `spawn`. El llamador ya resolvió el flag del evento.
+fn spawn_notify(
+    title: String,
+    body: String,
+    tag: String,
+    enabled: bool,
+    flag_on: bool,
+    log_file: std::path::PathBuf,
+) {
+    if !crate::notify::should_notify(enabled, flag_on) {
+        return;
+    }
+    std::thread::spawn(move || {
+        crate::notify::notify(&title, &body, &tag, |err| {
+            crate::filelog::write_log_line(&log_file, err);
+        });
+    });
 }
 
 /// Resolver el modelo pedido contra `models_dir`: acepta el basename plano
@@ -1888,7 +2247,7 @@ fn resolve_model_path(models_dir: &Path, requested: &str) -> Result<PathBuf, Str
     if norm.split('/').any(|seg| seg == "..") {
         return Err(format!("Ruta de modelo no válida: {:?}", requested));
     }
-    let candidate = models_dir.join(norm.replace('/', &std::path::MAIN_SEPARATOR.to_string()));
+    let candidate = models_dir.join(norm.replace('/', std::path::MAIN_SEPARATOR_STR));
     // Cinturón: aunque el join no debería escapar tras los filtros, verificarlo.
     let base = models_dir;
     if candidate != *base && !candidate.starts_with(base) {
@@ -1988,13 +2347,7 @@ fn crash_summary(lines: &[String], status: &str) -> String {
             status
         );
     }
-    let tail: Vec<&str> = nonempty
-        .iter()
-        .rev()
-        .take(30)
-        .rev()
-        .map(|s| *s)
-        .collect();
+    let tail: Vec<&str> = nonempty.iter().rev().take(30).rev().map(|s| *s).collect();
     let mut picked: Vec<&str> = tail
         .iter()
         .filter(|l| {
@@ -2025,8 +2378,7 @@ fn load_times_load(path: &Path) -> Result<HashMap<String, u64>, String> {
     if raw.trim().is_empty() {
         return Ok(HashMap::new());
     }
-    let mut map: HashMap<String, u64> =
-        serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let mut map: HashMap<String, u64> = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     // Acotar lecturas de archivos ajenos/más grandes (D-8: buffer acotado).
     if map.len() > MAX_LOAD_TIMES {
         map = map.into_iter().take(MAX_LOAD_TIMES).collect();
@@ -2097,7 +2449,8 @@ mod tests {
         // `last.model` nunca se valida: si el archivo ya no está, degrada.
         let dir = dir_con_modelos("last-inexistente", &["aaa-2b.gguf", "bbb-27b.gguf"]);
         let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
-        let got = resolve_model_filename(None, &[], &models, Some("borrado-7b.gguf"), &dir).unwrap();
+        let got =
+            resolve_model_filename(None, &[], &models, Some("borrado-7b.gguf"), &dir).unwrap();
         assert_eq!(got, "aaa-2b.gguf");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2108,7 +2461,8 @@ mod tests {
         let dir = dir_con_modelos("alias-gana", &["aaa-2b.gguf", "bbb-27b.gguf"]);
         let models = vec![mi_model("aaa-2b.gguf"), mi_model("bbb-27b.gguf")];
         let aliases = vec!["aaa".to_string()];
-        let got = resolve_model_filename(None, &aliases, &models, Some("bbb-27b.gguf"), &dir).unwrap();
+        let got =
+            resolve_model_filename(None, &aliases, &models, Some("bbb-27b.gguf"), &dir).unwrap();
         assert_eq!(got, "aaa-2b.gguf");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2173,11 +2527,29 @@ mod tests {
         );
         // Contexto explícito o perfil explícito ganan igual.
         assert_eq!(
-            resolve_context(Some(65536), None, 32768, Some("libros"), None, Some(131072), "libros", "x.gguf"),
+            resolve_context(
+                Some(65536),
+                None,
+                32768,
+                Some("libros"),
+                None,
+                Some(131072),
+                "libros",
+                "x.gguf"
+            ),
             65536
         );
         assert_eq!(
-            resolve_context(None, Some("velocidad"), 32768, Some("libros"), None, Some(131072), "velocidad", "x.gguf"),
+            resolve_context(
+                None,
+                Some("velocidad"),
+                32768,
+                Some("libros"),
+                None,
+                Some(131072),
+                "velocidad",
+                "x.gguf"
+            ),
             32768
         );
     }
@@ -2254,18 +2626,17 @@ mod tests {
     /// tiene `models/`, así que cualquier modelo es desconocido.
     #[test]
     fn intento_rechazado_limpia_el_error_anterior() {
-        let dir = std::env::temp_dir()
-            .join(format!("lm-slate-{}-{}", "intento-rechazado", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "lm-slate-{}-{}",
+            "intento-rechazado",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
             &dir.join("config.toml"),
         ));
-        let mgr = ProcessManager::new_with_log_file(
-            dir.clone(),
-            cfg,
-            scratch_log(&dir),
-        );
+        let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch_log(&dir));
         // Estado previo: el motor murió y el poller dejó su error, más un
         // veredicto viejo de la puerta (mismo arranque, mismo banner).
         {
@@ -2319,8 +2690,11 @@ mod tests {
     /// race, el mismo motivo por el que existe `ConfigStore::load_from_path`).
     #[test]
     fn process_manager_de_test_escribe_en_su_temporal_y_no_en_el_log_real() {
-        let dir = std::env::temp_dir()
-            .join(format!("lm-logdir-{}-{}", "aislamiento", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "lm-logdir-{}-{}",
+            "aislamiento",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -2330,8 +2704,7 @@ mod tests {
         let real = crate::filelog::log_file(&dir);
         let scratch = scratch_log(&dir);
         assert_ne!(
-            real,
-            scratch,
+            real, scratch,
             "si la resolución de producción cayera en el temporal, este test \
              no distinguiría nada; la precedencia de `%APPDATA%` cambió"
         );
@@ -2341,8 +2714,7 @@ mod tests {
         ));
         let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch.clone());
         assert_eq!(
-            mgr.log_file,
-            scratch,
+            mgr.log_file, scratch,
             "el `ProcessManager` debe escribir en la ruta que le dieron, no en la \
              que resolvería `base_dir`"
         );
@@ -2393,18 +2765,14 @@ mod tests {
     /// tanto está fuera de una corrida offline.
     #[test]
     fn intento_rechazado_invalida_la_puerta_en_vuelo() {
-        let dir = std::env::temp_dir()
-            .join(format!("lm-epoch-{}-{}", "rechazo", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("lm-epoch-{}-{}", "rechazo", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
             &dir.join("config.toml"),
         ));
-        let mgr = ProcessManager::new_with_log_file(
-            dir.clone(),
-            cfg,
-            scratch_log(&dir),
-        );
+        let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch_log(&dir));
         let antes = mgr.start_epoch.load(Ordering::Relaxed);
         let res = mgr.start(StartRequest {
             model: Some("noexiste.gguf".to_string()),
@@ -2423,11 +2791,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// D-45: el puerto crudo del motor deja de ser una puerta abierta. El argv
-    /// debe llevar `--api-key` con la MISMA clave que el gateway, no una
-    /// acuñada aparte: si divergieran, el motor exigiría una credencial que el
-    /// proxy no tiene y todo el tráfico interno (health, puerta de aceptación,
-    /// metrics) respondería 401.
+    /// D-45 / P1-seg: el puerto crudo del motor deja de ser una puerta abierta.
+    /// La clave del gateway viaja por el ENV del hijo (`LLAMA_API_KEY`), NUNCA
+    /// en el argv: el argv lo lee cualquier proceso local (Task Manager, `wmic
+    /// process get commandline`, ETW) y la clave quedaba expuesta. El build
+    /// 10743 documenta `(env: LLAMA_API_KEY)` junto a `--api-key` en su
+    /// `--help`, así que el soporte vía env está verificado contra el binario.
+    /// Debe ser la MISMA clave del gateway, no una acuñada aparte: si
+    /// divergieran, el proxy interno (health, puerta, metrics) respondería 401.
     #[test]
     fn argv_lleva_la_clave_del_gateway_al_motor() {
         let dir = std::env::temp_dir().join(format!("lm-argv-key-{}", std::process::id()));
@@ -2451,27 +2822,38 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        let i = argv
-            .iter()
-            .position(|a| a == "--api-key")
-            .expect("--api-key en el argv");
-        assert_eq!(
-            argv.get(i + 1).map(String::as_str),
-            Some(key),
-            "--api-key debe ir seguido de la clave del gateway"
-        );
-        // La clave no puede colarse por otro lado del argv (p. ej. suelta).
-        assert_eq!(
-            argv.iter().filter(|a| a.as_str() == key).count(),
-            1,
-            "la clave aparece una sola vez: {:?}",
+        // La clave NO puede ir en el argv (expuesta a cualquier proceso local).
+        assert!(
+            !argv.iter().any(|a| a == "--api-key"),
+            "`--api-key` no debe aparecer en el argv: la clave va por env: {:?}",
             argv
+        );
+        assert!(
+            !argv.iter().any(|a| a.as_str() == key),
+            "la clave no puede colarse en el argv ni suelta ni como valor: {:?}",
+            argv
+        );
+        // ...sino en el env del hijo, con la MISMA clave del gateway.
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|s| s.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "LLAMA_API_KEY" && v.as_deref() == Some(key)),
+            "LLAMA_API_KEY debe llevar la clave del gateway en el env del hijo: {:?}",
+            envs
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// El reintento MTP relanza el mismo arranque sin `--spec-*`, pero con la
-    /// MISMA clave: si la olvidara, el motor pediría credenciales y el
+    /// MISMA clave por env: si la olvidara, el motor pediría credenciales y el
     /// reintento moriría en 401 en vez de probar la hipótesis de decodificación
     /// especulativa.
     #[test]
@@ -2497,8 +2879,208 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        let i = argv.iter().position(|a| a == "--api-key").expect("--api-key");
-        assert_eq!(argv.get(i + 1).map(String::as_str), Some(key));
+        assert!(
+            !argv.iter().any(|a| a == "--api-key"),
+            "`--api-key` no debe aparecer ni en el reintento: {:?}",
+            argv
+        );
+        assert!(
+            !argv.iter().any(|a| a.as_str() == key),
+            "la clave no puede colarse en el argv del reintento: {:?}",
+            argv
+        );
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|s| s.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "LLAMA_API_KEY" && v.as_deref() == Some(key)),
+            "el reintento también lleva la clave por env: {:?}",
+            envs
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P1-seg: dos `start()` concurrentes no pueden lanzar dos hijos. El lock
+    /// global (`try_lock` al abrir) hace atómico el check→spawn: el segundo
+    /// intento recibe `Err("...en curso...")` sin tocar estado.
+    ///
+    /// Se alcanza sin motor real: el `base_dir` temporal no tiene
+    /// `bin/llama-server.exe`, así que el primer intento toma el lock y muere
+    /// en `No se encontró llama-server` (lock sostenido hasta volver), y el
+    /// segundo —lanzado mientras el primero duerme dentro del lock— debe caer
+    /// en `en curso`. Sin el lock ambos pasarían la validación y el segundo
+    /// pisaría el `child`/estado del primero.
+    #[test]
+    fn arranques_concurrentes_un_solo_intento_prospera() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-startlock-{}-{}",
+            "concurrente",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = std::sync::Arc::new(ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        ));
+        // El guard sostiene el lock mientras el hilo intenta `start()`: simula
+        // un `start()` en vuelo dentro de la ventana check→spawn. El hilo debe
+        // rebotar con `en curso`. Se suelta (`drop`) antes de `drop(mgr)`:
+        // el guard pide prestado `mgr` y el orden inverso no compila (E0505).
+        let guard = mgr.start_lock.lock();
+        let mgr2 = std::sync::Arc::clone(&mgr);
+        let h = std::thread::spawn(move || {
+            mgr2.start(StartRequest {
+                model: None,
+                profile: None,
+                context: None,
+                threads: None,
+                priority: None,
+            })
+        });
+        // Pequeña espera para que el hilo llegue al `try_lock` (el lock sigue
+        // sostenido por este test; 50 ms sobran en CI local).
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let res = h.join().expect("el hilo de arranque no debe abortar");
+        drop(guard);
+        assert!(
+            res.is_err(),
+            "con el lock ocupado el segundo start debe rebotar"
+        );
+        let msg = res.unwrap_err();
+        assert!(
+            msg.contains("en curso"),
+            "el rechazo debe decir `en curso`, no otro motivo: {}",
+            msg
+        );
+        drop(mgr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P1-IO (cambio pedido por el slice de IO): `import_model_from_path` y
+    /// `list_models` aceptan `.GGUF` en mayúsculas, coherente con
+    /// `list_gguf_files`/`copy_picked` en `models.rs` (ya case-insensitive).
+    /// En Windows el casing se preserva y un modelo válido no puede
+    /// rechazarse por mayúsculas.
+    #[test]
+    fn import_y_listado_aceptan_gguf_en_mayusculas() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-ggufcase-{}-{}",
+            "mayusculas",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch_log(&dir));
+        // `import_model_from_path` no rechaza por casing...
+        let fuente = dir.join("MODELO.GGUF");
+        std::fs::write(&fuente, b"gguf").unwrap();
+        let nombre = mgr
+            .import_model_from_path(&fuente, false)
+            .expect("MODELO.GGUF debe importarse");
+        assert_eq!(nombre, "MODELO.GGUF");
+        // ...y `list_models` lo enumera (antes lo filtraba `ends_with`).
+        let modelos = mgr.list_models();
+        assert!(
+            modelos.iter().any(|m| m.filename == "MODELO.GGUF"),
+            "list_models debe incluir el .GGUF en mayúsculas: {:?}",
+            modelos.iter().map(|m| &m.filename).collect::<Vec<_>>()
+        );
+        drop(mgr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TOCTOU 2026-10-10 (re-auditoría B): el chequeo `overwrite` vive DENTRO
+    /// de `import_model_from_path`. Sin `overwrite`, el segundo import del
+    /// mismo nombre falla con "ya existe"; con `overwrite=true`, pisa.
+    /// Concurrente: de N hilos con `overwrite=false`, exactamente UNO gana.
+    #[test]
+    fn import_colision_y_concurrencia_no_pisan() {
+        let dir = std::env::temp_dir().join(format!("lm-import-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = std::sync::Arc::new(ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        ));
+        let fuente = dir.join("dupe.gguf");
+        std::fs::write(&fuente, b"gguf-1").unwrap();
+        assert_eq!(
+            mgr.import_model_from_path(&fuente, false).unwrap(),
+            "dupe.gguf"
+        );
+        let err = mgr.import_model_from_path(&fuente, false).unwrap_err();
+        assert!(err.is_exists(), "{}", err);
+        // Carrera: N hilos, mismo nombre, sin overwrite → 1 gana, N-1 ven 409.
+        let fuente2 = dir.join("carrera.gguf");
+        std::fs::write(&fuente2, b"gguf").unwrap();
+        let mut hilos = Vec::new();
+        for _ in 0..8 {
+            let (m, f) = (std::sync::Arc::clone(&mgr), fuente2.clone());
+            hilos.push(std::thread::spawn(move || {
+                m.import_model_from_path(&f, false)
+            }));
+        }
+        let res: Vec<_> = hilos.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(res.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(
+            res.iter()
+                .filter(|r| matches!(r, Err(e) if e.is_exists()))
+                .count(),
+            7
+        );
+        // N1 wave-3: sin parciales — no queda ningún `.tmp-*` tras todo lo
+        // anterior (ni tras la carrera ni tras los overwrite).
+        let restos: Vec<_> = std::fs::read_dir(dir.join("models"))
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(restos.is_empty(), "tmps sin limpiar: {:?}", restos);
+        // B3 wave-3: self-import (origen == destino) es no-op, no trunca.
+        let ya = dir.join("models").join("dupe.gguf");
+        let antes = std::fs::read(&ya).unwrap();
+        assert_eq!(mgr.import_model_from_path(&ya, true).unwrap(), "dupe.gguf");
+        assert_eq!(std::fs::read(&ya).unwrap(), antes);
+        assert_eq!(mgr.import_model_from_path(&ya, false).unwrap(), "dupe.gguf");
+        // ABIERTO-1 wave-5: pick-vs-pick y pick-vs-import comparten el lock:
+        // 4 `import_picked` + 4 `import_model_from_path` concurrentes del
+        // mismo nombre sin overwrite → exactamente 1 gana con ok.
+        let fuente3 = dir.join("mezcla.gguf");
+        std::fs::write(&fuente3, b"gguf").unwrap();
+        let mut h2 = Vec::new();
+        for i in 0..8 {
+            let (m, f) = (std::sync::Arc::clone(&mgr), fuente3.clone());
+            h2.push(std::thread::spawn(move || {
+                if i % 2 == 0 {
+                    m.import_picked(std::slice::from_ref(&f), false)
+                        .map(|v| v.join(","))
+                } else {
+                    m.import_model_from_path(&f, false)
+                }
+            }));
+        }
+        let r2: Vec<_> = h2.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(r2.iter().filter(|r| r.is_ok()).count(), 1);
+        drop(mgr);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2511,19 +3093,44 @@ mod tests {
         let mut engine = crate::config::EngineConfig::default();
         engine.reasoning_preserve = true;
         engine.extra_flags = vec!["--jinja".to_string(), "--no-warmup".to_string()];
-        let mut profile = crate::profiles::HardwareProfile::default();
+        let mut profile = crate::config::HardwareProfile::default();
         profile.cache_ram = 8192;
         profile.extra_flags = vec!["--mlock".to_string()];
 
         let tokens = argv_tokens(&engine, &profile, 32768, false);
         let count = |flag: &str| tokens.iter().filter(|t| t.as_str() == flag).count();
 
-        assert_eq!(count("--reasoning-preserve"), 1, "--reasoning-preserve duplicado: {:?}", tokens);
-        assert_eq!(count("--mlock"), 1, "extra_flags del perfil duplicada: {:?}", tokens);
-        assert_eq!(count("--jinja"), 1, "extra_flags del engine duplicada: {:?}", tokens);
-        assert_eq!(count("--no-warmup"), 1, "extra_flags del engine duplicada: {:?}", tokens);
+        assert_eq!(
+            count("--reasoning-preserve"),
+            1,
+            "--reasoning-preserve duplicado: {:?}",
+            tokens
+        );
+        assert_eq!(
+            count("--mlock"),
+            1,
+            "extra_flags del perfil duplicada: {:?}",
+            tokens
+        );
+        assert_eq!(
+            count("--jinja"),
+            1,
+            "extra_flags del engine duplicada: {:?}",
+            tokens
+        );
+        assert_eq!(
+            count("--no-warmup"),
+            1,
+            "extra_flags del engine duplicada: {:?}",
+            tokens
+        );
         // Y la banderola de la puerta PSU no se cuela en el argv.
-        assert_eq!(count("--cache-reuse"), 0, "--cache-reuse nunca se pasa: {:?}", tokens);
+        assert_eq!(
+            count("--cache-reuse"),
+            0,
+            "--cache-reuse nunca se pasa: {:?}",
+            tokens
+        );
     }
 
     /// El valor repetido también tenía que ser correcto, no solo único: cada
@@ -2532,7 +3139,7 @@ mod tests {
     fn argv_no_repite_los_valores_de_las_flags() {
         let mut engine = crate::config::EngineConfig::default();
         engine.reasoning_preserve = true;
-        let mut profile = crate::profiles::HardwareProfile::default();
+        let mut profile = crate::config::HardwareProfile::default();
         profile.cache_ram = 8192;
 
         let tokens = argv_tokens(&engine, &profile, 32768, false);
@@ -2544,10 +3151,30 @@ mod tests {
                 .map(|(i, _)| tokens.get(i + 1).cloned().unwrap_or_default())
                 .collect()
         };
-        assert_eq!(values("--cache-ram"), vec!["8192".to_string()], "cache-ram: {:?}", tokens);
-        assert_eq!(values("-c"), vec!["32768".to_string()], "contexto duplicado: {:?}", tokens);
-        assert_eq!(values("-t"), vec!["6".to_string()], "hilos duplicados: {:?}", tokens);
-        assert_eq!(values("--port"), vec!["8080".to_string()], "puerto duplicado: {:?}", tokens);
+        assert_eq!(
+            values("--cache-ram"),
+            vec!["8192".to_string()],
+            "cache-ram: {:?}",
+            tokens
+        );
+        assert_eq!(
+            values("-c"),
+            vec!["32768".to_string()],
+            "contexto duplicado: {:?}",
+            tokens
+        );
+        assert_eq!(
+            values("-t"),
+            vec!["6".to_string()],
+            "hilos duplicados: {:?}",
+            tokens
+        );
+        assert_eq!(
+            values("--port"),
+            vec!["8080".to_string()],
+            "puerto duplicado: {:?}",
+            tokens
+        );
     }
 
     /// D-44: el banner de arranque describe el argv REAL. `--cache-reuse` está
@@ -2561,13 +3188,19 @@ mod tests {
             "el banner no puede afirmar cache-reuse: {:?}",
             b
         );
-        assert!(!b.contains("--cache-reuse"), "tampoco la flag literal: {:?}", b);
+        assert!(
+            !b.contains("--cache-reuse"),
+            "tampoco la flag literal: {:?}",
+            b
+        );
         // Lo que sí se pasa sigue estando, que es lo que hace útil el banner.
         assert!(b.contains("Contexto: 32768"), "{:?}", b);
         assert!(b.contains("Hilos: 6"), "{:?}", b);
         assert!(b.contains("uBatch: 512"), "{:?}", b);
         assert!(b.contains("Puerto: 8080"), "{:?}", b);
     }
+
+    // (movido a `engine_gate.rs`: `adapter_ram_da_techo_maximo_y_filtra_basura`.)
 
     /// La cabecera que los clientes internos mandan al motor tiene que ser la
     /// que el motor acepta: `Authorization: Bearer <clave>`. El build 10743
@@ -2583,7 +3216,8 @@ mod tests {
 
     #[test]
     fn usage_non_stream() {
-        let body = r#"{"id":"x","usage":{"prompt_tokens":8,"completion_tokens":64,"total_tokens":72}}"#;
+        let body =
+            r#"{"id":"x","usage":{"prompt_tokens":8,"completion_tokens":64,"total_tokens":72}}"#;
         assert_eq!(parse_usage(body), Some((8, 64)));
     }
 
@@ -2611,13 +3245,7 @@ mod tests {
         assert_eq!(acceptance_verdict(20, 7000), Err("tps".to_string()));
     }
 
-    #[test]
-    fn eta_stored_and_cold() {
-        assert_eq!(eta_secs(Some(95), 13.0), 95);
-        // Frío: 6 s × 13 GB = 78 s.
-        assert_eq!(eta_secs(None, 13.0), 78);
-        assert_eq!(eta_secs(None, 0.0), 0);
-    }
+    // (movido a `engine_gate.rs`: `eta_stored_and_cold`.)
 
     #[test]
     fn crash_summary_prefers_errors_and_trims() {
@@ -2669,8 +3297,16 @@ mod tests {
     fn ctx_explicit_wins_over_everything() {
         // Request explícito manda aunque perfil y sesión digan otra cosa.
         assert_eq!(
-            resolve_context(Some(65536), Some("velocidad"), 32768,
-                Some("velocidad"), Some("m.gguf"), Some(131072), "velocidad", "m.gguf"),
+            resolve_context(
+                Some(65536),
+                Some("velocidad"),
+                32768,
+                Some("velocidad"),
+                Some("m.gguf"),
+                Some(131072),
+                "velocidad",
+                "m.gguf"
+            ),
             65536
         );
     }
@@ -2679,8 +3315,16 @@ mod tests {
     fn ctx_explicit_profile_beats_stale_last() {
         // Regresión auditada: {"profile":"velocidad"} con last=131072 → 32768.
         assert_eq!(
-            resolve_context(None, Some("velocidad"), 32768,
-                Some("libros"), Some("m.gguf"), Some(131072), "velocidad", "m.gguf"),
+            resolve_context(
+                None,
+                Some("velocidad"),
+                32768,
+                Some("libros"),
+                Some("m.gguf"),
+                Some(131072),
+                "velocidad",
+                "m.gguf"
+            ),
             32768
         );
     }
@@ -2689,8 +3333,16 @@ mod tests {
     fn ctx_no_profile_matching_last_uses_last() {
         // Sin perfil en el request y misma sesión (perfil+modelo) → contexto guardado.
         assert_eq!(
-            resolve_context(None, None, 32768,
-                Some("velocidad"), Some("m.gguf"), Some(32768), "velocidad", "m.gguf"),
+            resolve_context(
+                None,
+                None,
+                32768,
+                Some("velocidad"),
+                Some("m.gguf"),
+                Some(32768),
+                "velocidad",
+                "m.gguf"
+            ),
             32768
         );
     }
@@ -2708,8 +3360,16 @@ mod tests {
     fn ctx_explicit_profile_same_as_last_still_profile() {
         // Perfil explícito igual al de la última sesión, sin contexto → perfil manda.
         assert_eq!(
-            resolve_context(None, Some("velocidad"), 32768,
-                Some("velocidad"), Some("m.gguf"), Some(131072), "velocidad", "m.gguf"),
+            resolve_context(
+                None,
+                Some("velocidad"),
+                32768,
+                Some("velocidad"),
+                Some("m.gguf"),
+                Some(131072),
+                "velocidad",
+                "m.gguf"
+            ),
             32768
         );
     }
@@ -2787,7 +3447,7 @@ mod tests {
     fn unknown_last_profile_falls_back_to_default() {
         // D-1: un id desconocido en el TOML cae al default real, no al fantasma.
         let profiles = crate::config::built_in_profiles();
-        let resolved = crate::profiles::resolve_profile(&profiles, "turbo");
+        let resolved = crate::config::resolve_profile(&profiles, "turbo");
         assert_eq!(resolved.id, profiles[0].id);
         assert_eq!(profiles[0].id, crate::config::DEFAULT_PROFILE_ID);
     }
@@ -2839,13 +3499,8 @@ mod tests {
         assert_eq!(gate_median(&[]), None);
     }
 
-    #[test]
-    fn gate_slow_flag_at_threshold() {
-        // Umbral default 20: bajo → true; igual o más → false.
-        assert!(gate_is_slow(19.9, 20.0));
-        assert!(!gate_is_slow(20.0, 20.0));
-        assert!(!gate_is_slow(34.0, 20.0));
-    }
+    // (movidos a `engine_gate.rs`: `gate_lento_bajo_umbral`,
+    // `auto_stop_borde_y_guardas`, `motor_perdido_a_los_10_fallos_en_running`.)
 
     fn val_ids() -> Vec<String> {
         vec!["velocidad".to_string(), "libros".to_string()]
@@ -2856,7 +3511,11 @@ mod tests {
         // `{"profile":"noexiste"}` → 400 con los ids válidos.
         let err = validate_req_profile(Some("noexiste"), &val_ids()).unwrap_err();
         assert!(err.contains("Perfil desconocido: 'noexiste'"), "{}", err);
-        assert!(err.contains("velocidad") && err.contains("libros"), "{}", err);
+        assert!(
+            err.contains("velocidad") && err.contains("libros"),
+            "{}",
+            err
+        );
         assert!(validate_req_profile(Some("libros"), &val_ids()).is_ok());
         assert!(validate_req_profile(None, &val_ids()).is_ok());
         assert!(validate_req_profile(Some(""), &val_ids()).is_ok());
@@ -2923,8 +3582,12 @@ mod tests {
         // Positivo con la línea real del fallo (LFM2.5).
         assert!(mtp_unsupported_signature(&mtp_lines()));
         // Negativos: errores ajenos no disparan el reintento.
-        assert!(!mtp_unsupported_signature(&["couldn't bind to port 8080".to_string()]));
-        assert!(!mtp_unsupported_signature(&["CUDA error: out of memory".to_string()]));
+        assert!(!mtp_unsupported_signature(&[
+            "couldn't bind to port 8080".to_string()
+        ]));
+        assert!(!mtp_unsupported_signature(&[
+            "CUDA error: out of memory".to_string()
+        ]));
         assert!(!mtp_unsupported_signature(&[]));
         // Solo "MTP" suelto sin draft/fallo → no dispara.
         assert!(!mtp_unsupported_signature(&["mtp draft ok".to_string()]));
@@ -2959,7 +3622,7 @@ mod tests {
 
     fn argv_tokens(
         engine: &crate::config::EngineConfig,
-        profile: &crate::profiles::HardwareProfile,
+        profile: &crate::config::HardwareProfile,
         context: usize,
         skip_spec: bool,
     ) -> Vec<String> {
@@ -2990,7 +3653,7 @@ mod tests {
         e
     }
 
-    fn ctx_profile(context: usize) -> crate::profiles::HardwareProfile {
+    fn ctx_profile(context: usize) -> crate::config::HardwareProfile {
         crate::config::HardwareProfile {
             id: "t".to_string(),
             name: String::new(),

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LocalMind Studio</title>
-  <link rel="icon" type="image/x-icon" href="localmind.ico">
+  <title>OMNI</title>
+  <link rel="icon" type="image/x-icon" href="omni.ico">
   <style>
     :root {
-      /* LocalMind design tokens: dark-first, single mint accent. */
+      /* OMNI design tokens: dark-first, monochrome (white/gray states). */
       /* Contrast on --bg (verified by docs/ui/contrast.mjs): */
       /* text 17.5:1, text-muted 10.7:1, text-subtle 8.0:1 (targets >= 7 / 4.5). */
       /* Card separators use --border (>= 1.5:1); --border-subtle is */
@@ -20,32 +20,32 @@
       --border: rgba(238, 243, 246, 0.18);
       --border-subtle: rgba(238, 243, 246, 0.08);
       --border-hover: rgba(238, 243, 246, 0.28);
-      --border-focus: rgba(61, 220, 151, 0.55);
+      --border-focus: rgba(245, 247, 247, 0.55);
 
       --text: #eef3f6;
       --text-muted: #b7c1cb;
       --text-subtle: #9aa7b4;
       --text-dim: #7d8a97;
 
-      --accent: #3ddc97;
-      --accent-bg: #3ddc97;
-      --accent-text: #06281a;
-      --accent-soft: rgba(61, 220, 151, 0.10);
-      --accent-line: rgba(61, 220, 151, 0.32);
+      --accent: #f5f7f7;
+      --accent-bg: #f5f7f7;
+      --accent-text: #0b0d0f;
+      --accent-soft: rgba(245, 247, 247, 0.08);
+      --accent-line: rgba(245, 247, 247, 0.30);
 
-      --ok: #3ddc97;
-      --ok-glow: rgba(61, 220, 151, 0.15);
-      --emerald: #3ddc97;
-      --emerald-glow: rgba(61, 220, 151, 0.15);
-      --warn: #f5b94f;
-      --warn-glow: rgba(245, 185, 79, 0.12);
-      --amber: #f5b94f;
-      --amber-glow: rgba(245, 185, 79, 0.12);
-      --danger: #f26d6d;
-      --danger-soft: #f6a3a3;
-      --red: #f26d6d;
-      --red-glow: rgba(242, 109, 109, 0.12);
-      --blue: #7cc7ff;
+      --ok: #c3cad2;
+      --ok-glow: rgba(195, 202, 210, 0.15);
+      --emerald: #c3cad2;
+      --emerald-glow: rgba(195, 202, 210, 0.15);
+      --warn: #9aa3ab;
+      --warn-glow: rgba(154, 163, 171, 0.12);
+      --amber: #9aa3ab;
+      --amber-glow: rgba(154, 163, 171, 0.12);
+      --danger: #ffffff;
+      --danger-soft: #ffffff;
+      --red: #ffffff;
+      --red-glow: rgba(255, 255, 255, 0.10);
+      --blue: #b7c1cb;
 
       --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       --font-mono: ui-monospace, "Cascadia Code", "Fira Code", "JetBrains Mono", monospace;
@@ -72,6 +72,7 @@
       --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
       --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55);
       --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+      color-scheme: dark;
     }
 
     * {
@@ -137,14 +138,13 @@
       width: 28px;
       height: 28px;
       border-radius: var(--r-s);
-      background: linear-gradient(145deg, var(--surface-active), var(--surface));
-      border: 1px solid var(--accent-line);
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--accent);
       flex-shrink: 0;
     }
+    .brand-logo img { width: 28px; height: 28px; display: block; }
 
     .brand-titles {
       display: flex;
@@ -208,9 +208,9 @@
     }
     .header-status.online { color: var(--ok); border-color: var(--accent-line); background: var(--accent-soft); }
     .header-status.online .status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok-glow); }
-    .header-status.loading { color: var(--warn); border-color: rgba(245, 185, 79, 0.35); background: var(--warn-glow); }
+    .header-status.loading { color: var(--warn); border-color: rgba(154, 163, 171, 0.35); background: var(--warn-glow); }
     .header-status.loading .status-dot { background: var(--warn); animation: pulse 1.2s infinite ease-in-out; }
-    .header-status.error { color: var(--danger-soft); border-color: rgba(242, 109, 109, 0.35); background: var(--red-glow); }
+    .header-status.error { color: var(--danger-soft); border-color: rgba(255, 255, 255, 0.35); background: var(--red-glow); }
     .header-status.error .status-dot { background: var(--danger); }
 
     @keyframes pulse {
@@ -283,6 +283,31 @@
       padding: 0 6px;
     }
     .tab-btn.active .tab-count { color: var(--text-muted); }
+
+    /* ---------- Role switcher (Oráculo/Guest, siempre visible) ---------- */
+    .role-switch {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      padding: 2px;
+    }
+    .role-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: var(--fs-s);
+      font-weight: var(--fw-medium);
+      font-family: inherit;
+      padding: 4px 10px;
+      border-radius: var(--r-pill);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .role-btn:hover { color: var(--text); }
+    .role-btn.active { background: var(--accent-bg); color: var(--accent-text); }
 
     /* ---------- Persistent engine status strip ---------- */
     .status-strip {
@@ -592,7 +617,7 @@
     .btn-danger {
       background: var(--red-glow);
       color: var(--danger-soft);
-      border-color: rgba(242, 109, 109, 0.35);
+      border-color: rgba(255, 255, 255, 0.35);
     }
     .btn-danger:hover:not(:disabled) { border-color: var(--danger); }
 
@@ -630,7 +655,7 @@
     .error-banner {
       display: none;
       background: var(--red-glow);
-      border: 1px solid rgba(242, 109, 109, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.35);
       border-radius: var(--r-s);
       padding: 10px 14px;
       font-size: var(--fs-s);
@@ -690,6 +715,8 @@
       line-height: 1.45;
     }
     .toast.error { border-left-color: var(--danger); }
+    .toast-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .toast-close { margin-left: auto; }
 
     /* ---------- Metrics ---------- */
     .metric-box {
@@ -709,6 +736,10 @@
       color: var(--text-subtle);
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      /* «Velocidad verificada» cabe en dos líneas en vez de recortarse. */
+      white-space: normal;
+      line-height: 1.35;
+      min-height: 2.7em;
     }
 
     .metric-value {
@@ -720,9 +751,10 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .metric-value.highlight { color: var(--ok); }
     .metric-sub {
@@ -736,7 +768,7 @@
       white-space: nowrap;
     }
     .metric-box.warn {
-      border-color: rgba(245, 185, 79, 0.35);
+      border-color: rgba(154, 163, 171, 0.35);
       background: var(--warn-glow);
     }
     .metric-box.warn .metric-label { color: var(--warn); }
@@ -766,6 +798,7 @@
     .telemetry-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-auto-rows: 1fr;
       gap: 10px;
     }
     .telemetry-grid .metric-box { padding: 10px 12px; gap: 2px; overflow: hidden; }
@@ -871,12 +904,11 @@
       border-top: 1px solid var(--border-subtle);
       padding-top: var(--sp-2);
       display: flex;
-      justify-content: space-between;
-      align-items: center;
+      flex-direction: column;
+      align-items: stretch;
       gap: var(--sp-2);
-      flex-wrap: wrap;
     }
-    .cli-effort-wrap { width: 150px; max-width: 100%; flex-shrink: 0; }
+    .cli-effort-wrap { width: 100%; max-width: 100%; }
     .cli-effort-select { padding: 4px 8px; font-size: var(--fs-s); }
     /* ---------- Model download / badges ---------- */
     .model-dl-row { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
@@ -1173,6 +1205,19 @@
       flex-direction: column;
       gap: var(--sp-2);
     }
+    .chat-opt-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+    }
+    .chat-opt-label {
+      font-size: var(--fs-s);
+      font-weight: var(--fw-medium);
+      color: var(--text-subtle);
+      white-space: nowrap;
+    }
+    .chat-effort-wrap { width: auto; max-width: 220px; }
+    .chat-effort-select { padding: 4px 8px; font-size: var(--fs-s); }
     .input-row {
       display: flex;
       gap: var(--sp-2);
@@ -1188,7 +1233,6 @@
       border: none;
       color: var(--text);
       font-family: inherit;
-      font-size: var(--fs-m);
       resize: none;
       height: 22px;
       max-height: 120px;
@@ -1216,7 +1260,7 @@
       border-radius: var(--r-s);
       background: var(--red-glow);
       color: var(--danger-soft);
-      border: 1px solid rgba(242, 109, 109, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1242,9 +1286,13 @@
     /* ---------- Logs section (the only terminal-like surface) ---------- */
     .terminal-container {
       max-width: 1360px;
-      margin: 0 auto;
+      margin: var(--sp-5) auto 0;
       width: 100%;
-      height: 100%;
+      /* Alto acotado: el registro crece con scroll interno, no empuja las
+         tarjetas de abajo a 2000px. ~14 líneas visibles. */
+      height: 320px;
+      min-height: 240px;
+      max-height: 45vh;
       display: flex;
       flex-direction: column;
       background: var(--bg);
@@ -1260,12 +1308,17 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-2);
+      gap: var(--sp-2) var(--sp-3);
       flex-wrap: wrap;
     }
-    .terminal-tools { display: flex; align-items: center; gap: var(--sp-2); }
+    .terminal-header .card-title { flex: 1 1 auto; min-width: 200px; }
+    .terminal-tools { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; flex-wrap: wrap; }
+    .table-scroll { overflow-x: auto; max-width: 100%; }
+    .strip-state { flex: 1 1 auto; min-width: 0; }
+    #strip-text { min-width: 0; max-width: 100%; }
     #terminal-stream {
       flex: 1;
+      min-height: 0;
       padding: var(--sp-4);
       overflow-y: auto;
       font-family: var(--font-mono);
@@ -1275,8 +1328,6 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
-
-    /* ---------- Specs ---------- */
     .info-layout {
       max-width: 1000px;
       margin: 0 auto;
@@ -1286,6 +1337,9 @@
       gap: var(--sp-5);
     }
     .info-card {
+      max-width: 1360px;
+      margin: var(--sp-5) auto 0;
+      width: 100%;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--r-m);
@@ -1316,22 +1370,20 @@
       padding: 1px 6px;
       border-radius: var(--r-s);
       color: var(--text);
+      /* Rutas largas (gateway.key, bin\llama-server.exe) se parten en vez
+         de estirar la tarjeta fuera del grid. */
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
-    .spec-table { width: 100%; border-collapse: collapse; margin-top: var(--sp-2); }
+    .spec-table { width: 100%; border-collapse: collapse; margin-top: var(--sp-2); table-layout: fixed; }
     .spec-table th, .spec-table td {
       padding: 8px 12px;
       text-align: left;
       border-bottom: 1px solid var(--border-subtle);
       font-size: var(--fs-s);
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
-    .spec-table th {
-      color: var(--text-subtle);
-      font-weight: var(--fw-medium);
-      text-transform: uppercase;
-      font-size: 11px;
-    }
-    .spec-table td { color: var(--text); font-family: var(--font-mono); }
-    .spec-table td:first-child { font-family: var(--font-sans); color: var(--text-muted); }
 
     /* ---------- Scrollbars ---------- */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1373,6 +1425,8 @@
       padding: 4px 0; cursor: pointer;
     }
     .cfg-check input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+    /* Radios del rol (Fase C): sin esto el navegador pinta el punto en azul. */
+    .cfg-check input[type="radio"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
     .cfg-ok { font-size: var(--fs-s); color: var(--accent); font-weight: var(--fw-medium); }
     .cfg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
     .spinner {
@@ -1392,8 +1446,6 @@
     }
     @media (max-width: 420px) {
       .telemetry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .cli-row-effort { align-items: flex-start; flex-direction: column; }
-      .cli-effort-wrap { width: 100%; }
       .header-status span.hdr-status-text { display: none; }
     }
   </style>
@@ -1404,26 +1456,23 @@
   <header>
     <div class="brand-section">
       <div class="brand-logo" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/>
-          <path d="M8 15.5v-7l3.2 4.4 3.2-4.4v7"/>
-        </svg>
+        <img src="omni.png" alt="" width="28" height="28">
       </div>
       <div class="brand-titles">
-        <span class="brand-name">LocalMind Studio</span>
+        <span class="brand-name">OMNI</span>
         <span class="brand-badge" id="app-version">v…</span>
       </div>
     </div>
 
     <div class="header-spacer"></div>
 
-    <div id="header-status" class="header-status stopped" role="status" aria-live="polite">
+    <div id="header-status" class="header-status stopped" aria-hidden="true">
       <span class="status-dot" aria-hidden="true"></span>
-      <span class="hdr-status-text" id="header-status-text" data-i18n="hdr.stopped">En reposo</span>
+      <span class="hdr-status-text" id="header-status-text" data-i18n="hdr.stopped" aria-hidden="true">En reposo</span>
     </div>
 
     <div class="lang-select-wrap">
-      <label for="lang-select" id="lang-label">Idioma</label>
+      <label for="lang-select" id="lang-label" data-i18n="lang.label">Idioma</label>
       <div class="select-wrapper">
         <select id="lang-select" class="lang-select" aria-labelledby="lang-label">
           <option value="es">ES</option>
@@ -1432,28 +1481,22 @@
       </div>
     </div>
 
-    <nav class="tabs-nav" aria-label="LocalMind" id="main-nav">
-      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard">
+    <div class="role-switch" role="group" data-i18n-aria="settings.roleGroup" aria-label="Rol">
+      <button class="role-btn active" type="button" id="hs-oraculo" onclick="setRole('oraculo')" aria-pressed="true"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
+      <button class="role-btn" type="button" id="hs-guest" onclick="setRole('guest')" aria-pressed="false"><span data-i18n="settings.roleGuest">Guest</span></button>
+    </div>
+
+    <nav class="tabs-nav" aria-label="OMNI" id="main-nav" role="tablist">
+      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard" role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" onkeydown="onNavKey(event)">
         <span data-i18n="nav.panel">Panel</span>
       </button>
-      <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" id="nav-chat">
+      <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" id="nav-chat" role="tab" aria-selected="false" aria-controls="tab-chat" tabindex="-1" onkeydown="onNavKey(event)">
         <span data-i18n="nav.chat">Chat</span>
       </button>
-      <button class="tab-btn" data-tab="models" onclick="switchTab('models')" id="nav-models">
-        <span data-i18n="nav.models">Modelos</span>
-        <span class="tab-count" id="nav-models-count">–</span>
+      <button class="tab-btn" data-tab="conexion" onclick="switchTab('conexion')" id="nav-conexion" role="tab" aria-selected="false" aria-controls="tab-conexion" tabindex="-1" onkeydown="onNavKey(event)">
+        <span data-i18n="nav.conexion">Conexión</span>
       </button>
-      <button class="tab-btn" data-tab="usage" onclick="switchTab('usage')" id="nav-usage">
-        <span data-i18n="nav.usage">Uso</span>
-        <span class="tab-count" id="nav-usage-count">–</span>
-      </button>
-      <button class="tab-btn" data-tab="terminal" onclick="switchTab('terminal')" id="nav-terminal">
-        <span data-i18n="nav.logs">Logs</span>
-      </button>
-      <button class="tab-btn" data-tab="info" onclick="switchTab('info')" id="nav-info">
-        <span data-i18n="nav.specs">Specs</span>
-      </button>
-      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" id="nav-settings">
+      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" id="nav-settings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" onkeydown="onNavKey(event)">
         <span data-i18n="nav.settings">Ajustes</span>
       </button>
     </nav>
@@ -1462,7 +1505,7 @@
   <div id="status-strip" class="status-strip">
     <div id="strip-state" class="strip-state stopped">
       <span id="strip-dot" class="strip-dot" aria-hidden="true"></span>
-      <span id="strip-text" role="status" aria-live="polite">En reposo</span>
+      <span id="strip-text" role="status" data-i18n="strip.idle" data-i18n-ph="strip.idle">En reposo</span>
     </div>
     <span id="strip-port" class="strip-port" style="display: none;">127.0.0.1:8080</span>
     <span id="strip-countdown" class="strip-countdown" style="display: none;">auto-stop --</span>
@@ -1473,6 +1516,51 @@
 
   <!-- Toast region: non-blocking notifications for every user-facing error -->
   <div id="toast-region" aria-live="polite"></div>
+
+  <!-- Unlock overlay (Fase B4): la UI en red llega sin cookie; con 401 pide
+       la clave del Servidor y la canjea por sesión vía POST /api/unlock. -->
+  <div id="unlock-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 100; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+    <div class="card" style="max-width: min(360px, 100%); margin: 0; width: 100%;">
+      <div class="card-header">
+        <span class="card-title" data-i18n="unlock.title">Desbloquear</span>
+      </div>
+      <div class="card-body">
+        <div class="profile-hint" data-i18n="unlock.sub">Esta UI está en red: ingresa la clave del Servidor.</div>
+        <label class="field-label" for="unlock-key"><span data-i18n="settings.clientKey">Clave</span></label>
+        <input type="password" id="unlock-key" autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.clientKey" aria-label="Clave">
+        <div id="unlock-error" class="error-banner" role="alert"></div>
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+          <button class="btn btn-primary" type="button" id="unlock-go" onclick="doUnlock()"><span data-i18n="unlock.go">Entrar</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding de rol (Fase UX): primer arranque pregunta Oráculo/Guest. -->
+  <!-- "Decidir después" conserva el rol vigente y deja un aviso persistente en Conexión. -->
+  <div id="onboard-overlay" role="dialog" aria-modal="true" aria-labelledby="onboard-title" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+    <div class="card" style="max-width: min(460px, 100%); margin: 0; width: 100%;">
+      <div class="card-header">
+        <span class="card-title" id="onboard-title" data-i18n="onboard.title">Elige el rol de esta PC</span>
+      </div>
+      <div class="card-body">
+        <div class="profile-hint" data-i18n="onboard.sub">Puedes cambiarlo cuando quieras desde el encabezado o Conexión.</div>
+        <div class="fields-row cfg-2col" style="margin-top: 8px;">
+          <div class="field-group">
+            <button class="btn btn-primary" type="button" id="onboard-oraculo" style="width: 100%;" onclick="chooseRole('oraculo')"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
+            <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
+          </div>
+          <div class="field-group">
+            <button class="tool-btn" type="button" id="onboard-guest" style="width: 100%;" onclick="chooseRole('guest')"><span data-i18n="settings.roleGuest">Guest</span></button>
+            <div class="profile-hint" data-i18n="settings.roleGuestDesc">Sin modelo: chatea y lanza CLIs contra el Oráculo.</div>
+          </div>
+        </div>
+        <div style="margin-top: 8px; text-align: center;">
+          <button class="tool-btn" type="button" id="onboard-later" onclick="laterRole()"><span data-i18n="onboard.later">Decidir después</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Main viewport -->
   <main>
@@ -1495,22 +1583,14 @@
 
           <div class="card-body">
             <div id="error-banner" class="error-banner" role="alert"></div>
+            <button type="button" id="update-banner" class="cfg-ok" style="display: none; cursor: pointer;" onclick="switchTab('settings')"></button>
 
             <div class="field-group">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <label class="field-label" for="profile-select" style="margin: 0;">
                   <span data-i18n="engine.profile">Perfil de uso · ¿qué vas a hacer?</span>
                 </label>
-                <div style="display: flex; gap: 6px;">
-                  <button class="tool-btn" type="button" onclick="exportProfiles()" data-i18n-title="engine.exportTitle" title="Exportar perfiles a archivo JSON">
-                    <span data-i18n="engine.export">Exportar</span>
-                  </button>
-                  <button class="tool-btn" type="button" onclick="triggerImportProfiles()" data-i18n-title="engine.importTitle" title="Importar perfiles desde JSON">
-                    <span data-i18n="engine.import">Importar</span>
-                  </button>
-                </div>
               </div>
-              <input type="file" id="file-profile-input" accept=".json" style="display: none;" onchange="handleProfileFileSelected(event)">
               <div class="select-wrapper">
                 <select id="profile-select" onchange="onProfileChange()"></select>
               </div>
@@ -1627,24 +1707,19 @@
         <div class="card" id="telemetry-card">
           <div class="card-header">
             <span class="card-title" data-i18n="telemetry.title">Telemetría</span>
-            <span id="pid-display" class="card-meta">PID: --</span>
+            <span id="pid-display" class="card-meta" data-i18n-ph="telemetry.pidLabel">PID: --</span>
           </div>
 
           <div class="card-body">
             <div class="telemetry-meta">
-              <span id="endpoint-port">:8080/v1</span>
               <span id="endpoint-meta">127.0.0.1:—</span>
             </div>
 
             <div class="telemetry-title" data-i18n="telemetry.live">Telemetría en vivo</div>
             <div class="telemetry-grid" role="status" aria-live="off">
               <div class="metric-box">
-                <span class="metric-label">Gen t/s</span>
+                <span class="metric-label" data-i18n="telemetry.genRate">Gen t/s</span>
                 <span id="tel-gen-tps" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label">Prompt t/s</span>
-                <span id="tel-prompt-tps" class="metric-value">—</span>
               </div>
               <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.tokens">Tokens</span>
@@ -1653,10 +1728,6 @@
               <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.cache">Caché</span>
                 <span id="tel-cache-pct" class="metric-value">—</span>
-              </div>
-              <div class="metric-box">
-                <span class="metric-label">MTP</span>
-                <span id="tel-mtp-pct" class="metric-value">—</span>
               </div>
               <div class="metric-box">
                 <span class="metric-label" data-i18n="telemetry.requests">Solicitudes</span>
@@ -1674,6 +1745,7 @@
               <div class="metric-box warn" id="tel-slow-box" role="status" style="display: none;">
                 <span class="metric-label" data-i18n="telemetry.slowTitle">Motor lento</span>
                 <span id="tel-slow-text" class="metric-value">—</span>
+                <button id="tel-slow-restart" class="tool-btn" type="button" onclick="restartEngineOnce()" data-i18n="telemetry.slowRestart">Reiniciar motor</button>
               </div>
             </div>
           </div>
@@ -1681,6 +1753,65 @@
         </div><!-- /.dash-col -->
 
       </div>
+
+      <!-- Registro del motor + detalles (plegados de Logs/Specs) -->
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <div class="card-title">
+            <span data-i18n="logs.title">Proceso llama-server.exe</span>
+          </div>
+          <div class="terminal-tools">
+            <button id="btn-scroll-toggle" class="tool-btn" onclick="toggleScroll()" data-i18n="logs.scrollOn">Auto-scroll: ON</button>
+            <button class="tool-btn" onclick="copyTerminalLogs(event)"><span data-i18n="logs.copy">Copiar</span></button>
+            <button class="tool-btn" onclick="clearTerminalLogs()"><span data-i18n="logs.clear">Limpiar</span></button>
+          </div>
+        </div>
+        <div id="terminal-stream" tabindex="0" data-i18n="logs.boot" data-i18n-aria="logs.stream" aria-label="Registro del motor">OMNI inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.
+</div>
+      </div>
+
+        <div class="info-card">
+          <h3 data-i18n="specs.hwTitle">Hardware Detectado &amp; Motor de Inferencia</h3>
+          <p data-i18n="specs.hwBody">Equipo y motor en uso.</p>
+          <div class="table-scroll">
+          <table class="spec-table">
+            <thead>
+              <tr>
+                <th data-i18n="specs.colComponent">Componente</th>
+                <th data-i18n="specs.colDevice">Dispositivo Detectado</th>
+                <th data-i18n="specs.colState">Estado / Capacidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-i18n="specs.rowGpu">GPU Principal</td>
+                <td id="spec-gpu-name" data-i18n="specs.detecting">Detectando...</td>
+                <td id="spec-gpu-vram">--</td>
+              </tr>
+              <tr>
+                <td data-i18n="specs.rowCpu">Procesador (CPU)</td>
+                <td id="spec-cpu-name" data-i18n="specs.detecting">Detectando...</td>
+                <td id="spec-cpu-threads">--</td>
+              </tr>
+              <tr>
+                <td data-i18n="specs.rowEngine">Motor de Inferencia</td>
+                <td id="spec-engine-build" data-i18n="specs.detecting">Detectando...</td>
+                <td id="spec-engine-path">--</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <h3 data-i18n="specs.epTitle">Endpoints OpenAI Compatibles</h3>
+          <p>
+            <span data-i18n="specs.epBody">Cualquier herramienta compatible con la API de OpenAI puede conectarse directamente con la URL base</span>
+            <code id="spec-gateway-url">…</code>
+            <span data-i18n="specs.epBody2">con la clave de <code>%APPDATA%\LocalMind\gateway.key</code> en <code>Authorization: Bearer</code> y el ID de modelo</span>
+            <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code id="spec-model-id">localmind</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
+          </p>
+        </div>
     </div>
 
     <!-- TAB 2: CHAT -->
@@ -1688,7 +1819,7 @@
       <div class="chat-container">
         <div class="chat-header">
           <div class="chat-header-title">
-            <span data-i18n="chat.title">LocalMind Chat</span>
+            <span data-i18n="chat.title">OMNI Chat</span>
           </div>
           <button class="tool-btn" onclick="clearChat()" data-i18n-aria="chat.clear" aria-label="Limpiar">
             <span data-i18n="chat.clear">Limpiar</span>
@@ -1698,12 +1829,24 @@
         <div id="chat-messages" class="chat-scroll-area">
           <div class="msg-group assistant">
             <div class="msg-bubble" data-i18n="chat.welcome">
-              Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con LocalMind.
+              Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con OMNI.
             </div>
           </div>
         </div>
 
         <div class="chat-dock">
+          <div class="chat-opt-row">
+            <label class="chat-opt-label" for="chat-effort-select"><span data-i18n="chat.effort">Razonamiento</span></label>
+            <div class="select-wrapper chat-effort-wrap">
+              <select id="chat-effort-select" class="chat-effort-select" data-i18n-aria="chat.effort" aria-label="Razonamiento">
+                <option value="medium" selected data-i18n="opt.effMed">Medio (Medium)</option>
+                <option value="low" data-i18n="opt.effLow">Bajo (Rápido)</option>
+                <option value="high" data-i18n="opt.effHigh">Alto (High)</option>
+                <option value="max" data-i18n="opt.effMax">Max (Profundo)</option>
+                <option value="off" data-i18n="opt.effOff">Desactivado (Off)</option>
+              </select>
+            </div>
+          </div>
           <div class="input-row">
             <textarea id="chat-input" class="chat-textarea" data-i18n-placeholder="chat.placeholder" data-i18n-aria="chat.placeholder" placeholder="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" aria-label="Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)" rows="1" onkeydown="handleChatKey(event)" oninput="autoResizeTextarea(this)"></textarea>
             <button id="chat-send-btn" class="chat-send-btn" onclick="sendChatMessage()" data-i18n-aria="chat.send" aria-label="Enviar mensaje">
@@ -1715,94 +1858,76 @@
           </div>
           <div class="chat-dock-hints">
             <span data-i18n="chat.hint">Presiona Shift + Enter para saltos de línea</span>
-            <span id="chat-status-hint" role="status">Motor en reposo</span>
+            <span id="chat-status-hint" role="status" data-i18n="chat.hintIdle">Motor en reposo</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- TAB 3: MODELS -->
-    <div id="tab-models" class="tab-panel" role="tabpanel" aria-labelledby="nav-models">
-      <div class="section-shell">
+    <!-- TAB 3: CONEXION (Fase UX: Modo + Uso, plegados de Settings/Usage) -->
+    <div id="tab-conexion" class="tab-panel" role="tabpanel" aria-labelledby="nav-conexion">
+      <div class="section-shell narrow">
         <div class="section-head">
-          <div class="section-title" data-i18n="models.title">Modelos</div>
-          <div class="section-sub" data-i18n="models.sub">Pesos GGUF locales, importación y descarga verificada.</div>
+          <div class="section-title" data-i18n="conexion.title">Conexión</div>
+          <div class="section-sub" data-i18n="conexion.sub">Modo de esta PC, red local y uso del gateway.</div>
         </div>
 
-        <div class="card">
+        <!-- Mode: role of this PC (Fase C: Servidor / Cliente / Todo aquí) -->
+        <div class="card" id="cfg-role-card">
           <div class="card-header">
-            <span class="card-title" data-i18n="models.localTitle">Modelos locales</span>
-            <span class="card-meta" id="models-meta">–</span>
+            <span class="card-title" data-i18n="settings.roleTitle">Rol: qué es esta PC</span>
+            <span class="card-meta" id="cfg-role-meta">–</span>
           </div>
           <div class="card-body">
-            <div id="models-empty" class="empty-state" style="display: none;" data-i18n="models.empty">Todavía no hay modelos. Importa un .gguf o descarga uno verificado.</div>
-            <table class="models-table" id="models-table">
-              <thead>
-                <tr>
-                  <th data-i18n="models.colModel">Modelo</th>
-                  <th data-i18n="models.colSize">Tamaño</th>
-                  <th data-i18n="models.colState">Estado</th>
-                  <th><span class="sr-only">Acción</span></th>
-                </tr>
-              </thead>
-              <tbody id="models-tbody"></tbody>
-            </table>
-
-            <div class="field-group">
-              <label class="field-label" for="model-select">
-                <span data-i18n="models.active">Modelo activo para arrancar el motor</span>
-              </label>
-              <div class="select-wrapper">
-                <select id="model-select">
-                  <option value="">Cargando modelo...</option>
-                </select>
+            <div class="fields-row cfg-2col" role="radiogroup" data-i18n-aria="settings.roleGroup" aria-label="Rol">
+              <div class="field-group">
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="oraculo" id="cfg-role-oraculo" onchange="setRole('oraculo')"> <span data-i18n="settings.roleOraculo">Oráculo</span></label>
+                <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
               </div>
-              <div id="model-badges" class="model-dl-status" style="display: none;"></div>
+              <div class="field-group">
+                <label class="cfg-check"><input type="radio" name="cfg-role" value="guest" id="cfg-role-guest" onchange="setRole('guest')"> <span data-i18n="settings.roleGuest">Guest</span></label>
+                <div class="profile-hint" data-i18n="settings.roleGuestDesc">Sin modelo: chatea y lanza CLIs contra el Oráculo.</div>
+              </div>
             </div>
-
-            <div class="field-group">
-              <div class="field-label">
-                <span data-i18n="models.importTitle">Importar desde tu disco</span>
-              </div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                <button class="tool-btn" type="button" id="btn-import-gguf" onclick="importGgufPick()" data-i18n-title="models.importBtnTitle" title="Importar archivo .gguf desde tu disco">
-                  <span id="import-gguf-label" data-i18n="models.importBtn">Importar .gguf…</span>
-                </button>
-                <button class="tool-btn" type="button" onclick="openModelsFolder()" data-i18n-title="models.folderTitle" title="Abrir carpeta models en explorador">
-                  <span data-i18n="models.folder">Carpeta</span>
-                </button>
-              </div>
-              <div id="import-pick-status" class="model-dl-status" style="display: none;"></div>
-            </div>
-
-            <div class="field-group">
-              <div class="field-label">
-                <span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span>
-              </div>
-              <div class="model-dl-row">
-                <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
-                <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
-                <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
-              </div>
-              <div id="model-dl-section" style="display: none;">
-                <div id="model-dl-status" class="model-dl-status" role="status"></div>
-                <div class="model-dl-bar"><div id="model-dl-fill" class="model-dl-fill"></div></div>
-                <div style="margin-top: 6px;">
-                  <button class="tool-btn" type="button" id="btn-dl-cancel" onclick="cancelModelDownload()" data-i18n-title="models.cancelTitle" title="Cancelar la descarga en curso"><span data-i18n="models.cancel">Cancelar</span></button>
+            <div class="profile-hint" data-i18n="settings.roleRestart">Exponer en LAN rige al reiniciar la app.</div>
+            <div id="cfg-role-error" class="error-banner" role="alert"></div>
+            <div id="cfg-role-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+            <div id="role-deferred-hint" class="profile-hint warn" style="display: none;" role="note"></div>
+            <!-- Oracle panel = servidor: LAN + pairing -->
+            <div id="cfg-server-panel" style="display: none; margin-top: 8px;">
+              <label class="cfg-check"><input type="checkbox" id="cfg-lan-enabled" onchange="setLanExposed(this.checked)"> <span data-i18n="settings.lanExposed">Exponer en la LAN</span></label>
+              <div class="profile-hint warn" role="note"><span data-i18n="settings.lanPlainWarn">La LAN va en HTTP sin cifrar: clave y prompts visibles en tu red. Solo en redes de confianza.</span></div>
+              <div class="field-label"><span data-i18n="settings.serverIps">Esta PC en la LAN</span></div>
+              <div class="telemetry-meta" role="status"><span id="cfg-server-ips">–</span></div>
+              <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.serverPairing">Emparejar (QR o copiar)</span></div>
+              <div class="fields-row">
+                <div class="field-group" style="flex: 1;">
+                  <!-- P2 producción: la clave de pairing no se exhibe en texto plano (shoulder surfing / capturas): `password` + mostrar temporal con autoclear. -->
+                  <input type="password" id="cfg-server-pairing" readonly autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.serverPairing" aria-label="Pairing">
                 </div>
+                <div class="field-group" style="flex: 0 0 auto; align-self: end;">
+                  <button class="tool-btn" type="button" id="cfg-server-show" onclick="togglePairing()"><span data-i18n="settings.serverShow">Mostrar</span></button>
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                <button class="tool-btn" type="button" id="cfg-server-refresh" onclick="refreshLanPanel()"><span data-i18n="settings.serverRefresh">Actualizar</span></button>
+                <button class="tool-btn" type="button" id="cfg-server-copy" onclick="copyPairing()"><span data-i18n="settings.serverCopy">Copiar</span></button>
+                <button class="tool-btn" type="button" id="cfg-server-rotate" onclick="rotateKey()"><span data-i18n="settings.serverRotate">Regenerar clave</span></button>
+              </div>
+            </div>
+            <div id="cfg-client-panel" style="display: none; margin-top: 8px;">
+              <label class="field-label" for="cfg-remote-url"><span data-i18n="settings.clientUrl">URL del Servidor</span></label>
+              <input type="text" id="cfg-remote-url" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="http://192.168.1.10:17860" data-i18n-aria="settings.clientUrl" aria-label="URL del Servidor">
+              <label class="field-label" for="cfg-remote-key" style="margin-top: 4px;"><span data-i18n="settings.clientKey">Clave</span></label>
+              <input type="password" id="cfg-remote-key" autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.clientKey" aria-label="Clave">
+              <div id="cfg-client-result" class="telemetry-meta" role="status" style="margin-top: 4px;"></div>
+              <div id="cfg-client-error" class="error-banner" role="alert"></div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                <button class="tool-btn" type="button" id="cfg-client-test" onclick="testRemote()"><span data-i18n="settings.clientTest">Probar</span> <span id="cfg-client-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+                <button class="tool-btn" type="button" id="cfg-client-save" onclick="saveRemote()"><span data-i18n="settings.clientSave">Guardar remoto</span></button>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: USAGE -->
-    <div id="tab-usage" class="tab-panel" role="tabpanel" aria-labelledby="nav-usage">
-      <div class="section-shell">
-        <div class="section-head">
-          <div class="section-title" data-i18n="usage.title">Uso</div>
-          <div class="section-sub" data-i18n="usage.sub">Peticiones y tokens servidos por el motor local.</div>
         </div>
 
         <div class="card" id="usage-card" style="display: none;">
@@ -1828,6 +1953,7 @@
             <div class="usage-section-title" data-i18n="usage.last14">Últimos 14 días</div>
             <div id="usage-chart" class="usage-chart"></div>
             <div class="usage-section-title" data-i18n="usage.byModel">Por modelo</div>
+            <div class="table-scroll">
             <table class="usage-table">
               <thead>
                 <tr>
@@ -1838,8 +1964,11 @@
               </thead>
               <tbody id="usage-by-model"></tbody>
             </table>
-            <div class="usage-section-title" data-i18n="usage.recent">Últimas peticiones</div>
-            <div id="usage-raw-list" class="usage-raw-list"></div>
+            </div>
+            <details class="advanced">
+              <summary><span data-i18n="usage.recent">Últimas peticiones</span></summary>
+              <div id="usage-raw-list" class="usage-raw-list" style="margin-top: 8px;"></div>
+            </details>
           </div>
         </div>
 
@@ -1851,103 +1980,7 @@
       </div>
     </div>
 
-    <!-- TAB 5: LOGS (the only terminal-like surface; never the main surface) -->
-    <div id="tab-terminal" class="tab-panel" role="tabpanel" aria-labelledby="nav-terminal">
-      <div class="terminal-container">
-        <div class="terminal-header">
-          <div class="card-title">
-            <span data-i18n="logs.title">Proceso llama-server.exe</span>
-          </div>
-          <div class="terminal-tools">
-            <button id="btn-scroll-toggle" class="tool-btn" onclick="toggleScroll()">Auto-scroll: ON</button>
-            <button class="tool-btn" onclick="copyTerminalLogs()"><span data-i18n="logs.copy">Copiar</span></button>
-            <button class="tool-btn" onclick="clearTerminalLogs()"><span data-i18n="logs.clear">Limpiar</span></button>
-          </div>
-        </div>
-        <div id="terminal-stream" tabindex="0" data-i18n="logs.boot" data-i18n-aria="logs.stream" aria-label="Registro del motor">LocalMind Studio inicializado. Presiona 'Iniciar Motor' para arrancar el servidor.
-</div>
-      </div>
-    </div>
-
-    <!-- TAB 6: SPECS -->
-    <div id="tab-info" class="tab-panel" role="tabpanel" aria-labelledby="nav-info">
-      <div class="section-shell narrow">
-        <div class="section-head">
-          <div class="section-title" data-i18n="specs.title">Especificaciones</div>
-          <div class="section-sub" data-i18n="specs.sub">Hardware detectado y cómo conectarse al motor.</div>
-        </div>
-
-        <div class="info-card">
-          <h3 data-i18n="specs.hwTitle">Hardware Detectado &amp; Motor de Inferencia</h3>
-          <p data-i18n="specs.hwBody">
-            LocalMind detecta dinámicamente tus aceleradores gráficos y procesador para ejecutar modelos de lenguaje localmente con máxima eficiencia mediante offload Vulkan y memoria unificada.
-          </p>
-          <table class="spec-table">
-            <thead>
-              <tr>
-                <th data-i18n="specs.colComponent">Componente</th>
-                <th data-i18n="specs.colDevice">Dispositivo Detectado</th>
-                <th data-i18n="specs.colState">Estado / Capacidad</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td data-i18n="specs.rowGpu">GPU Principal</td>
-                <td id="spec-gpu-name" data-i18n="specs.detecting">Detectando...</td>
-                <td id="spec-gpu-vram">--</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowCpu">Procesador (CPU)</td>
-                <td id="spec-cpu-name" data-i18n="specs.detecting">Detectando...</td>
-                <td id="spec-cpu-threads">--</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowAccel">Aceleración Gráfica</td>
-                <td>Vulkan Hardware Offload</td>
-                <td>Capas en VRAM (-ngl 99)</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowKv">KV Cache</td>
-                <td>Cuantización 4-bit (q4_0)</td>
-                <td>Flash Attention activado</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowEngine">Motor de Inferencia</td>
-                <td id="spec-engine-build" data-i18n="specs.detecting">Detectando...</td>
-                <td id="spec-engine-path">--</td>
-              </tr>
-              <tr>
-                <td data-i18n="specs.rowPower">Protección Eléctrica</td>
-                <td data-i18n="specs.rowPowerVal">Modo Silencioso &amp; Anti-Apagón</td>
-                <td data-i18n="specs.rowPowerState">Prioridad equilibrada + Auto-stop</td>
-              </tr>
-            </tbody>
-          </table>
-        <div class="feature-list" id="spec-features">
-          <div class="feature-item">
-            <span class="feature-dot"></span>
-            <span>Vulkan 100% offload · Flash Attention activado (-fa on)</span>
-          </div>
-          <div class="feature-item">
-            <span class="feature-dot"></span>
-            <span>KV Cache cuantizado en 4-bit (q4_0) · Batch size 2048 / 512</span>
-          </div>
-        </div>
-        </div>
-
-        <div class="info-card">
-          <h3 data-i18n="specs.epTitle">Endpoints OpenAI Compatibles</h3>
-          <p>
-            <span data-i18n="specs.epBody">Cualquier herramienta compatible con la API de OpenAI puede conectarse directamente con la URL base</span>
-            <code>http://127.0.0.1:8080/v1</code>
-            <span data-i18n="specs.epBody2">con la clave de <code>%APPDATA%\LocalMind\gateway.key</code> en <code>Authorization: Bearer</code> y el ID de modelo</span>
-            <code>localmind</code> <span data-i18n="specs.epOr">o</span> <code id="spec-model-id">localmind</code>.<br><code id="config-path" data-i18n="specs.cfgLoading" style="color: var(--text-subtle); font-size: 11px;">config: cargando…</code><br><code id="gateway-key-path" style="color: var(--text-subtle); font-size: 11px;">Clave API: %APPDATA%\LocalMind\gateway.key</code>
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 7: SETTINGS (Ajustes) — profiles, generation, engine + notices.
+    <!-- TAB 4: SETTINGS (Ajustes) — profiles, generation, engine + notices, modelos.
          Blocks hide themselves with the "new engine" note when the
          matching route answers 404/501 or is unreachable. -->
     <div id="tab-settings" class="tab-panel" role="tabpanel" aria-labelledby="nav-settings">
@@ -1983,17 +2016,24 @@
               <div class="fields-row">
                 <div class="field-group">
                   <label class="field-label" for="cfg-profile-context"><span data-i18n="settings.profileContext">Contexto (tokens)</span></label>
-                  <input type="text" id="cfg-profile-context" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="32768" aria-label="Contexto (tokens)">
+                  <input type="text" id="cfg-profile-context" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="32768" data-i18n-aria="settings.profileContext" aria-label="Contexto (tokens)">
                 </div>
                 <div class="field-group">
                   <label class="field-label" for="cfg-profile-cacheram"><span data-i18n="settings.profileCache">KV cache en RAM (MB)</span></label>
-                  <input type="text" id="cfg-profile-cacheram" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" aria-label="KV cache en RAM (MB)">
+                  <input type="text" id="cfg-profile-cacheram" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" data-i18n-aria="settings.profileCache" aria-label="KV cache en RAM (MB)">
                 </div>
               </div>
               <label class="field-label" for="cfg-profile-flags"><span data-i18n="settings.profileFlags">Flags extra (uno por línea)</span></label>
               <textarea id="cfg-profile-flags" class="chat-textarea cfg-textarea" rows="2" autocomplete="off" spellcheck="false" placeholder="-kvu" data-i18n-aria="settings.profileFlags" aria-label="Flags extra (uno por línea)"></textarea>
               <div id="cfg-profile-error" class="error-banner" role="alert"></div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="tool-btn" type="button" onclick="exportProfiles()">
+                  <span data-i18n="engine.export">Exportar</span>
+                </button>
+                <button class="tool-btn" type="button" onclick="triggerImportProfiles()">
+                  <span data-i18n="engine.import">Importar</span>
+                </button>
+                <input type="file" id="file-profile-input" accept=".json" style="display: none;" onchange="handleProfileFileSelected(event)">
                 <button class="tool-btn" type="button" id="cfg-profile-save" onclick="saveProfileEdit()"><span data-i18n="settings.save">Guardar</span> <span id="cfg-profile-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
                 <button class="tool-btn" type="button" id="cfg-profile-new" onclick="newProfileEdit()"><span data-i18n="settings.profileNew">Nuevo</span></button>
                 <button class="tool-btn" type="button" id="cfg-profile-dup" onclick="duplicateProfileEdit()"><span data-i18n="settings.profileDup">Duplicar</span></button>
@@ -2013,21 +2053,21 @@
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-temperature"><span data-i18n="settings.temperature">Temperatura</span></label>
-                <input type="text" id="cfg-temperature" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.7" aria-label="Temperatura">
+                <input type="text" id="cfg-temperature" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.7" data-i18n-aria="settings.temperature" aria-label="Temperatura">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-top-p"><span data-i18n="settings.topP">Top-p</span></label>
-                <input type="text" id="cfg-top-p" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.9" aria-label="Top-p">
+                <input type="text" id="cfg-top-p" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.9" data-i18n-aria="settings.topP" aria-label="Top-p">
               </div>
             </div>
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-max-tokens"><span data-i18n="settings.maxTokens">Max tokens</span></label>
-                <input type="text" id="cfg-max-tokens" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="2048" aria-label="Max tokens">
+                <input type="text" id="cfg-max-tokens" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="2048" data-i18n-aria="settings.maxTokens" aria-label="Max tokens">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-seed"><span data-i18n="settings.seed">Seed</span></label>
-                <input type="text" id="cfg-seed" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" aria-label="Seed">
+                <input type="text" id="cfg-seed" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" data-i18n-aria="settings.seed" aria-label="Seed">
               </div>
             </div>
             <div class="profile-hint" data-i18n="settings.nextStart">Se aplica al próximo arranque del motor</div>
@@ -2048,12 +2088,11 @@
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-idle-min"><span data-i18n="settings.idleMin">Auto-stop (minutos)</span></label>
-                <input type="text" id="cfg-idle-min" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="25" aria-label="Auto-stop (minutos)">
-                <div class="profile-hint" data-i18n="settings.idleHint">0 = desactivado: el motor no se apaga solo</div>
+                <input type="text" id="cfg-idle-min" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="25" data-i18n-aria="settings.idleMin" aria-label="Auto-stop (minutos)">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-threads"><span data-i18n="engine.threads">Hilos de CPU</span></label>
-                <input type="text" id="cfg-threads" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="6" aria-label="Hilos de CPU">
+                <input type="text" id="cfg-threads" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="6" data-i18n-aria="engine.threads" aria-label="Hilos de CPU">
               </div>
             </div>
             <div class="field-group">
@@ -2072,6 +2111,7 @@
               <span id="cfg-guard-slow">umbral lento: —</span>
               <span id="cfg-guard-power">power_safe: —</span>
             </div>
+            <div class="profile-hint" role="note"><span data-i18n="settings.backendNote">Backend GPU (solo lectura, se cambia en el TOML):</span> <code id="cfg-backend-id">—</code></div>
             <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.notifTitle">Avisos del sistema</span></div>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-enabled"> <span data-i18n="settings.notifEnabled">Avisos activados</span></label>
             <label class="cfg-check"><input type="checkbox" id="cfg-notif-ready"> <span data-i18n="settings.notifReady">Avisar al quedar listo</span></label>
@@ -2085,6 +2125,128 @@
             <div id="cfg-engine-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="models.localTitle">Modelos locales</span>
+            <span class="card-meta" id="models-meta">–</span>
+          </div>
+          <div class="card-body">
+            <div id="models-empty" class="empty-state" style="display: none;"><span data-i18n="models.empty">Sin modelos — importa un .gguf</span> <button class="tool-btn" type="button" id="btn-models-goto" onclick="gotoModelsCard()" data-i18n="models.goto">Ir a Modelos</button></div>
+            <div id="models-starter" class="profile-hint" style="display: none;" role="note"><span data-i18n="models.starterHint">¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.</span> <button class="tool-btn" type="button" id="btn-starter-fill" onclick="fillStarterModel()"><span data-i18n="models.starterFill">Rellenar ejemplo</span></button></div>
+            <div class="table-scroll">
+            <table class="models-table" id="models-table">
+              <thead>
+                <tr>
+                  <th data-i18n="models.colModel">Modelo</th>
+                  <th data-i18n="models.colSize">Tamaño</th>
+                  <th data-i18n="models.colState">Estado</th>
+                  <th><span class="sr-only">Acción</span></th>
+                </tr>
+              </thead>
+              <tbody id="models-tbody"></tbody>
+            </table>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="model-select">
+                <span data-i18n="models.active">Modelo activo para arrancar el motor</span>
+              </label>
+              <div class="select-wrapper">
+                <select id="model-select">
+                  <option value="">Cargando modelo...</option>
+                </select>
+              </div>
+              <div id="model-badges" class="model-dl-status" style="display: none;"></div>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">
+                <span data-i18n="models.importTitle">Importar desde tu disco</span>
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="tool-btn" type="button" id="btn-import-gguf" onclick="importGgufPick()" data-i18n-title="models.importBtnTitle" title="Importar archivo .gguf desde tu disco">
+                  <span id="import-gguf-label" data-i18n="models.importBtn">Importar .gguf…</span>
+                </button>
+                <button class="tool-btn" type="button" onclick="openModelsFolder()" data-i18n-title="models.folderTitle" title="Abrir carpeta models en explorador">
+                  <span data-i18n="models.folder">Carpeta</span>
+                </button>
+              </div>
+              <div id="import-pick-status" class="model-dl-status" style="display: none;"></div>
+            </div>
+
+            <details class="advanced">
+              <summary><span data-i18n="models.dlTitle">Descargar verificado (Hugging Face)</span></summary>
+              <div class="model-dl-row" style="margin-top: 8px;">
+                <input type="text" id="dl-repo" data-i18n-placeholder="models.dlRepoPh" data-i18n-aria="models.dlRepoPh" placeholder="owner/modelo-GGUF" autocomplete="off" spellcheck="false" aria-label="owner/modelo-GGUF">
+                <input type="text" id="dl-revision" data-i18n-placeholder="models.dlRevPh" data-i18n-aria="models.dlRevPh" placeholder="revisión (opcional)" autocomplete="off" spellcheck="false" style="max-width: 150px;" aria-label="revisión (opcional)">
+                <button class="tool-btn" type="button" id="btn-dl-advise" onclick="adviseModelDownload()" data-i18n-title="models.adviseTitle" title="Evaluar si cabe en tu equipo antes de descargar"><span data-i18n="models.advise">Evaluar</span> <span id="dl-advise-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+                <button class="tool-btn" type="button" id="btn-dl-start" onclick="startModelDownload()" data-i18n-title="models.dlBtnTitle" title="Descargar modelo desde el repositorio"><span data-i18n="models.download">Descargar</span></button>
+              </div>
+              <div id="model-advise-box" class="profile-hint" role="status" style="display: none; margin-top: 6px;"></div>
+              <div id="model-dl-section" style="display: none;">
+                <div id="model-dl-status" class="model-dl-status" role="status"></div>
+                <div class="model-dl-bar"><div id="model-dl-fill" class="model-dl-fill"></div></div>
+                <div style="margin-top: 6px;">
+                  <button class="tool-btn" type="button" id="btn-dl-cancel" onclick="cancelModelDownload()" data-i18n-title="models.cancelTitle" title="Cancelar la descarga en curso"><span data-i18n="models.cancel">Cancelar</span></button>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="card" id="cfg-update-card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="settings.updateTitle">Actualización</span>
+            <span class="card-meta" id="cfg-update-meta">–</span>
+          </div>
+          <div class="card-body">
+            <div id="cfg-update-status" class="telemetry-meta" role="status"></div>
+            <div id="model-dl-section-update" style="display: none; margin-top: 6px;">
+              <div class="model-dl-bar"><div id="cfg-update-fill" class="model-dl-fill"></div></div>
+            </div>
+            <div id="cfg-update-error" class="error-banner" role="alert"></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-update-check" onclick="checkUpdate()"><span data-i18n="settings.updateCheck">Buscar actualización</span> <span id="cfg-update-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+              <button class="tool-btn" type="button" id="cfg-update-retry" onclick="checkUpdate()" style="display: none;"><span data-i18n="settings.updateRetry">Reintentar</span></button>
+              <button class="tool-btn" type="button" id="cfg-update-dl" onclick="downloadUpdate()"><span data-i18n="settings.updateDownload">Descargar</span></button>
+              <button class="tool-btn" type="button" id="cfg-update-cancel" onclick="cancelUpdate()"><span data-i18n="settings.updateCancel">Cancelar</span></button>
+              <button class="btn btn-primary" type="button" id="cfg-update-restart" onclick="restartToInstall()" style="display: none;"><span data-i18n="settings.updateRestart">Reiniciar e instalar</span></button>
+            <label class="cfg-check" style="margin-top: 6px;"><input type="checkbox" id="cfg-update-startup" onchange="saveUpdateCfg()"> <span data-i18n="settings.updateStartup">Comprobar al arrancar</span></label>
+            <div class="profile-hint" data-i18n="settings.updateHint">La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.</div>
+            <div id="cfg-update-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+          </div>
+        </div>
+
+        <div class="card" id="cfg-data-card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="settings.dataTitle">Datos y desinstalación</span>
+          </div>
+          <div class="card-body">
+            <div class="profile-hint" data-i18n="settings.dataPaths">Tus modelos y ajustes viven aquí; la actualización no los toca.</div>
+            <div class="telemetry-meta"><code id="cfg-data-appdata">%APPDATA%\LocalMind</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-appdata" onclick="copyDataPath('appdata')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+              <button class="tool-btn" type="button" id="cfg-data-open-appdata" onclick="openDataFolder('appdata')"><span data-i18n="settings.dataOpenFolder">Abrir carpeta</span></button>
+            </div>
+            <div class="telemetry-meta" style="margin-top: 6px;"><code id="cfg-data-temp">%TEMP%\omni-update</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-temp" onclick="copyDataPath('temp')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+              <button class="tool-btn" type="button" id="cfg-data-open-temp" onclick="openDataFolder('temp')"><span data-i18n="settings.dataOpenFolder">Abrir carpeta</span></button>
+            </div>
+            <div class="field-label" style="margin-top: 8px;"><span data-i18n="settings.dataBackupHint">Copia de seguridad (PowerShell):</span></div>
+            <div class="telemetry-meta"><code id="cfg-data-backup-cmd">Copy-Item "$env:APPDATA\LocalMind" "$env:USERPROFILE\Desktop\LocalMind-backup" -Recurse</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-backup" onclick="copyDataPath('backup')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+            </div>
+            <div class="field-label" style="margin-top: 8px;"><span data-i18n="settings.dataUninstallHint">Desinstalar (remueve la app, conserva tus datos salvo que borres estas carpetas):</span></div>
+            <div class="telemetry-meta"><code id="cfg-data-uninstall-cmd">powershell -ExecutionPolicy Bypass -File packaging\uninstall.ps1</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-uninstall" onclick="copyDataPath('uninstall')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+            </div>
+            <div class="profile-hint warn" role="note" data-i18n="settings.dataKeyNote">Regenerar clave rige al reiniciar.</div>
+          </div>
+        </div>
+
         <div class="card" id="cfg-unavailable-card" style="display: none;">
           <div class="card-body">
             <div class="empty-state" data-i18n="settings.needsNew">Requiere la versión nueva del motor</div>
@@ -2095,7 +2257,7 @@
   </main>
   <script>
     /* ============================================================
-       LocalMind Studio — UI logic
+       OMNI — UI logic
        Behaviour contract (frozen; see docs/ui/notes.md):
        - /api/status poll 800 ms · /api/metrics poll 2 s
        - download poll 1500 ms · usage lazy poll 30 s (visible tab only)
@@ -2112,7 +2274,10 @@
       es: {
         'nav.panel': 'Panel', 'nav.chat': 'Chat', 'nav.models': 'Modelos',
         'nav.usage': 'Uso', 'nav.logs': 'Logs', 'nav.specs': 'Specs',
+        'nav.conexion': 'Conexión',
         'nav.settings': 'Ajustes',
+        'conexion.title': 'Conexión',
+        'conexion.sub': 'Modo de esta PC, red local y uso del gateway.',
         'lang.label': 'Idioma',
         'hdr.stopped': 'En reposo', 'hdr.starting': 'Cargando…',
         'hdr.online': 'Activo', 'hdr.error': 'Error al iniciar',
@@ -2155,7 +2320,7 @@
         'specs.rowCpu': 'Procesador (CPU)',
         'specs.rowKv': 'KV Cache',
         'specs.rowEngine': 'Motor de Inferencia',
-        'logs.boot': 'LocalMind Studio inicializado. Presiona \'Iniciar Motor\' para arrancar el servidor.',
+        'logs.boot': 'OMNI inicializado. Presiona \'Iniciar Motor\' para arrancar el servidor.',
         'telemetry.title': 'Telemetría', 'telemetry.live': 'Telemetría en vivo',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Caché',
         'telemetry.requests': 'Solicitudes',
@@ -2163,7 +2328,11 @@
         'telemetry.samples': 'muestras: {list} t/s',
         'telemetry.slowTitle': 'Motor lento',
         'telemetry.slowText': 'El motor cargó lento ({median} t/s); puede mejorarse reiniciándolo una vez',
+        'telemetry.slowRestart': 'Reiniciar motor',
         'telemetry.gpuCheck': 'Verificación GPU',
+        'telemetry.genRate': 'Gen t/s',
+        'telemetry.pidLabel': 'PID',
+        'telemetry.pidActive': 'Activo',
         'launch.title': 'Accesos',
         'launch.folder': 'Carpeta de Trabajo (Proyecto)',
         'launch.folderTitle': 'Elegir directorio donde abrirán OMP y Pi',
@@ -2183,11 +2352,11 @@
         'launch.taskPh': 'Describe la tarea…',
         'launch.web': 'Interfaz Web Externa',
         'launch.webDesc': 'Abrir UI oficial de llama.cpp en tu navegador por defecto',
-        'chat.title': 'LocalMind Chat', 'chat.clear': 'Limpiar',
-        'chat.welcome': 'Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con LocalMind.',
-        'chat.reset': 'Chat reiniciado. Escribe una pregunta para consultar con LocalMind.',
+        'chat.title': 'OMNI Chat', 'chat.clear': 'Limpiar',
+        'chat.welcome': 'Inicia el modelo desde la pestaña <b>Panel</b> para comenzar una conversación directa con OMNI.',
+        'chat.reset': 'Chat reiniciado. Escribe una pregunta para consultar con OMNI.',
         'chat.placeholder': 'Escribe tu mensaje... (Enter para enviar, Shift+Enter para nueva línea)',
-        'chat.send': 'Enviar mensaje', 'chat.stop': 'Detener generación',
+        'chat.effort': 'Razonamiento',
         'chat.hint': 'Presiona Shift + Enter para saltos de línea',
         'chat.hintReady': 'Listo para consultar',
         'chat.hintLoading': 'Cargando tensores en GPU...',
@@ -2198,10 +2367,26 @@
         'chat.thinking': 'Proceso de razonamiento',
         'chat.stopped': 'detenido',
         'chat.error': 'Error al comunicarse con el motor: ',
+        'chat.send': 'Enviar mensaje',
+        'chat.stop': 'Detener generación',
+        'chat.welcomeEmpty': 'Aún no hay modelos: importa un .gguf o evalúa una descarga verificada en Ajustes.',
+        'chat.welcomeGuest': 'Como Guest usas el motor de tu Oráculo: configúralo en la pestaña Conexión.',
         'models.title': 'Modelos',
         'models.sub': 'Pesos GGUF locales, importación y descarga verificada.',
         'models.localTitle': 'Modelos locales',
-        'models.empty': 'Todavía no hay modelos. Importa un .gguf o descarga uno verificado.',
+        'models.empty': 'Sin modelos — importa un .gguf',
+        'models.goto': 'Ir a Modelos',
+        'models.starterHint': '¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.',
+        'models.starterFill': 'Rellenar ejemplo',
+        'models.advise': 'Evaluar',
+        'models.adviseTitle': 'Evaluar si cabe en tu equipo antes de descargar',
+        'models.adviseChecking': 'Evaluando compatibilidad con tu equipo…',
+        'models.advise_fits': 'Cabe en tu GPU',
+        'models.advise_tight': 'Cabe justo (KV en RAM)',
+        'models.advise_no_fit': 'No cabe en tu equipo',
+        'models.advise_unknown': 'Sin dato de tu GPU',
+        'models.advise_no_gguf': 'Repo sin modelos',
+        'models.advise_no_file': 'Fichero no encontrado',
         'models.searching': 'Buscando modelos...',
         'models.count': '{n} modelos',
         'models.colModel': 'Modelo', 'models.colSize': 'Tamaño',
@@ -2254,7 +2439,7 @@
         'specs.title': 'Especificaciones',
         'specs.sub': 'Hardware detectado y cómo conectarse al motor.',
         'specs.hwTitle': 'Hardware Detectado & Motor de Inferencia',
-        'specs.hwBody': 'LocalMind detecta dinámicamente tus aceleradores gráficos y procesador para ejecutar modelos de lenguaje localmente con máxima eficiencia mediante offload Vulkan y memoria unificada.',
+        'specs.hwBody': 'Equipo y motor en uso.',
         'specs.colComponent': 'Componente', 'specs.colDevice': 'Dispositivo Detectado',
         'specs.colState': 'Estado / Capacidad',
         'specs.rowAccel': 'Aceleración Gráfica',
@@ -2276,9 +2461,32 @@
         'err.profilesBad': 'Formato incorrecto',
         'err.profilesRead': 'Error al leer el archivo: ',
         'err.engineOff': 'Debes iniciar el motor desde el Panel antes de enviar mensajes.',
+        'err.engineOffGuest': 'Como Guest no tienes motor local: configúralo con tu Oráculo en la pestaña Conexión.',
         'err.startFail': 'Error al iniciar: ',
         'common.copied': 'Copiado',
+        'common.copy': 'Copiar',
+        'common.retry': 'Reintentar',
+        'common.dismiss': 'Cerrar',
+        'toast.copied': 'Copiado al portapapeles.',
+        'toast.copyFail': 'No se pudo copiar: el portapapeles no está disponible.',
+        'err.friendlyVram': 'Sin VRAM suficiente: usa un modelo más pequeño o cierra otras apps que usen la GPU.',
+        'err.friendlyPort': 'El puerto 17860 está ocupado o sin permiso: cierra la otra app o reinicia.',
+        'err.friendlyLog': 'Revisa el registro del motor (Panel → Proceso) y el log en disco para más detalle.',
+        'err.friendlyAdvise': 'Pulsa Evaluar en Ajustes → Modelos para comprobar si cabe en tu equipo antes de descargar.',
         'profile.dynHint': 'Perfil dinámico: ',
+        'profile.ctxNative': '(nativo del modelo: {n}K máx.)',
+        'chat.effortNoThinking': 'Este modelo no trae razonamiento: el nivel se ignora y responde directo.',
+        'threads.rec': '{n} hilos — recomendado para tu CPU',
+        'threads.quiet': '{n} hilos — silencioso',
+        'threads.all': '{n} hilos — todos los lógicos',
+        'profile.fbVelLabel': 'Chat diario — el más rápido (32K, todo en GPU)',
+        'profile.fbVelHint': 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).',
+        'profile.fbMultiLabel': 'Multi-documento — varios PDFs y archivos (64K)',
+        'profile.fbMultiHint': 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.',
+        'profile.fbLibrosLabel': 'Libros y repos largos — 128K de contexto',
+        'profile.fbLibrosHint': 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.',
+        'profile.fbMaxLabel': 'Máximo contexto físico — 262K (el límite del modelo)',
+        'profile.fbMaxHint': 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.',
         'settings.title': 'Ajustes',
         'settings.sub': 'Perfiles, generación, motor y avisos. Los cambios que afectan al motor se aplican al próximo arranque.',
         'settings.needsNew': 'Requiere la versión nueva del motor',
@@ -2298,6 +2506,8 @@
         'settings.profileDup': 'Duplicar',
         'settings.profileDel': 'Eliminar',
         'settings.profileConfirmDel': '¿Eliminar el perfil "{id}"? Pulsa de nuevo para confirmar',
+        'settings.profileCopySuffix': ' (copia)',
+        'settings.profileCopyId': '-copia',
         'settings.current': 'actual',
         'settings.genTitle': 'Generación',
         'settings.temperature': 'Temperatura',
@@ -2309,6 +2519,7 @@
         'settings.guardsTitle': 'Protecciones de arranque',
         'settings.idleMin': 'Auto-stop (minutos)',
         'settings.idleHint': '0 = desactivado: el motor no se apaga solo',
+        'settings.backendNote': 'Backend GPU (solo lectura, se cambia en el TOML):',
         'settings.notifTitle': 'Avisos del sistema',
         'settings.notifEnabled': 'Avisos activados',
         'settings.notifReady': 'Avisar al quedar listo',
@@ -2316,12 +2527,73 @@
         'settings.notifAutostop': 'Avisar antes del auto-stop',
         'settings.save': 'Guardar',
         'settings.saved': 'Guardado',
+        'settings.roleTitle': 'Rol: qué es esta PC',
+        'settings.roleOraculo': 'Oráculo',
+        'settings.roleOraculoDesc': 'Tiene el modelo: computa, sirve y usa en esta PC.',
+        'settings.roleGuest': 'Guest',
+        'settings.roleGuestDesc': 'Sin modelo: chatea y lanza CLIs contra el Oráculo.',
+        'settings.roleRestart': 'Exponer en LAN rige al reiniciar la app.',
+        'settings.roleGroup': 'Rol',
+        'settings.lanExposed': 'Exponer en la LAN',
+        'settings.lanPlainWarn': 'La LAN va en HTTP sin cifrar: clave y prompts visibles en tu red. Solo en redes de confianza.',
+        'onboard.title': 'Elige el rol de esta PC',
+        'onboard.sub': 'Puedes cambiarlo cuando quieras desde el encabezado o Conexión.',
+        'onboard.later': 'Decidir después',
+        'onboard.deferredHint': 'Aún no elegiste el rol de esta PC: Oráculo (tiene el modelo) o Guest (usa el de otro). Cámbialo aquí cuando quieras.',
+        'settings.serverIps': 'Esta PC en la LAN',
+        'settings.serverPairing': 'Emparejar (QR o copiar)',
+        'settings.serverCopy': 'Copiar',
+        'settings.serverShow': 'Mostrar',
+        'settings.serverHide': 'Ocultar',
+        'settings.serverRotate': 'Regenerar clave',
+        'settings.serverRotateWarn': 'Clave rotada: reinicia para que tome efecto.',
+        'settings.serverCopied': 'Clave copiada al portapapeles.',
+        'settings.serverCopyFail': 'No se pudo copiar: el portapapeles no está disponible.',
+        'settings.serverRefresh': 'Actualizar',
+        'settings.clientUrl': 'URL del Servidor',
+        'settings.clientKey': 'Clave',
+        'settings.clientTest': 'Probar',
+        'settings.clientSave': 'Guardar remoto',
+        'settings.clientOk': 'Remoto OK',
         'settings.saving': 'Guardando…',
+        'settings.updateTitle': 'Actualización',
+        'settings.updateCheck': 'Buscar actualización',
+        'settings.updateDownload': 'Descargar',
+        'settings.updateCancel': 'Cancelar',
+        'settings.updateStartup': 'Comprobar al arrancar',
+        'settings.updateHint': 'La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.',
+        'settings.updateIdle': 'Al día (v{cur}).',
+        'settings.updateAvailable': 'Disponible OMNI {ver}: pulsa Descargar.',
+        'settings.updateDownloading': 'Descargando OMNI {ver}… {pct}%.',
+        'settings.updateReady': 'OMNI {ver} listo: reinicia la app para instalarlo.',
+        'settings.updateChecking': 'Comprobando…',
+        'settings.updateInstalling': 'Instalando OMNI {ver}… la app se reabrirá sola.',
+        'settings.updateRestart': 'Reiniciar e instalar',
+        'settings.updateRestarting': 'Cerrando para instalar… la app se reabrirá sola.',
+        'settings.updateError': 'No se pudo actualizar: {msg}',
+        'settings.updateRetry': 'Reintentar',
+        'settings.dataTitle': 'Datos y desinstalación',
+        'settings.dataPaths': 'Tus modelos y ajustes viven aquí; la actualización no los toca.',
+        'settings.dataCopyPath': 'Copiar ruta',
+        'settings.dataOpenFolder': 'Abrir carpeta',
+        'settings.dataBackupHint': 'Copia de seguridad (PowerShell):',
+        'settings.dataBackupCmd': 'Copy-Item "$env:APPDATA\\LocalMind" "$env:USERPROFILE\\Desktop\\LocalMind-backup" -Recurse',
+        'settings.dataUninstallHint': 'Desinstalar (remueve la app, conserva tus datos salvo que borres estas carpetas):',
+        'settings.dataUninstallCmd': 'powershell -ExecutionPolicy Bypass -File packaging\\uninstall.ps1',
+        'settings.dataKeyNote': 'Regenerar clave rige al reiniciar.',
+        'settings.logFailed': 'El log en disco no se escribe (disco lleno o sin permiso): los errores pueden perderse.',
+        'unlock.title': 'Desbloquear',
+        'unlock.sub': 'Esta UI está en red: ingresa la clave del Servidor.',
+        'unlock.go': 'Entrar',
+        'unlock.bad': 'Clave incorrecta.',
       },
       en: {
         'nav.panel': 'Dashboard', 'nav.chat': 'Chat', 'nav.models': 'Models',
         'nav.usage': 'Usage', 'nav.logs': 'Logs', 'nav.specs': 'Specs',
+        'nav.conexion': 'Connect',
         'nav.settings': 'Settings',
+        'conexion.title': 'Connection',
+        'conexion.sub': 'This PC mode, local network and gateway usage.',
         'lang.label': 'Language',
         'hdr.stopped': 'Idle', 'hdr.starting': 'Loading…',
         'hdr.online': 'Running', 'hdr.error': 'Failed to start',
@@ -2332,7 +2604,6 @@
         'strip.verifying': 'Verifying GPU…',
         'strip.loadPct': 'Loading… {pct}% (ETA {eta})',
         'strip.loadSecs': 'Loading… {s}s',
-        'telemetry.gpuFail': 'GPU check: FAILED',
         'models.fallbackName': 'model',
         'panel.title': 'Dashboard',
         'panel.sub': 'Local engine, telemetry and shortcuts at a glance.',
@@ -2364,7 +2635,7 @@
         'specs.rowCpu': 'Processor (CPU)',
         'specs.rowKv': 'KV Cache',
         'specs.rowEngine': 'Inference Engine',
-        'logs.boot': 'LocalMind Studio initialized. Press \'Start Engine\' to boot the server.',
+        'logs.boot': 'OMNI initialized. Press \'Start Engine\' to boot the server.',
         'telemetry.title': 'Telemetry', 'telemetry.live': 'Live telemetry',
         'telemetry.tokens': 'Tokens', 'telemetry.cache': 'Cache',
         'telemetry.requests': 'Requests',
@@ -2372,7 +2643,12 @@
         'telemetry.samples': 'samples: {list} t/s',
         'telemetry.slowTitle': 'Slow engine',
         'telemetry.slowText': 'The engine loaded slowly ({median} t/s); a single restart may improve it',
+        'telemetry.slowRestart': 'Restart engine',
         'telemetry.gpuCheck': 'GPU check',
+        'telemetry.genRate': 'Gen t/s',
+        'telemetry.gpuFail': 'GPU check: FAILED',
+        'telemetry.pidLabel': 'PID',
+        'telemetry.pidActive': 'Running',
         'launch.title': 'Shortcuts',
         'launch.folder': 'Work Folder (Project)',
         'launch.folderTitle': 'Choose the directory where OMP and Pi will open',
@@ -2392,11 +2668,11 @@
         'launch.taskPh': 'Describe the task…',
         'launch.web': 'External Web UI',
         'launch.webDesc': 'Open the official llama.cpp UI in your default browser',
-        'chat.title': 'LocalMind Chat', 'chat.clear': 'Clear',
-        'chat.welcome': 'Start the model from the <b>Dashboard</b> tab to begin a direct conversation with LocalMind.',
-        'chat.reset': 'Chat restarted. Type a question to ask LocalMind.',
+        'chat.title': 'OMNI Chat', 'chat.clear': 'Clear',
+        'chat.welcome': 'Start the model from the <b>Dashboard</b> tab to begin a direct conversation with OMNI.',
+        'chat.reset': 'Chat restarted. Type a question to ask OMNI.',
         'chat.placeholder': 'Type your message... (Enter to send, Shift+Enter for a new line)',
-        'chat.send': 'Send message', 'chat.stop': 'Stop generation',
+        'chat.effort': 'Reasoning',
         'chat.hint': 'Press Shift + Enter for line breaks',
         'chat.hintReady': 'Ready for queries',
         'chat.hintLoading': 'Loading tensors onto GPU...',
@@ -2407,10 +2683,26 @@
         'chat.thinking': 'Reasoning process',
         'chat.stopped': 'stopped',
         'chat.error': 'Error talking to the engine: ',
+        'chat.send': 'Send message',
+        'chat.stop': 'Stop generation',
+        'chat.welcomeEmpty': 'No models yet: import a .gguf or check a verified download in Settings.',
+        'chat.welcomeGuest': 'As a Guest you use your Oráculo engine: set it up in the Connection tab.',
         'models.title': 'Models',
         'models.sub': 'Local GGUF weights, import and verified download.',
         'models.localTitle': 'Local models',
-        'models.empty': 'No models yet. Import a .gguf or download a verified one.',
+        'models.empty': 'No models — import a .gguf',
+        'models.goto': 'Go to Models',
+        'models.starterHint': 'First time? Start with a small one (2-3 GB, runs on almost any GPU), then move up to 27B if your VRAM allows it.',
+        'models.starterFill': 'Fill example',
+        'models.advise': 'Check fit',
+        'models.adviseTitle': 'Check if it fits your machine before downloading',
+        'models.adviseChecking': 'Checking fit on your machine…',
+        'models.advise_fits': 'Fits your GPU',
+        'models.advise_tight': 'Tight fit (KV on RAM)',
+        'models.advise_no_fit': 'Does not fit your machine',
+        'models.advise_unknown': 'No GPU data',
+        'models.advise_no_gguf': 'Repo has no models',
+        'models.advise_no_file': 'File not found',
         'models.searching': 'Looking for models...',
         'models.count': '{n} models',
         'models.colModel': 'Model', 'models.colSize': 'Size',
@@ -2463,7 +2755,7 @@
         'specs.title': 'Specifications',
         'specs.sub': 'Detected hardware and how to reach the engine.',
         'specs.hwTitle': 'Detected Hardware & Inference Engine',
-        'specs.hwBody': 'LocalMind dynamically detects your graphics accelerators and processor to run language models locally at full efficiency with Vulkan offload and unified memory.',
+        'specs.hwBody': 'Machine and engine in use.',
         'specs.colComponent': 'Component', 'specs.colDevice': 'Detected Device',
         'specs.colState': 'State / Capacity',
         'specs.rowAccel': 'Graphics Acceleration',
@@ -2485,8 +2777,32 @@
         'err.profilesBad': 'Bad format',
         'err.profilesRead': 'Error reading the file: ',
         'err.engineOff': 'Start the engine from the Dashboard before sending messages.',
+        'err.engineOffGuest': 'As a Guest you have no local engine: set it up with your Oráculo in the Connection tab.',
         'err.startFail': 'Failed to start: ',
+        'common.copied': 'Copied',
+        'common.copy': 'Copy',
+        'common.retry': 'Retry',
+        'common.dismiss': 'Dismiss',
+        'toast.copied': 'Copied to clipboard.',
+        'toast.copyFail': 'Could not copy: clipboard unavailable.',
+        'err.friendlyVram': 'Not enough VRAM: use a smaller model or close other apps using the GPU.',
+        'err.friendlyPort': 'Port 17860 is busy or denied: close the other app or restart.',
+        'err.friendlyLog': 'Check the engine log (Dashboard → Process) and the disk log for details.',
+        'err.friendlyAdvise': 'Press Evaluate in Settings → Models to check fit before downloading.',
         'profile.dynHint': 'Dynamic profile: ',
+        'profile.ctxNative': '(model native: {n}K max)',
+        'chat.effortNoThinking': 'This model has no reasoning: the level is ignored and it answers directly.',
+        'threads.rec': '{n} threads — recommended for your CPU',
+        'threads.quiet': '{n} threads — quiet',
+        'threads.all': '{n} threads — all logical',
+        'profile.fbVelLabel': 'Daily chat — fastest (32K, all in GPU)',
+        'profile.fbVelHint': 'Model and conversation memory 100% in VRAM (16 GB). Top speed (~17 t/s). For chat, questions and short code (<~30k words).',
+        'profile.fbMultiLabel': 'Multi-document — several PDFs and files (64K)',
+        'profile.fbMultiHint': 'Model in VRAM + part of the KV cache in DDR5 RAM. Trades ~5% speed for ~60k words: several documents or a medium repo.',
+        'profile.fbLibrosLabel': 'Long books and repos — 128K context',
+        'profile.fbLibrosHint': 'Extended memory in DDR5 RAM. ~120k words (a whole book). Speed drops ~15-20% as part of the prompt travels over DDR5.',
+        'profile.fbMaxLabel': 'Max physical context — 262K (model limit)',
+        'profile.fbMaxHint': 'The native 262,144 tokens (~200k words). Slowest and hardest on PSU/CPU: extreme cases only.',
         'settings.title': 'Settings',
         'settings.sub': 'Profiles, generation, engine and notices. Engine-affecting changes apply on the next start.',
         'settings.needsNew': 'Requires the new engine version',
@@ -2506,6 +2822,8 @@
         'settings.profileDup': 'Duplicate',
         'settings.profileDel': 'Delete',
         'settings.profileConfirmDel': 'Delete profile "{id}"? Click again to confirm',
+        'settings.profileCopySuffix': ' (copy)',
+        'settings.profileCopyId': '-copy',
         'settings.genTitle': 'Generation',
         'settings.temperature': 'Temperature',
         'settings.topP': 'Top-p',
@@ -2516,6 +2834,7 @@
         'settings.guardsTitle': 'Start guardrails',
         'settings.idleMin': 'Auto-stop (minutes)',
         'settings.idleHint': '0 = disabled: the engine never stops itself',
+        'settings.backendNote': 'GPU backend (read-only, set in the TOML):',
         'settings.notifTitle': 'System notices',
         'settings.notifEnabled': 'Notices enabled',
         'settings.notifReady': 'Notify when ready',
@@ -2523,7 +2842,65 @@
         'settings.notifAutostop': 'Notify before auto-stop',
         'settings.save': 'Save',
         'settings.saved': 'Saved',
+        'settings.roleTitle': 'Role: what this PC is',
+        'settings.roleOraculo': 'Oráculo',
+        'settings.roleOraculoDesc': 'Holds the model: computes, serves and uses on this PC.',
+        'settings.roleGuest': 'Guest',
+        'settings.roleGuestDesc': 'No model: chats and launches CLIs against the Oráculo.',
+        'settings.roleRestart': 'LAN exposure applies after restarting the app.',
+        'settings.roleGroup': 'Role',
+        'settings.lanExposed': 'Expose on LAN',
+        'settings.lanPlainWarn': 'LAN is plain HTTP: key and prompts are visible on your network. Trusted networks only.',
+        'onboard.title': 'Choose this PC role',
+        'onboard.sub': 'You can change it anytime from the header or Connection.',
+        'onboard.later': 'Decide later',
+        'onboard.deferredHint': 'You have not chosen this PC role yet: Oráculo (holds the model) or Guest (uses someone else\u2019s). Change it here anytime.',
+        'settings.serverIps': 'This PC on the LAN',
+        'settings.serverPairing': 'Pair (QR or copy)',
+        'settings.serverCopy': 'Copy',
+        'settings.serverShow': 'Show',
+        'settings.serverHide': 'Hide',
+        'settings.serverRotate': 'Rotate key',
+        'settings.serverRotateWarn': 'Key rotated: restart to take effect.',
+        'settings.serverCopied': 'Key copied to clipboard.',
+        'settings.serverCopyFail': 'Could not copy: clipboard unavailable.',
+        'settings.serverRefresh': 'Refresh',
+        'settings.clientUrl': 'Server URL',
+        'settings.clientKey': 'Key',
+        'settings.clientTest': 'Test',
+        'settings.clientSave': 'Save remote',
+        'settings.clientOk': 'Remote OK',
         'settings.saving': 'Saving…',
+        'settings.updateTitle': 'Update',
+        'settings.updateCheck': 'Check for update',
+        'settings.updateDownload': 'Download',
+        'settings.updateCancel': 'Cancel',
+        'settings.updateStartup': 'Check on startup',
+        'settings.updateHint': 'The update installs when you restart the app; your models and settings are kept.',
+        'settings.updateIdle': 'Up to date (v{cur}).',
+        'settings.updateAvailable': 'OMNI {ver} available: press Download.',
+        'settings.updateDownloading': 'Downloading OMNI {ver}… {pct}%.',
+        'settings.updateReady': 'OMNI {ver} ready: restart the app to install it.',
+        'settings.updateChecking': 'Checking…',
+        'settings.updateInstalling': 'Installing OMNI {ver}… the app will reopen itself.',
+        'settings.updateRestarting': 'Closing to install… the app will reopen itself.',
+        'settings.updateRestart': 'Restart & install',
+        'settings.updateError': 'Could not update: {msg}',
+        'settings.updateRetry': 'Retry',
+        'settings.dataTitle': 'Data & uninstall',
+        'settings.dataPaths': 'Your models and settings live here; updates never touch them.',
+        'settings.dataCopyPath': 'Copy path',
+        'settings.dataOpenFolder': 'Open folder',
+        'settings.dataBackupHint': 'Backup (PowerShell):',
+        'settings.dataBackupCmd': 'Copy-Item "$env:APPDATA\\LocalMind" "$env:USERPROFILE\\Desktop\\LocalMind-backup" -Recurse',
+        'settings.dataUninstallHint': 'Uninstall (removes the app, keeps your data unless you delete these folders):',
+        'settings.dataUninstallCmd': 'powershell -ExecutionPolicy Bypass -File packaging\\uninstall.ps1',
+        'settings.dataKeyNote': 'Regenerating the key applies after restart.',
+        'settings.logFailed': 'Disk log is not being written (disk full or no permission): errors may be lost.',
+        'unlock.title': 'Unlock',
+        'unlock.sub': 'This UI is on the network: enter the Server key.',
+        'unlock.go': 'Enter',
+        'unlock.bad': 'Wrong key.',
         'settings.current': 'current',
         'common.copied': 'Copied',
       }
@@ -2548,7 +2925,9 @@
     // Deep link via location hash (e.g. #tab=chat&lang=en, or #chat).
     // The server only serves exact "/" (query strings 404), so state travels
     // in the fragment. Used by screenshots and manual deep-linking.
-    const KNOWN_TABS = ['dashboard', 'chat', 'models', 'usage', 'terminal', 'info', 'settings'];
+    const KNOWN_TABS = ['dashboard', 'chat', 'conexion', 'settings'];
+    // Atajos viejos (7 tabs) → su hogar nuevo. Nunca se pierde un deep link.
+    const TAB_ALIASES = { models: 'settings', usage: 'conexion', terminal: 'dashboard', info: 'dashboard' };
     function parseDeepLink() {
       try {
         const h = (typeof window !== 'undefined' && window.location && window.location.hash) || '';
@@ -2560,6 +2939,13 @@
           else if (kv[0] === 'lang' && (kv[1] === 'es' || kv[1] === 'en')) out.lang = kv[1];
           else if (kv.length === 1 && KNOWN_TABS.indexOf(part) >= 0) out.tab = part;
         });
+        if (out.tab === undefined) {
+          const bare = h.replace(/^#/, '').split('&');
+          for (const part of bare) {
+            const k = part.split('=')[0] === 'tab' ? part.split('=')[1] : part;
+            if (k && TAB_ALIASES[k]) { out.tab = TAB_ALIASES[k]; break; }
+          }
+        }
         return out;
       } catch (e) { return {}; }
     }
@@ -2584,7 +2970,8 @@
           if (!key || el.id === 'project-folder-display') return;
           // <option> labels: translate the text, never the value attribute.
           if (el.tagName === 'OPTION') { el.textContent = T(key); return; }
-          el.innerHTML = T(key);
+          if (key === 'chat.welcome') { el.innerHTML = T(key); return; }
+          el.textContent = T(key);
         });
         document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
           el.setAttribute('placeholder', T(el.getAttribute('data-i18n-placeholder')));
@@ -2595,6 +2982,22 @@
         document.querySelectorAll('[data-i18n-aria]').forEach(el => {
           el.setAttribute('aria-label', T(el.getAttribute('data-i18n-aria')));
         });
+        // P1 producción: etiquetas dinámicas que el HTML deja con texto fijo
+        // (scroll, hint de chat, métricas y estado) se re-etiquetan aquí para
+        // que el cambio de idioma no deje fósiles en inglés/español.
+        try {
+          const sc = document.getElementById('btn-scroll-toggle');
+          if (sc) sc.textContent = autoScrollTerminal ? T('logs.scrollOn') : T('logs.scrollOff');
+        } catch (e) {}
+        try {
+          const sk = document.getElementById('strip-text');
+          if (sk && sk.getAttribute && sk.getAttribute('data-i18n-ph') && lastStatus == null) sk.textContent = T(sk.getAttribute('data-i18n-ph'));
+        } catch (e) {}
+        try {
+          const ch = document.getElementById('chat-status-hint');
+          if (ch && ch.getAttribute && ch.getAttribute('data-i18n') && lastStatus == null) ch.textContent = T(ch.getAttribute('data-i18n'));
+        } catch (e) {}
+        try { renderChatWelcome(); } catch (e) {}
       } catch (e) {}
       try { setProjectFolder(selectedProjectCwd); } catch (e) {}
       try {
@@ -2606,8 +3009,8 @@
         else renderStatus({ status: 'stopped' });
       } catch (e) {}
       try { renderModelsTable(lastModelsCache); } catch (e) {}
+      try { renderRoleDeferredHint(); } catch (e) {}
     }
-
     let isServerRunning = false;
     let autoScrollTerminal = true;
     const chatHistory = [];
@@ -2620,24 +3023,88 @@
     let lastStatus = null;
     // Non-blocking toast channel. All user-facing errors go here;
     // the UI never blocks on a modal dialog.
-    function toast(msg, kind) {
+    function toast(msg, kind, opts) {
       try {
         const region = document.getElementById('toast-region');
-        if (!region) return;
+        if (!region) return null;
+        const o = opts || {};
         const el = document.createElement('div');
-        el.className = 'toast' + (kind === 'error' ? ' error' : '');
-        el.textContent = msg;
+        const isErr = kind === 'error';
+        el.className = 'toast' + (isErr ? ' error' : '');
+        el.setAttribute('role', isErr ? 'alert' : 'status');
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = msg;
+        el.appendChild(body);
+        let timer = 0;
+        const close = () => { try { if (timer) clearTimeout(timer); } catch (e) {} try { if (el.parentNode === region) region.removeChild(el); } catch (e) {} };
+        if (isErr || o.actions || o.sticky) {
+          const row = document.createElement('div');
+          row.className = 'toast-actions';
+          const mkBtn = (label, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'tool-btn';
+            b.textContent = label;
+            b.addEventListener('click', (ev) => { try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (e) {} try { fn(); } catch (e2) {} });
+            row.appendChild(b);
+            return b;
+          };
+          const copySrc = (o.copyText != null) ? String(o.copyText) : String(msg);
+          mkBtn(T('common.copy'), () => {
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(copySrc).then(() => toast(T('toast.copied')), () => toast(T('toast.copyFail'), 'error'));
+              else toast(T('toast.copyFail'), 'error');
+            } catch (e) { toast(T('toast.copyFail'), 'error'); }
+          });
+          if (typeof o.onRetry === 'function') mkBtn(T('common.retry'), () => { close(); o.onRetry(); });
+          if (Array.isArray(o.actions)) o.actions.forEach(a => { if (a && a.label && typeof a.fn === 'function') mkBtn(a.label, a.fn); });
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.className = 'tool-btn toast-close';
+          x.setAttribute('aria-label', T('common.dismiss'));
+          x.textContent = '×';
+          x.addEventListener('click', close);
+          row.appendChild(x);
+          el.appendChild(row);
+        }
         region.appendChild(el);
-        setTimeout(() => { try { region.removeChild(el); } catch (e) {} }, 4500);
-      } catch (e) {}
+        if (!(isErr || o.sticky)) timer = setTimeout(close, 4500);
+        else if (typeof o.ms === 'number' && isFinite(o.ms) && o.ms > 0) timer = setTimeout(close, o.ms);
+        else timer = setTimeout(close, 30000);
+        return close;
+      } catch (e) { return null; }
     }
-    function showToast(msg, kind) { toast(msg, kind); }
+    function showToast(msg, kind, opts) { return toast(msg, kind, opts); }
+    // Substrings conocidos (crudos del backend) → mensaje T() es/en + acción.
+    // Orden: VRAM > puerto 17860 > log > Evaluar. Devuelve '' si no hay match.
+    function friendlyEngineHint(raw) {
+      try {
+        const s = String(raw || '').toLowerCase();
+        if (!s) return '';
+        if (s.indexOf('vram') >= 0 || s.indexOf('out of memory') >= 0 || s.indexOf('memoria') >= 0) return T('err.friendlyVram');
+        if (s.indexOf('17860') >= 0 || s.indexOf('puerto') >= 0 || s.indexOf('port') >= 0 || s.indexOf('bind') >= 0 || s.indexOf('eaddrinuse') >= 0) return T('err.friendlyPort');
+        if (s.indexOf('evaluar') >= 0 || s.indexOf('evaluate') >= 0 || s.indexOf('advise') >= 0) return T('err.friendlyAdvise');
+        if (s.indexOf('log') >= 0) return T('err.friendlyLog');
+        return '';
+      } catch (e) { return ''; }
+    }
+    // Error de motor con prefijo traducido + hint + toast sticky con acciones.
+    function toastEngineError(raw, retryFn) {
+      const hint = friendlyEngineHint(raw);
+      const full = T('err.startFail') + (raw || '') + (hint ? ' ' + hint : '');
+      toast(full, 'error', { sticky: true, copyText: String(raw || ''), onRetry: (typeof retryFn === 'function') ? retryFn : undefined });
+      return full;
+    }
 
     // Chat Persistence
     const CHAT_STORAGE_KEY = 'localmind_chat_v1';
 
     function saveChatHistory() {
       try {
+        // Tope anti-cuota (auditoría): sin tope, sesiones eternas matan el
+        // localStorage de 5 MB y mueren en silencio. 300 mensajes sobran.
+        if (chatHistory.length > 300) chatHistory.splice(0, chatHistory.length - 300);
         localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatHistory));
       } catch (e) {}
     }
@@ -2677,15 +3144,20 @@
     function appendLogLine(line) {
       const box = document.getElementById('terminal-stream');
       if (!box || !line) return;
-      box.textContent += line + '\n';
-      if (box.textContent.length > 200 * 1024) {
-        box.textContent = box.textContent.slice(box.textContent.length - 200 * 1024);
+      // Nodos de texto (auditoría de rendimiento): `textContent +=` re-serializa
+      // los ~200 KB en CADA línea (O(n²) con el motor escupiendo logs al cargar).
+      box.appendChild(document.createTextNode(line + '\n'));
+      // Poda por conteo de nodos (O(1); medir longitud sería O(n) otra vez).
+      // ~1500 líneas ≈ 300 KB peor caso; el tope histórico era 200 KB.
+      while (box.childNodes.length > 1500) {
+        box.removeChild(box.firstChild);
       }
       if (autoScrollTerminal) {
         box.scrollTop = box.scrollHeight;
       }
     }
 
+    let eventsSource = null;
     function connectEvents() {
       if (eventsSource) {
         try { eventsSource.close(); } catch (e) {}
@@ -2706,8 +3178,11 @@
       } catch (e) {}
     }
 
+    let telemetrySeq = 0;
     async function pollTelemetry() {
+      const tseq = ++telemetrySeq;
       const m = await api.getMetrics();
+      if (tseq !== telemetrySeq) return;
       const set = (id, v) => {
         const el = document.getElementById(id);
         if (el) el.textContent = v;
@@ -2730,16 +3205,58 @@
       set('tel-requests', m.requests_processing != null ? String(m.requests_processing) : '—');
     }
 
-    // Tab Navigation
-    function switchTab(name) {
+    // Tab Navigation (Fase UX: 4 tabs; Uso vive en Conexión, el rol también).
+    function switchTab(name, opts) {
+      // P2 producción: al salir de la vista se limpia la clave de pairing
+      // (autoclear al cerrar/cambiar: no queda expuesta en el DOM visible).
+      try { if (typeof clearPairing === 'function') clearPairing(); } catch (e) {}
       document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
+        const on = btn.getAttribute('data-tab') === name;
+        btn.classList.toggle('active', on);
+        try { btn.setAttribute('aria-selected', on ? 'true' : 'false'); } catch (e) {}
+        try { btn.tabIndex = on ? 0 : -1; } catch (e) {}
       });
       document.querySelectorAll('.tab-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === 'tab-' + name);
       });
-      if (name === 'dashboard' || name === 'usage') refreshUsage();
+      if (name === 'dashboard' || name === 'conexion') refreshUsage();
       if (name === 'settings') refreshSettings();
+      if (name === 'conexion') refreshConexion();
+      if (!opts || opts.focus !== false) {
+        try {
+          const panel = document.getElementById('tab-' + name);
+          if (panel) { if (!panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1'); panel.focus({ preventScroll: true }); }
+        } catch (e) {}
+      }
+    }
+    // Flechas izq/der en el tablist (P1-5): roving tabindex sin ratón.
+    var TAB_ORDER = ['dashboard', 'chat', 'conexion', 'settings'];
+    function onNavKey(ev) {
+      try {
+        const cur = ev && ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-tab') : null;
+        let i = TAB_ORDER.indexOf(cur);
+        if (i < 0) return;
+        let next = -1;
+        if (ev.key === 'ArrowRight') next = (i + 1) % TAB_ORDER.length;
+        else if (ev.key === 'ArrowLeft') next = (i + TAB_ORDER.length - 1) % TAB_ORDER.length;
+        else if (ev.key === 'Home') next = 0;
+        else if (ev.key === 'End') next = TAB_ORDER.length - 1;
+        else return;
+        if (ev.preventDefault) ev.preventDefault();
+        switchTab(TAB_ORDER[next]);
+        try {
+          const btn = document.querySelector('[data-tab="' + TAB_ORDER[next] + '"]');
+          if (btn && btn.focus) btn.focus();
+        } catch (e2) {}
+      } catch (e) {}
+    }
+    // Rol + red de la tab Conexión (la tarjeta vive ahí; refreshSettings la
+    // sigue actualizando cuando se abre Ajustes, con el mismo cfg).
+    async function refreshConexion() {
+      try {
+        const cfg = await api.getAppConfig();
+        if (cfg && !cfg.missing) refreshRoleCard(cfg);
+      } catch (e) {}
     }
 
     function isDashboardVisible() {
@@ -2747,7 +3264,7 @@
       return !!panel && panel.classList.contains('active');
     }
     function isUsageVisible() {
-      const panel = document.getElementById('tab-usage');
+      const panel = document.getElementById('tab-conexion');
       return !!panel && panel.classList.contains('active');
     }
 
@@ -2843,11 +3360,9 @@
       if (!card) return;
       const u = await api.getUsage();
       const emptyCard = document.getElementById('usage-empty-card');
-      const countEl = document.getElementById('nav-usage-count');
       if (!u || u.missing) {
         card.style.display = 'none';
         if (emptyCard) emptyCard.style.display = '';
-        if (countEl) countEl.textContent = '–';
         return;
       }
       const totals = u.totals || {};
@@ -2859,7 +3374,6 @@
       set('usage-prompt', fmtInt(totals.prompt_tokens));
       set('usage-completion', fmtInt(totals.completion_tokens));
       set('usage-meta', T('usage.updated') + fmtClock(Date.now()));
-      if (countEl) countEl.textContent = (typeof totals.requests === 'number' && isFinite(totals.requests)) ? String(Math.round(totals.requests)) : '–';
       renderUsageChart(u.by_day);
       renderUsageByModel(u.by_model);
       const raw = await api.getUsageRaw(50);
@@ -2880,11 +3394,12 @@
       if (box) box.textContent = '';
     }
 
-    function copyTerminalLogs() {
+    function copyTerminalLogs(ev) {
       const box = document.getElementById('terminal-stream');
       if (!box) return;
-      navigator.clipboard.writeText(box.textContent);
-      const btn = event && event.currentTarget;
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(box.textContent).catch(function(){}); }
+      const evt = ev || (typeof event !== 'undefined' ? event : null);
+      const btn = evt && evt.currentTarget;
       if (btn) {
         const orig = btn.textContent;
         btn.textContent = T('common.copied');
@@ -2894,21 +3409,22 @@
 
 
 
-    // Known static fallback profiles (used if /api/profiles is unavailable/empty)
+    // Known static fallback profiles (used if /api/profiles is unavailable/empty).
+    // D-48: labels/hints van por T() (antes solo español hardcodeado).
     function getProfileFallback() {
       return [
         { id: 'velocidad', context: 32768,
-          label: 'Chat diario — el más rápido (32K, todo en GPU)',
-          hint: 'Modelo y memoria de conversación 100% en VRAM (16 GB). Máxima velocidad (~17 t/s). Para chat, preguntas y código corto (<~30k palabras).' },
+          label: T('profile.fbVelLabel'),
+          hint: T('profile.fbVelHint') },
         { id: 'multi_doc', context: 65536,
-          label: 'Multi-documento — varios PDFs y archivos (64K)',
-          hint: 'Modelo en VRAM + parte del KV cache en RAM DDR5. Cede ~5% de velocidad para sostener ~60k palabras: varios documentos o un repo mediano.' },
+          label: T('profile.fbMultiLabel'),
+          hint: T('profile.fbMultiHint') },
         { id: 'libros', context: 131072,
-          label: 'Libros y repos largos — 128K de contexto',
-          hint: 'Memoria extendida en RAM DDR5. ~120k palabras (un libro entero). Velocidad baja ~15-20% porque parte del prompt viaja por DDR5.' },
+          label: T('profile.fbLibrosLabel'),
+          hint: T('profile.fbLibrosHint') },
         { id: 'max_contexto', context: 262144,
-          label: 'Máximo contexto físico — 262K (el límite del modelo)',
-          hint: 'Los 262,144 tokens nativos (~200k palabras). El más lento y el que más tensiona PSU/CPU: solo para casos extremos.' }
+          label: T('profile.fbMaxLabel'),
+          hint: T('profile.fbMaxHint') }
       ];
     }
     let profilesIndex = {};
@@ -2943,7 +3459,7 @@
       const ctxSel = document.getElementById('context-select');
       const hint = document.getElementById('profile-hint');
       if (info) {
-        if (ctxSel && info.context && ctxSel.querySelector(`option[value="${info.context}"]`)) {
+        if (ctxSel && info.context && ctxSel.querySelector(`option[value="${CSS.escape(info.context ?? '')}"]`)) {
           ctxSel.value = String(info.context);
         }
         if (hint) hint.textContent = info.hint || info.description || '';
@@ -3236,14 +3752,15 @@
         || cfgProfilesCache.find(x => x.id === cfgCurrentProfileId)
         || cfgProfilesCache[0] || null;
       if (!src) return;
-      const base = (src.id || 'perfil') + '-copia';
+      // P1 producción: el sufijo "(copia)"/"-copia" sale del diccionario.
+      const base = (src.id || 'perfil') + T('settings.profileCopyId');
       const set = (eid, val) => {
         const el = document.getElementById(eid);
         if (el) el.value = val;
       };
       cfgEditingId = null;
       set('cfg-profile-id', base);
-      set('cfg-profile-name', (src.name || src.label || '') + ' (copia)');
+      set('cfg-profile-name', (src.name || src.label || '') + T('settings.profileCopySuffix'));
       set('cfg-profile-desc', src.description || src.hint || '');
       set('cfg-profile-context', src.context != null ? String(src.context) : '32768');
       set('cfg-profile-cacheram', src.cache_ram != null ? String(src.cache_ram) : '0');
@@ -3352,7 +3869,8 @@
       setCheck('cfg-notif-ready', notif.on_ready === true);
       setCheck('cfg-notif-failure', notif.on_failure === true);
       setCheck('cfg-notif-autostop', notif.on_autostop === true);
-      // Read-only guardrails: shown from GET /api/config (or TOML); never POSTed.
+      const upd = (cfg && cfg.update) || {};
+      setCheck('cfg-update-startup', upd.check_on_startup !== false);
       const setT = (id, v) => {
         const el = document.getElementById(id);
         if (el) el.textContent = v;
@@ -3481,8 +3999,10 @@
       if (which === 'config' || which === 'all') {
         const g = document.getElementById('cfg-generation-card');
         const e = document.getElementById('cfg-engine-card');
+        const r = document.getElementById('cfg-role-card');
         if (g) g.style.display = 'none';
         if (e) e.style.display = 'none';
+        if (r) r.style.display = 'none';
       }
       const un = document.getElementById('cfg-unavailable-card');
       if (un) {
@@ -3493,8 +4013,9 @@
     }
 
     function showSettingsCards() {
-      ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'].forEach(id => {
+      ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card', 'cfg-role-card'].forEach(id => {
         const el = document.getElementById(id);
+        if (el) el.style.display = '';
       });
       const un = document.getElementById('cfg-unavailable-card');
       if (un) un.style.display = 'none';
@@ -3508,8 +4029,582 @@
       return null;
     }
 
+    /* ---------- Roles (Oráculo/Guest): qué es esta PC.
+       Oráculo = tiene el modelo (computa, sirve, usa en local).
+       Guest = sin modelo (chatea y lanza CLIs contra el Oráculo).
+       Backend intacto: client.enabled manda (guest); si no, oráculo.
+       El switch LAN del Oráculo es `lan.enabled` (resto del PATCH igual). */
+    let cfgRoleCache = 'oraculo';
+
+    function roleFromCfg(cfg) {
+      if (cfg && cfg.client && cfg.client.enabled) return 'guest';
+      return 'oraculo';
+    }
+
+    function roleLabel(role) {
+      if (role === 'guest') return T('settings.roleGuest');
+      return T('settings.roleOraculo');
+    }
+
+    function refreshRoleCard(cfg) {
+      const role = roleFromCfg(cfg);
+      cfgRoleCache = role;
+      const meta = document.getElementById('cfg-role-meta');
+      if (meta) meta.textContent = roleLabel(role);
+      for (const r of ['oraculo', 'guest']) {
+        const el = document.getElementById('cfg-role-' + r);
+        if (el) el.checked = (r === role);
+      }
+      syncRoleSwitcher(role);
+      const lanCk = document.getElementById('cfg-lan-enabled');
+      if (lanCk && cfg && cfg.lan) lanCk.checked = !!cfg.lan.enabled;
+      cfgShow(document.getElementById('cfg-server-panel'), role === 'oraculo');
+      cfgShow(document.getElementById('cfg-client-panel'), role === 'guest');
+      const url = document.getElementById('cfg-remote-url');
+      if (url && cfg && cfg.remote && typeof cfg.remote.url === 'string' && !url.value) url.value = cfg.remote.url;
+      if (role === 'oraculo') refreshLanPanel();
+      try { renderChatWelcome(); } catch (e) {}
+    }
+
+    // Switcher del header: refleja el rol vigente (lo llama refreshRoleCard).
+    function syncRoleSwitcher(role) {
+      for (const r of ['oraculo', 'guest']) {
+        const el = document.getElementById('hs-' + r);
+        if (!el) continue;
+        const on = (r === role);
+        el.classList.toggle('active', on);
+        el.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+    }
+
+    /* ---------- Onboarding de rol: una sola vez por perfil de navegador.
+       Sin marca → overlay. Elegir guarda el rol y la marca; "después"
+       conserva el rol vigente, guarda la marca diferida y deja un aviso
+       persistente en Conexión hasta elegir (P0 producción). */
+    const ROLE_SEEN_KEY = 'omni_role_seen';
+    const ROLE_DEFERRED_KEY = 'omni_role_deferred';
+    let onboardPrevFocus = null;
+    function roleSeen() {
+      try { return localStorage.getItem(ROLE_SEEN_KEY) === '1'; } catch (e) { return true; }
+    }
+    function roleDeferred() {
+      try { return localStorage.getItem(ROLE_DEFERRED_KEY) === '1'; } catch (e) { return false; }
+    }
+    function markRoleSeen() {
+      try { localStorage.setItem(ROLE_SEEN_KEY, '1'); } catch (e) {}
+      try { localStorage.removeItem(ROLE_DEFERRED_KEY); } catch (e) {}
+      const ov = document.getElementById('onboard-overlay');
+      if (ov) ov.style.display = 'none';
+      try { renderRoleDeferredHint(); } catch (e) {}
+      if (onboardPrevFocus && onboardPrevFocus.focus) {
+        try { onboardPrevFocus.focus(); } catch (e) {}
+        onboardPrevFocus = null;
+      }
+    }
+    function maybeOnboard() {
+      if (roleSeen()) { try { renderRoleDeferredHint(); } catch (e) {} return; }
+      const ov = document.getElementById('onboard-overlay');
+      if (!ov) return;
+      try { onboardPrevFocus = document.activeElement || null; } catch (e) { onboardPrevFocus = null; }
+      ov.style.display = 'flex';
+      // P0 producción: foco inicial dentro del diálogo para lector de pantalla.
+      const first = document.getElementById('onboard-oraculo');
+      if (first && first.focus) { try { first.focus(); } catch (e) {} }
+    }
+    // P0 producción: trampa de foco + Esc dentro del diálogo de rol.
+    function onboardTrapKey(ev) {
+      const ov = document.getElementById('onboard-overlay');
+      if (!ov || ov.style.display === 'none') return;
+      if (ev && ev.key === 'Escape') { laterRole(); return; }
+      if (!ev || ev.key !== 'Tab') return;
+      const ids = ['onboard-oraculo', 'onboard-guest', 'onboard-later'];
+      const els = ids.map(id => document.getElementById(id)).filter(Boolean);
+      if (!els.length) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    }
+    try {
+      if (document.addEventListener) document.addEventListener('keydown', onboardTrapKey);
+    } catch (e) {}
+    async function chooseRole(role) {
+      markRoleSeen();
+      await setRole(role);
+    }
+    function laterRole() {
+      try { localStorage.setItem(ROLE_SEEN_KEY, '1'); } catch (e) {}
+      try { localStorage.setItem(ROLE_DEFERRED_KEY, '1'); } catch (e) {}
+      const ov = document.getElementById('onboard-overlay');
+      if (ov) ov.style.display = 'none';
+      try { renderRoleDeferredHint(); } catch (e) {}
+      if (onboardPrevFocus && onboardPrevFocus.focus) {
+        try { onboardPrevFocus.focus(); } catch (e) {}
+        onboardPrevFocus = null;
+      }
+    }
+    // P0 producción: hint persistente en Conexión cuando se pospone el rol.
+    function renderRoleDeferredHint() {
+      const hint = document.getElementById('role-deferred-hint');
+      if (!hint) return;
+      if (roleDeferred()) {
+        hint.style.display = '';
+        hint.textContent = T('onboard.deferredHint');
+      } else {
+        hint.style.display = 'none';
+        hint.textContent = '';
+      }
+    }
+    async function setRole(role) {
+      cfgInlineError('cfg-role-error', null);
+      // Oráculo: sale de cliente y enciende LAN (consentimiento explícito al
+      // elegir el rol; rige al reiniciar). Guest: entra en cliente.
+      const body = role === 'guest' ? { client: { enabled: true } }
+        : { lan: { enabled: true }, client: { enabled: false } };
+      try {
+        const res = await api.postAppConfig(body);
+        if (res && res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          if (role === 'oraculo') toast(T('settings.roleRestart'));
+          const cfg = (res.data && !res.data.missing) ? res.data : await api.getAppConfig();
+          if (cfg && !cfg.missing) refreshRoleCard(cfg);
+          return;
+        }
+        cfgInlineError('cfg-role-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : T('models.dlError'));
+      }
+    }
+
+    async function setLanExposed(on) {
+      cfgInlineError('cfg-role-error', null);
+      try {
+        const res = await api.postAppConfig({ lan: { enabled: !!on } });
+        if (res && res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          toast(T('settings.roleRestart'));
+          const cfg = (res.data && !res.data.missing) ? res.data : await api.getAppConfig();
+          if (cfg && !cfg.missing) refreshRoleCard(cfg);
+          return;
+        }
+        cfgInlineError('cfg-role-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : T('models.dlError'));
+      }
+    }
+
+    async function refreshLanPanel() {
+      const ips = document.getElementById('cfg-server-ips');
+      const pairing = document.getElementById('cfg-server-pairing');
+      try {
+        const res = await fetch('/api/lan');
+        if (!res.ok) {
+          if (ips) ips.textContent = 'HTTP ' + res.status;
+          if (pairing) pairing.value = '';
+          return;
+        }
+        const data = await res.json();
+        if (ips) ips.textContent = ((data.ips && data.ips.length) ? data.ips.join(', ') : '—') + ' :' + data.port;
+        if (pairing) pairing.value = (data.pairings && data.pairings.length) ? data.pairings[0] : '';
+      } catch (e) {
+        if (ips) ips.textContent = (e && e.message) ? e.message : '?';
+      }
+    }
+
+    // P2 producción: la clave de pairing jamás se pinta en un toast (el toast
+    // queda visible 4,5 s para cualquiera mirando la pantalla): mensaje
+    // genérico + autoclear del campo al copiar/cerrar. `togglePairing`
+    // muestra 15 s y vuelve solo a `password` (sin dejar la clave expuesta).
+    let pairingTimer = 0;
+    function clearPairing() {
+      try {
+        const p = document.getElementById('cfg-server-pairing');
+        if (p) p.value = '';
+        const b = document.getElementById('cfg-server-show');
+        if (b) b.textContent = T('settings.serverShow');
+        if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+      } catch (e) {}
+    }
+    function togglePairing() {
+      const pairing = document.getElementById('cfg-server-pairing');
+      const btn = document.getElementById('cfg-server-show');
+      if (!pairing) return;
+      if (!pairing.value) return;
+      try {
+        if (pairing.type === 'password') {
+          pairing.type = 'text';
+          if (btn) btn.textContent = T('settings.serverHide');
+          if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+          pairingTimer = setTimeout(() => {
+            try {
+              pairing.type = 'password';
+              if (btn) btn.textContent = T('settings.serverShow');
+            } catch (e) {}
+            pairingTimer = 0;
+          }, 15000);
+        } else {
+          pairing.type = 'password';
+          if (btn) btn.textContent = T('settings.serverShow');
+          if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+        }
+      } catch (e) {}
+    }
+    function copyPairing() {
+      const pairing = document.getElementById('cfg-server-pairing');
+      const v = pairing ? pairing.value : '';
+      if (!v) return;
+      const done = () => {
+        toast(T('settings.serverCopied'));
+        clearPairing();
+      };
+      const fail = () => { toast(T('settings.serverCopyFail')); };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(done, fail);
+        } else {
+          fail();
+        }
+      } catch (e) {
+        fail();
+      }
+    }
+
+    async function rotateKey() {
+      cfgInlineError('cfg-role-error', null);
+      try {
+        const res = await fetch('/api/key/rotate', { method: 'POST' });
+        if (res.ok) {
+          toast(T('settings.serverRotateWarn'));
+          refreshLanPanel();
+          return;
+        }
+        cfgInlineError('cfg-role-error', 'HTTP ' + res.status);
+      } catch (e) {
+        cfgInlineError('cfg-role-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    function remoteForm() {
+      const url = document.getElementById('cfg-remote-url');
+      const key = document.getElementById('cfg-remote-key');
+      return { url: url ? url.value : '', key: key ? key.value : '' };
+    }
+
+    async function testRemote() {
+      const out = document.getElementById('cfg-client-result');
+      cfgInlineError('cfg-client-error', null);
+      cfgSetSaving('cfg-client-test', 'cfg-client-spinner', true);
+      try {
+        const f = remoteForm();
+        const res = await fetch('/api/remote/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(f)
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (data && data.ok) {
+          if (out) out.textContent = T('settings.clientOk') + ': ' + (data.models || []).join(', ');
+        } else {
+          cfgInlineError('cfg-client-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+        }
+      } catch (e) {
+        cfgInlineError('cfg-client-error', (e && e.message) ? e.message : '?');
+      } finally {
+        cfgSetSaving('cfg-client-test', 'cfg-client-spinner', false);
+      }
+    }
+
+    async function saveRemote() {
+      const out = document.getElementById('cfg-client-result');
+      cfgInlineError('cfg-client-error', null);
+      try {
+        const res = await fetch('/api/remote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(remoteForm())
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          cfgFlashOk('cfg-role-ok');
+          if (out) out.textContent = T('settings.clientOk');
+        } else {
+          cfgInlineError('cfg-client-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+        }
+      } catch (e) {
+        cfgInlineError('cfg-client-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    /* ---------- Actualización automática (Fase Prod): estado + chequeo +
+       descarga verificada + instalación al reiniciar. Poll de 2 s solo
+       mientras hay operación en curso; la tarjeta vive en Ajustes y el
+       banner de Panel avisa con la versión disponible. */
+    let updatePollTimer = 0;
+    let updateLastState = '';
+
+    async function fetchUpdate() {
+      try {
+        const res = await fetch('/api/update');
+        if (res.status === 404 || res.status === 501) return { missing: true };
+        if (res.ok) return await res.json();
+      } catch (e) {
+        return { missing: true };
+      }
+      return null;
+    }
+
+    function renderUpdate(st) {
+      // P1-7: NUNCA se oculta #cfg-update-card: sin backend se muestra el
+      // motivo + Reintentar; el banner del Panel sigue siendo el aviso.
+      const card = document.getElementById('cfg-update-card');
+      if (card) card.style.display = '';
+      if (!st || st.missing) {
+        const meta0 = document.getElementById('cfg-update-meta');
+        if (meta0) meta0.textContent = 'v?';
+        const status0 = document.getElementById('cfg-update-status');
+        if (status0) status0.textContent = T('settings.updateError', { msg: T('settings.needsNew') });
+        const banner0 = document.getElementById('update-banner');
+        if (banner0) banner0.style.display = 'none';
+        ensureUpdateRetry();
+        return;
+      }
+      updateLastState = st.state || '';
+      const meta = document.getElementById('cfg-update-meta');
+      const status = document.getElementById('cfg-update-status');
+      const fill = document.getElementById('cfg-update-fill');
+      const bar = document.getElementById('model-dl-section-update');
+      const dlBtn = document.getElementById('cfg-update-dl');
+      const cancelBtn = document.getElementById('cfg-update-cancel');
+      const cur = (st.current || '').trim();
+      const ver = (st.latest || '').trim();
+      if (meta) meta.textContent = ver && ver !== cur ? ('v' + cur + ' → ' + ver) : ('v' + (cur || '?'));
+      let text = '';
+      if (st.state === 'available') text = T('settings.updateAvailable', { ver });
+      else if (st.state === 'downloading') text = T('settings.updateDownloading', { ver, pct: (st.percent != null ? st.percent : 0) });
+      else if (st.state === 'ready') text = T('settings.updateReady', { ver });
+      else if (st.state === 'checking') text = T('settings.updateChecking');
+      else if (st.state === 'installing') text = T('settings.updateInstalling', { ver });
+      else if (st.state === 'error') text = T('settings.updateError', { msg: st.error || ('HTTP ?') });
+      else text = T('settings.updateIdle', { cur: cur || '?' });
+      if (status) status.textContent = text;
+      const pct = (typeof st.percent === 'number' && isFinite(st.percent)) ? Math.max(0, Math.min(100, st.percent)) : 0;
+      if (fill) fill.style.width = pct + '%';
+      if (bar) bar.style.display = (st.state === 'downloading') ? '' : 'none';
+      const installing = (st.state === 'installing');
+      if (dlBtn) dlBtn.disabled = (st.state !== 'available') || installing;
+      if (cancelBtn) cancelBtn.disabled = (!(st.state === 'downloading' || st.state === 'checking')) || installing;
+      const restartBtn = document.getElementById('cfg-update-restart');
+      if (restartBtn) restartBtn.style.display = (st.state === 'ready' && !installing) ? '' : 'none';
+      const checkBtn = document.getElementById('cfg-update-check');
+      if (checkBtn) checkBtn.disabled = !!installing;
+      const banner = document.getElementById('update-banner');
+      if (banner) {
+        const show = (st.state === 'available' || st.state === 'ready');
+        banner.style.display = show ? '' : 'none';
+        if (show) banner.textContent = (st.state === 'ready')
+          ? T('settings.updateReady', { ver })
+          : T('settings.updateAvailable', { ver });
+      }
+      if (st.state === 'error') ensureUpdateRetry();
+      else removeUpdateRetry();
+      renderUpdatePoll(st);
+    }
+    // Botón Reintentar dentro de la tarjeta (P1-7): se muestra con error.
+    function ensureUpdateRetry() {
+      try {
+        const b = document.getElementById('cfg-update-retry');
+        if (b) { b.style.display = ''; b.textContent = T('settings.updateRetry'); }
+      } catch (e) {}
+    }
+    function removeUpdateRetry() {
+      try {
+        const b = document.getElementById('cfg-update-retry');
+        if (b) b.style.display = 'none';
+      } catch (e) {}
+    }
+    // Rutas de datos + comandos backup/uninstall (P1-7): copiar y abrir.
+    function dataPathText(which) {
+      try {
+        const id = which === 'temp' ? 'cfg-data-temp'
+          : which === 'backup' ? 'cfg-data-backup-cmd'
+          : which === 'uninstall' ? 'cfg-data-uninstall-cmd' : 'cfg-data-appdata';
+        const el = document.getElementById(id);
+        return el ? el.textContent : '';
+      } catch (e) { return ''; }
+    }
+    function copyDataPath(which) {
+      const v = dataPathText(which);
+      if (!v) return;
+      const done = () => toast(T('toast.copied'));
+      const fail = () => toast(T('toast.copyFail'), 'error');
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done, fail);
+        else fail();
+      } catch (e) { fail(); }
+    }
+    function openDataFolder(which) {
+      // `POST /api/open_data_dir` (allowlist appdata|temp); si falla, fallback
+      // a copiar la ruta (el botón Copiar) en vez de dejar al usuario sin nada.
+      try {
+        if (which !== 'appdata' && which !== 'temp') return;
+        fetch('/api/open_data_dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ which: which }) }).then(function (r) { if (!r.ok) copyDataPath(which); }).catch(function () { copyDataPath(which); });
+      } catch (e) { try { copyDataPath(which); } catch (_) {} }
+    }
+    function renderUpdatePoll(st) {
+      // Poll corto solo en curso; al terminar vuelve a estado quieto.
+      const busy = (st.state === 'checking' || st.state === 'downloading');
+      if (busy && !updatePollTimer) {
+        updatePollTimer = setInterval(async () => {
+          const s = await fetchUpdate();
+          if (s && !s.missing) {
+            renderUpdate(s);
+            if (s.state !== 'checking' && s.state !== 'downloading') {
+              clearInterval(updatePollTimer);
+              updatePollTimer = 0;
+            }
+          }
+        }, 2000);
+      } else if (!busy && updatePollTimer) {
+        clearInterval(updatePollTimer);
+        updatePollTimer = 0;
+      }
+    }
+    async function refreshUpdate() {
+      const st = await fetchUpdate();
+      if (st) renderUpdate(st);
+      try {
+        const cfg = await api.getAppConfig();
+        const ck = document.getElementById('cfg-update-startup');
+        if (ck && cfg && !cfg.missing && cfg.update) ck.checked = cfg.update.check_on_startup !== false;
+      } catch (e) {}
+    }
+
+    async function checkUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      cfgSetSaving('cfg-update-check', 'cfg-update-spinner', true);
+      try {
+        const res = await fetch('/api/update/check', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          if (data) renderUpdate(data);
+          await refreshUpdate();
+          return;
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      } finally {
+        cfgSetSaving('cfg-update-check', 'cfg-update-spinner', false);
+      }
+    }
+
+    async function downloadUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      try {
+        const res = await fetch('/api/update/download', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          if (data) renderUpdate(data);
+          return;
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    async function cancelUpdate() {
+      cfgInlineError('cfg-update-error', null);
+      try {
+        const res = await fetch('/api/update/cancel', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok && data) renderUpdate(data);
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    // Reiniciar e instalar (P0): con staging listo, el servidor arma la
+    // salida ordenada y se cierra solo en ≤5 s; el swap relanza la app ya
+    // actualizada. Sin `ready` el servidor responde 409 y se muestra.
+    async function restartToInstall() {
+      cfgInlineError('cfg-update-error', null);
+      const btn = document.getElementById('cfg-update-restart');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('/api/update/restart', { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (res.ok) {
+          const status = document.getElementById('cfg-update-status');
+          if (status) status.textContent = T('settings.updateRestarting');
+          return; // la app se cierra sola; no hay más UI que actualizar.
+        }
+        cfgInlineError('cfg-update-error', (data && data.error) ? data.error : ('HTTP ' + res.status));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function saveUpdateCfg() {
+      const ck = document.getElementById('cfg-update-startup');
+      const on = ck ? !!ck.checked : true;
+      try {
+        const res = await api.postAppConfig({ update: { check_on_startup: on } });
+        if (res && res.ok) cfgFlashOk('cfg-update-ok');
+        else cfgInlineError('cfg-update-error', cfgErrText(res, 'models.dlError'));
+      } catch (e) {
+        cfgInlineError('cfg-update-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
+    /* ---------- Unlock (Fase B4): la UI en red llega sin cookie de sesión.
+       Si /api/status da 401, se muestra el overlay una vez; el desbloqueo
+       canjea la clave por cookie vía POST /api/unlock y refresca. */
+    async function maybeUnlock() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.status === 401) {
+          const ov = document.getElementById('unlock-overlay');
+          if (ov) ov.style.display = 'flex';
+          const inp = document.getElementById('unlock-key');
+          if (inp) inp.focus();
+        }
+      } catch (e) {}
+    }
+
+    async function doUnlock() {
+      const inp = document.getElementById('unlock-key');
+      try {
+        const res = await fetch('/api/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: inp ? inp.value : '' })
+        });
+        if (res.ok) {
+          if (inp) inp.value = '';
+          cfgInlineError('unlock-error', null);
+          const ov = document.getElementById('unlock-overlay');
+          if (ov) ov.style.display = 'none';
+          updateStatus();
+          refreshSettings();
+          return;
+        }
+        cfgInlineError('unlock-error', T('unlock.bad'));
+      } catch (e) {
+        cfgInlineError('unlock-error', (e && e.message) ? e.message : '?');
+      }
+    }
+
     async function refreshSettings() {
-      const cards = ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'];
+      const cards = ['cfg-role-card', 'cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'];
       const anyCard = cards.some(id => document.getElementById(id));
       if (!anyCard) return;
       showSettingsCards();
@@ -3540,10 +4635,13 @@
           hideSettingsMissing('config');
         } else {
           renderAppConfig(cfg);
+          refreshRoleCard(cfg);
         }
       } catch (e) {
         hideSettingsMissing('config');
       }
+      // Update: GET /api/update (card propia; 404/501 → ocultar).
+      try { await refreshUpdate(); } catch (e) {}
     }
 
     function formatSizeGb(m) {
@@ -3572,18 +4670,73 @@
       box.textContent = '';
       if (!cur) { box.style.display = 'none'; return; }
       if (cur.verified === true) {
-        const b = document.createElement('span');
-        b.className = 'model-badge verified';
-        b.textContent = T('badge.verified');
-        box.appendChild(b);
-      }
-      if (typeof cur.source === 'string' && cur.source && cur.source !== 'local') {
-        const b = document.createElement('span');
         b.className = 'model-badge downloaded';
         b.textContent = T('badge.downloaded');
         box.appendChild(b);
       }
       box.style.display = box.childNodes.length ? '' : 'none';
+      try { adaptOptionsToModel(cur); } catch (e) {}
+    }
+
+    // Opciones adaptativas (portabilidad): el contexto se acota al nativo del
+    // modelo (si se conoce) y el effort avisa si el modelo no trae thinking.
+    // Nunca inventa: sin `capabilities`, todo queda como estaba.
+    function adaptOptionsToModel(m) {
+      const caps = (m && m.capabilities) || null;
+      adaptContextToCaps(caps);
+      adaptEffortToCaps(caps);
+    }
+    function adaptContextToCaps(caps) {
+      const ctxSel = document.getElementById('context-select');
+      if (!ctxSel) return;
+      const native = caps && typeof caps.ctx_native === 'number' ? caps.ctx_native : null;
+      let limited = false;
+      ctxSel.querySelectorAll('option').forEach(opt => {
+        const v = parseInt(opt.value, 10);
+        const over = native && isFinite(v) && v > native;
+        opt.disabled = !!over;
+        if (over) limited = true;
+        if (over && opt.selected) opt.selected = false;
+      });
+      // Si la selección quedó en una opción desactivada (o vacía), bajar a la
+      // mayor permitida.
+      const cur = parseInt(ctxSel.value, 10);
+      if (native && (!isFinite(cur) || cur > native)) {
+        let best = null;
+        ctxSel.querySelectorAll('option').forEach(opt => {
+          const v = parseInt(opt.value, 10);
+          if (!opt.disabled && isFinite(v) && (best === null || v > best)) best = v;
+        });
+        if (best !== null) ctxSel.value = String(best);
+      }
+      const hint = document.getElementById('profile-hint');
+      if (hint && native) {
+        const base = hint.textContent || '';
+        if (!base.includes('nativo')) {
+          hint.textContent = (base ? base + ' ' : '') + T('profile.ctxNative', { n: Math.round(native / 1024) });
+        }
+      }
+      void limited;
+    }
+    function adaptEffortToCaps(caps) {
+      const sel = document.getElementById('chat-effort-select');
+      if (!sel) return;
+      const thinking = !!(caps && caps.thinking === true);
+      const unknown = !caps;
+      let warn = document.getElementById('chat-effort-warn');
+      if (!thinking && !unknown) {
+        if (!warn) {
+          warn = document.createElement('div');
+          warn.id = 'chat-effort-warn';
+          warn.className = 'profile-hint warn';
+          warn.setAttribute('role', 'note');
+          sel.closest('.chat-opt-row').appendChild(warn);
+        }
+        warn.textContent = T('chat.effortNoThinking');
+        warn.style.display = '';
+      } else if (warn) {
+        warn.style.display = 'none';
+      }
     }
 
     // Models tab table (read-only view over the same models cache).
@@ -3595,10 +4748,10 @@
       const empty = document.getElementById('models-empty');
       const table = document.getElementById('models-table');
       const meta = document.getElementById('models-meta');
-      const count = document.getElementById('nav-models-count');
       if (meta) meta.textContent = T('models.count', { n: list.length });
-      if (count) count.textContent = String(list.length);
       if (empty) empty.style.display = list.length ? 'none' : '';
+      const starter = document.getElementById('models-starter');
+      if (starter) starter.style.display = list.length ? 'none' : '';
       if (table) table.style.display = list.length ? '' : 'none';
       list.forEach(m => {
         const tr = document.createElement('tr');
@@ -3648,11 +4801,12 @@
         if (!models || models.length === 0) {
           const opt = document.createElement('option');
           opt.value = '';
-          opt.textContent = T('models.searching');
+          opt.textContent = T('models.empty');
           sel.appendChild(opt);
           lastModelsCache = [];
           updateModelBadges([]);
           renderModelsTable([]);
+          try { renderChatWelcome(); } catch (e) {}
           return;
         }
         models.forEach((m, idx) => {
@@ -3665,6 +4819,7 @@
         lastModelsCache = models;
         updateModelBadges(models);
         renderModelsTable(models);
+        try { renderChatWelcome(); } catch (e) {}
       } catch (err) {
         console.error('refreshModels error:', err);
       }
@@ -3679,8 +4834,8 @@
       }
 
       const profile = document.getElementById('profile-select') ? document.getElementById('profile-select').value : 'turbo';
-      const context = parseInt(document.getElementById('context-select').value);
-      const threads = parseInt(document.getElementById('threads-select').value);
+      const context = parseInt(document.getElementById('context-select') ? document.getElementById('context-select').value : '32768', 10);
+      const threads = parseInt(document.getElementById('threads-select') ? document.getElementById('threads-select').value : '6', 10);
       const prioEl = document.getElementById('priority-select');
       const priority = prioEl ? prioEl.value : '2';
       const action = document.getElementById('strip-action');
@@ -3703,9 +4858,11 @@
         // "Error al iniciar: Modelo desconocido: 'noexiste.gguf'.".
         // Aqui se paints el estado (franja, estado del motor) y despues se
         // escribe el mensaje final, que es el que el usuario debe leer.
+        // Además, toast sticky con [Copiar][Reintentar] (P1-4).
+        const full = toastEngineError(res.error, () => { try { startEngine(); } catch (e) {} });
         renderStatus({ status: 'error', last_error: res.error });
         if (errBanner) {
-          errBanner.textContent = T('err.startFail') + res.error;
+          errBanner.textContent = full;
           errBanner.style.display = 'block';
         }
       }
@@ -3715,6 +4872,21 @@
       const action = document.getElementById('strip-action');
       if (action) action.disabled = true;
       await api.stopServer();
+    }
+
+    // Reinicio único tras carga lenta (D-31): el backend ya marcó
+    // `engine_slow` (informativo, sin reintentos automáticos por LM-NF-3);
+    // este botón es el gesto manual: parar + arrancar con la misma config.
+    // Respeta el cooldown del servidor (responde 429/400 si toca esperar).
+    async function restartEngineOnce() {
+      const btn = document.getElementById('tel-slow-restart');
+      if (btn) btn.disabled = true;
+      try {
+        await api.stopServer();
+        await startEngine();
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     let selectedProjectCwd = '';
@@ -3775,6 +4947,35 @@
     function persistCliEffort(val) {
       try {
         if (val && EFFORT_VALUES.indexOf(val) >= 0) localStorage.setItem(EFFORT_KEY, val);
+      } catch (e) {}
+    }
+    // Chat effort: mismo vocabulario que el launcher CLI (`max/high/medium/low/off`),
+    // pero default `medium` (punto medido más rápido con calidad: Kodesage 8.18
+    // a 76s mediana vs xhigh 8.61 a 143s; en esta máquina xhigh devolvió vacío).
+    const CHAT_EFFORT_KEY = 'localmind_chat_effort';
+    const CHAT_EFFORT_DEFAULT = 'medium';
+    function getSelectedChatEffort() {
+      const sel = document.getElementById('chat-effort-select');
+      if (sel && sel.value && EFFORT_VALUES.indexOf(sel.value) >= 0) return sel.value;
+      try {
+        const saved = localStorage.getItem(CHAT_EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) return saved;
+      } catch (e) {}
+      return CHAT_EFFORT_DEFAULT;
+    }
+    function initChatEffort() {
+      const sel = document.getElementById('chat-effort-select');
+      if (!sel) return;
+      let val = CHAT_EFFORT_DEFAULT;
+      try {
+        const saved = localStorage.getItem(CHAT_EFFORT_KEY);
+        if (saved && EFFORT_VALUES.indexOf(saved) >= 0) val = saved;
+      } catch (e) {}
+      try { sel.value = val; } catch (e) {}
+    }
+    function persistChatEffort(val) {
+      try {
+        if (val && EFFORT_VALUES.indexOf(val) >= 0) localStorage.setItem(CHAT_EFFORT_KEY, val);
       } catch (e) {}
     }
     /* ---------- Unified launcher: ONE selector + ONE "Abrir" button.
@@ -4064,17 +5265,24 @@
       modelDlTimer = setInterval(pollModelDownload, 1500);
     }
 
+    function stopModelDlPolling() {
+      if (modelDlTimer) { try { clearInterval(modelDlTimer); } catch (e) {} }
+      modelDlTimer = null;
+    }
+
     async function pollModelDownload() {
-      if (!modelDlActive) return;
+      if (!modelDlActive) { stopModelDlPolling(); return; }
       const d = await api.getDownloadState();
       if (!d) return;
-      if (d.missing) { modelDlActive = false; renderDownloadState(null); return; }
+      if (d.missing) { modelDlActive = false; stopModelDlPolling(); renderDownloadState(null); return; }
       renderDownloadState(d);
       if (d.state === 'done') {
         modelDlActive = false;
+        stopModelDlPolling();
         await refreshModels();
-      } else if (d.state === 'error') {
+      } else if (d.state === 'error' || d.state === 'cancelled' || d.state === 'canceled') {
         modelDlActive = false;
+        stopModelDlPolling();
       }
     }
 
@@ -4110,9 +5318,60 @@
         await pollModelDownload();
       } catch (e) {
         modelDlActive = false;
+        stopModelDlPolling();
       }
     }
 
+    // Sugerencia inicial (portabilidad): rellena un repo pequeño y verificado
+    // para que el usuario nuevo no parta de un input vacío. No descarga nada
+    // solo: el usuario pulsa Descargar y confirma. Repo real, ~2 GB.
+    function fillStarterModel() {
+      const repoEl = document.getElementById('dl-repo');
+      if (repoEl && !repoEl.value.trim()) repoEl.value = 'Qwen/Qwen2.5-1.5B-Instruct-GGUF';
+      const section = document.getElementById('model-dl-section');
+      if (section) section.style.display = '';
+      try { document.getElementById('dl-repo').focus(); } catch (e) {}
+    }
+
+    // Asesor previo a descargar (portabilidad): pregunta al servidor si el
+    // repo cabe en ESTE equipo y muestra el veredicto con perfil sugerido.
+    // No descarga nada; el usuario decide después con Descargar.
+    async function adviseModelDownload() {
+      const box = document.getElementById('model-advise-box');
+      const spin = document.getElementById('dl-advise-spinner');
+      const repoEl = document.getElementById('dl-repo');
+      const revEl = document.getElementById('dl-revision');
+      const repo = repoEl ? repoEl.value.trim() : '';
+      const revision = revEl ? revEl.value.trim() : '';
+      if (box) { box.style.display = ''; box.textContent = T('models.adviseChecking'); }
+      if (spin) spin.style.display = '';
+      try {
+        if (!repo) {
+          if (box) box.textContent = T('models.dlNeedRepo');
+          return;
+        }
+        const body = { repo };
+        if (revision) body.revision = revision;
+        const res = await fetch('/api/models/advise', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (!res.ok || !data) {
+          if (box) box.textContent = (data && data.error) ? data.error : ('HTTP ' + res.status);
+          return;
+        }
+        if (box) {
+          const v = data.verdict || 'unknown';
+          const key = 'models.advise_' + v;
+          let label = T(key);
+          if (label === key) label = v;
+          let text = label + ': ' + (data.detail || '');
+          if (data.hint_quant) text += ' ' + data.hint_quant;
+          box.textContent = text;
+        }
+      } finally {
+        if (spin) spin.style.display = 'none';
+      }
+    }
     async function cancelModelDownload() {
       try {
         await fetch('/api/models/download/cancel', { method: 'POST' });
@@ -4169,11 +5428,42 @@
           const primary = hw.gpus[0];
           if (gpuNameEl) gpuNameEl.textContent = primary.name;
           if (gpuVramEl) gpuVramEl.textContent = primary.vram;
+          const beEl = document.getElementById('cfg-backend-id');
+          if (beEl) beEl.textContent = primary.id || '—';
         } else {
           if (gpuNameEl) gpuNameEl.textContent = T('specs.gpuFallback');
           if (gpuVramEl) gpuVramEl.textContent = T('specs.gpuMemFallback');
         }
+        try { adaptThreadsToHw(hw); } catch (e) {}
       } catch (e) {}
+    }
+
+    // Hilos del USUARIO, no del dueño (portabilidad): reescribe el select con
+    // los físicos reales (recomendado), mitad (silencioso) y todos los lógicos
+    // (solo si difieren). Sin dato, deja las opciones de fábrica (6/4/12).
+    function adaptThreadsToHw(hw) {
+      const sel = document.getElementById('threads-select');
+      if (!sel) return;
+      const phys = hw && typeof hw.cpu_physical === 'number' ? hw.cpu_physical : null;
+      const logical = hw && typeof hw.cpu_cores === 'number' ? hw.cpu_cores : null;
+      if (!phys || phys < 1) return;
+      const prev = sel.value;
+      sel.innerHTML = '';
+      const mk = (v, label, selected) => {
+        const opt = document.createElement('option');
+        opt.value = String(v);
+        opt.textContent = label;
+        if (selected) opt.selected = true;
+        sel.appendChild(opt);
+      };
+      mk(phys, T('threads.rec', { n: phys }), true);
+      const quiet = Math.max(1, Math.floor(phys / 2));
+      if (quiet !== phys) mk(quiet, T('threads.quiet', { n: quiet }), false);
+      if (logical && logical !== phys) mk(logical, T('threads.all', { n: logical }), false);
+      if (prev) {
+        const hit = sel.querySelector(`option[value="${CSS.escape(prev ?? '')}"]`);
+        if (hit) sel.value = prev;
+      }
     }
     async function refreshVersion() {
       const badge = document.getElementById('app-version');
@@ -4191,6 +5481,13 @@
         const v = await api.getVersion();
         const build = v && typeof v.engine_build === 'string' ? v.engine_build.trim() : '';
         if (build) showEngine(build, (typeof v.engine_path === 'string' && v.engine_path) || '--');
+        if (v && v.log_ok === false) {
+          const errBanner = document.getElementById('error-banner');
+          if (errBanner && !errBanner.textContent) {
+            errBanner.textContent = T('settings.logFailed');
+            errBanner.style.display = 'block';
+          }
+        }
         const ver = v && (typeof v.app === 'string' && v.app ? v.app : (typeof v.version === 'string' && v.version ? v.version : ''));
         if (ver) {
           badge.textContent = 'v' + ver;
@@ -4199,11 +5496,14 @@
       } catch (e) {}
       badge.textContent = 'local';
     }
-    // Status Poller
+    // Status Poller (race guard: solo el poll más nuevo pinta).
+    let statusSeq = 0;
     async function updateStatus() {
+      const seq = ++statusSeq;
       try {
         const st = await api.getStatus();
         if (!st) return;
+        if (seq !== statusSeq) return;
         isServerRunning = st.is_healthy;
         renderStatus(st);
       } catch (e) {}
@@ -4323,10 +5623,9 @@
         stripAction.setAttribute('aria-label', actionLabel);
       }
 
-      // Telemetry meta
-      set('endpoint-meta', healthy ? ('127.0.0.1:' + port) : '127.0.0.1:—');
-      set('endpoint-port', ':' + port + '/v1');
-      set('pid-display', 'PID: ' + (healthy ? (st.pid || 'Activo') : (status === 'starting' ? '...' : '--')));
+      // Telemetry meta (P1 producción: PID/Activo traducidos, no literales).
+      set('endpoint-meta', healthy ? ('127.0.0.1:' + port + '/v1') : '127.0.0.1:—');
+      set('pid-display', T('telemetry.pidLabel') + ': ' + (healthy ? (st.pid || T('telemetry.pidActive')) : (status === 'starting' ? '...' : '--')));
 
       // Telemetry card dimmed when engine down
       const telCard = document.getElementById('telemetry-card');
@@ -4348,6 +5647,11 @@
       // honesto cuando el motor no está en marcha.
       const specModel = document.getElementById('spec-model-id');
       if (specModel) specModel.textContent = servedModelName(st) || 'localmind';
+      const specGw = document.getElementById('spec-gateway-url');
+      if (specGw) {
+        try { specGw.textContent = 'http://' + window.location.host + '/v1'; }
+        catch (e) {}
+      }
       updateLauncherHint(st);
       set('chat-status-hint', chatHintText);
       // Engine-verification telemetry (additive; blank when keys absent/null).
@@ -4400,27 +5704,18 @@
       const errBanner = document.getElementById('error-banner');
       if (errBanner) {
         if (status === 'error' && (st.last_error || st.acceptance_error || '')) {
-          // Aquí el error llega CRUDO y sin prefijo a propósito: este camino es
-          // un fallo POSTERIOR (el motor arrancó y se cayó, o la puerta de
-          // aceptación falló), no un arranque rechazado. Ponerle
-          // "Error al iniciar:" sería falso. El arranque rechazado lo escribe
-          // `startEngine`, que conoce el motivo y le pone su prefijo.
-          //
-          // Los dos caminos no se pisan SI el status llega limpio, y la
-          // precondición la garantiza el servidor, no esta función: `start()`
-          // borra `last_error`/`acceptance_error`/`acceptance_ok` al ABRIR el
-          // intento (no solo al lograrse), así que tras un arranque rechazado
-          // el poller ve esas tres a null y no entra en ninguna de las dos
-          // ramas de abajo. Antes de ese borrado el arranque rechazado
-          // heredaba el error del arranque anterior y el poller pintaba aquí un
-          // mensaje viejo, tapando el "Error al iniciar: ..." recién escrito.
-          // La exclusividad no es incondicional: si el motor se cae o falla la
-          // puerta DESPUÉS de abrirse el intento, esta rama gana, y es lo
-          // correcto (ese error sí acaba de ocurrir).
-          errBanner.textContent = st.last_error || st.acceptance_error;
+          // Fallo POSTERIOR (el motor arrancó y se cayó, o la puerta de
+          // aceptación falló): prefijo traducido siempre, nunca crudo inglés.
+          // El arranque rechazado lo reescribe `startEngine` con el mismo
+          // prefijo; el poller nunca pisa ese texto (ver rama `stopped`).
+          const raw = st.last_error || st.acceptance_error || '';
+          const hint = friendlyEngineHint(raw);
+          errBanner.textContent = T('err.startFail') + raw + (hint ? ' ' + hint : '');
           errBanner.style.display = 'block';
         } else if (st.acceptance_ok === false && (st.acceptance_error || '')) {
-          errBanner.textContent = st.acceptance_error;
+          const raw2 = st.acceptance_error || '';
+          const hint2 = friendlyEngineHint(raw2);
+          errBanner.textContent = T('err.startFail') + raw2 + (hint2 ? ' ' + hint2 : '');
           errBanner.style.display = 'block';
         } else if (status === 'online' || status === 'starting') {
           // Solo se oculta al llegar a un estado nuevo y sano. `stopped` es el estado
@@ -4543,9 +5838,10 @@
     }
 
     function copyCode(btn) {
-      const pre = btn.closest('.code-block-wrapper').querySelector('pre code');
+      const wrap = btn.closest('.code-block-wrapper');
+      const pre = wrap ? wrap.querySelector('pre code') : null;
       if (!pre) return;
-      navigator.clipboard.writeText(pre.textContent);
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(pre.textContent).catch(function(){}); }
       const span = btn.querySelector('span');
       if (span) {
         const orig = span.textContent;
@@ -4588,15 +5884,61 @@
       }
     }
 
+    // P0 producción: "Ir a Modelos" lleva a Ajustes y enfoca la tarjeta de
+    // modelos para importar/evaluar el primer .gguf.
+    function gotoModelsCard() {
+      try { switchTab('settings'); } catch (e) {}
+      try {
+        const card = document.getElementById('btn-import-gguf');
+        if (card) {
+          card.scrollIntoView({ block: 'center' });
+          card.focus();
+        }
+      } catch (e) {}
+    }
+    // P0 producción: bienvenida según estado (0 modelos → importar/evaluar;
+    // guest sin remoto → ir a Conexión). Se repinta con idioma y modelos.
+    function chatWelcomeKey() {
+      try {
+        if (typeof cfgRoleCache !== 'undefined' && cfgRoleCache === 'guest') return 'chat.welcomeGuest';
+      } catch (e) {}
+      try {
+        if (Array.isArray(lastModelsCache) && lastModelsCache.length === 0) return 'chat.welcomeEmpty';
+      } catch (e) {}
+      return 'chat.welcome';
+    }
+    function renderChatWelcome() {
+      const box = document.getElementById('chat-messages');
+      if (!box) return;
+      const sel = box.querySelector
+        ? (box.querySelector('[data-i18n="chat.welcome"]') || box.querySelector('[data-i18n-welcome]'))
+        : null;
+      if (!sel) return;
+      const key = chatWelcomeKey();
+      if (key === 'chat.welcome') {
+        sel.innerHTML = T('chat.welcome');
+        sel.setAttribute('data-i18n', 'chat.welcome');
+        sel.removeAttribute('data-i18n-welcome');
+      } else {
+        sel.innerHTML = escapeHtml(T(key));
+        sel.removeAttribute('data-i18n');
+        sel.setAttribute('data-i18n-welcome', key === 'chat.welcomeGuest' ? 'guest' : 'empty');
+      }
+    }
 
     async function sendChatMessage() {
       if (!isServerRunning) {
-        toast(T('err.engineOff'), 'error');
+        // P0 producción: el Guest sin motor local necesita Conexión, no Panel.
+        const guestOff = (typeof cfgRoleCache !== 'undefined' && cfgRoleCache === 'guest');
+        toast(guestOff ? T('err.engineOffGuest') : T('err.engineOff'), 'error');
+        if (guestOff) { try { switchTab('conexion'); } catch (e) {} }
         return;
       }
+      if (isGenerating) return;
       const input = document.getElementById('chat-input');
-      const text = input.value.trim();
+      const text = input && typeof input.value === 'string' ? input.value.trim() : '';
       if (!text) return;
+      isGenerating = true;
       input.value = '';
       input.style.height = '22px';
 
@@ -4647,22 +5989,45 @@
 
       try {
         activeAbort = new AbortController();
-        isGenerating = true;
         const stopBtn = document.getElementById('btn-stop-gen');
         if (stopBtn) stopBtn.style.display = 'flex';
 
         const startedAt = performance.now();
+        // Sampler: lo que el usuario fijó en Ajustes → Generación; vacío =
+        // el gateway aplica el oficial Qwen3.8 del modo (thinking/instruct).
+        // El effort sale del selector del chat (default `medium`, no el
+        // `xhigh` de la plantilla que sobre-piensa).
+        const chatBody = {
+          model: 'localmind',
+          messages: chatHistory,
+          stream: true,
+          stream_options: { include_usage: true }
+        };
+        const gTemp = document.getElementById('cfg-temperature');
+        const gTopP = document.getElementById('cfg-top-p');
+        const gMax = document.getElementById('cfg-max-tokens');
+        const gSeed = document.getElementById('cfg-seed');
+        const numOrUndef = (el) => {
+          if (!el || typeof el.value !== 'string') return undefined;
+          const s = el.value.trim();
+          if (!s) return undefined;
+          const n = Number(s);
+          return isFinite(n) ? n : undefined;
+        };
+        const tVal = numOrUndef(gTemp);
+        const pVal = numOrUndef(gTopP);
+        const mVal = numOrUndef(gMax);
+        const sVal = numOrUndef(gSeed);
+        if (tVal !== undefined) chatBody.temperature = tVal;
+        if (pVal !== undefined) chatBody.top_p = pVal;
+        if (mVal !== undefined) chatBody.max_tokens = Math.round(mVal);
+        if (sVal !== undefined) chatBody.seed = Math.round(sVal);
+        chatBody.reasoning_effort = getSelectedChatEffort();
         const res = await fetch('/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: activeAbort.signal,
-          body: JSON.stringify({
-            model: 'localmind',
-            messages: chatHistory,
-            temperature: 0.7,
-            stream: true,
-            stream_options: { include_usage: true }
-          })
+          body: JSON.stringify(chatBody)
         });
 
         if (!res.ok || !res.body) {
@@ -4676,6 +6041,10 @@
         let sseBuffer = '';
         let usage = null;
         let aborted = false;
+        let lastMdRender = 0;
+        // Throttle de render (auditoría): renderMarkdown() re-parsea TODA la
+        // respuesta en cada token (O(n²) por respuesta larga). Se pinta como
+        // mucho cada 150 ms + render final al cerrar el stream.
 
         while (true) {
           let readResult;
@@ -4708,12 +6077,22 @@
                 }
                 if (delta?.content) {
                   fullReply += delta.content;
-                  botBubble.innerHTML = renderMarkdown(fullReply);
+                  const nowMs = performance.now();
+                  if (nowMs - lastMdRender > 150) {
+                    lastMdRender = nowMs;
+                    botBubble.innerHTML = renderMarkdown(fullReply);
+                    messagesArea.scrollTop = messagesArea.scrollHeight;
+                  }
                 }
-                messagesArea.scrollTop = messagesArea.scrollHeight;
               } catch (err) {}
             }
           }
+        }
+
+        // Render final (el throttle deja hasta 150 ms sin pintar).
+        if (fullReply) {
+          botBubble.innerHTML = renderMarkdown(fullReply);
+          messagesArea.scrollTop = messagesArea.scrollHeight;
         }
 
         const elapsed = (performance.now() - startedAt) / 1000;
@@ -4741,7 +6120,7 @@
         if (err && err.name === 'AbortError') {
           // Handled in the loop; nothing extra needed here.
         } else {
-          botBubble.innerHTML = `<span style="color: #f87171;">${escapeHtml(T('chat.error') + err.message)}</span>`;
+          botBubble.innerHTML = `<span style="color: var(--danger-soft); font-weight: var(--fw-semibold);">${escapeHtml(T('chat.error') + err.message)}</span>`;
         }
       } finally {
         isGenerating = false;
@@ -4789,14 +6168,14 @@
         }
         if (s.profile) {
           const profileSel = document.getElementById('profile-select');
-          if (profileSel && profileSel.querySelector(`option[value="${s.profile}"]`)) {
+          if (profileSel && profileSel.querySelector(`option[value="${CSS.escape(s.profile ?? '')}"]`)) {
             profileSel.value = s.profile;
             onProfileChange();
           }
         }
         if (s.context) {
           const ctxSel = document.getElementById('context-select');
-          if (ctxSel && ctxSel.querySelector(`option[value="${s.context}"]`)) {
+          if (ctxSel && ctxSel.querySelector(`option[value="${CSS.escape(s.context ?? '')}"]`)) {
             ctxSel.value = String(s.context);
           }
         }
@@ -4826,6 +6205,16 @@
           }
         });
         connectEvents();
+        maybeUnlock();
+        maybeOnboard();
+        // Switcher del header al día desde el arranque (sin abrir Conexión).
+        try {
+          api.getAppConfig().then(cfg => {
+            if (cfg && !cfg.missing) syncRoleSwitcher(roleFromCfg(cfg));
+          }).catch(() => {});
+        } catch (e) {}
+        // Banner de update en el Panel desde el arranque (sin abrir Ajustes).
+        try { refreshUpdate().catch(() => {}); } catch (e) {}
       }
       const modelSel = document.getElementById('model-select');
       if (modelSel) modelSel.addEventListener('change', () => updateModelBadges(lastModelsCache));
@@ -4834,6 +6223,9 @@
       initCliEffort();
       const effortSel = document.getElementById('cli-effort-select');
       if (effortSel) effortSel.addEventListener('change', () => persistCliEffort(effortSel.value));
+      initChatEffort();
+      const chatEffortSel = document.getElementById('chat-effort-select');
+      if (chatEffortSel) chatEffortSel.addEventListener('change', () => persistChatEffort(chatEffortSel.value));
     }
 
     document.addEventListener('DOMContentLoaded', initApp);

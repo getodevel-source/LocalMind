@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Install LocalMind into %LOCALAPPDATA%\Programs\LocalMind.
+  Install OMNI into %LOCALAPPDATA%\Programs\OMNI.
 
 .DESCRIPTION
-  Copies the runtime files (LocalMind.exe, ui.html, ui_fallback.html,
-  localmind.ico, localmind.png, bin/**) from the repo working tree — or from
+  Copies the runtime files (OMNI.exe, ui.html, ui_fallback.html,
+  omni.ico, omni.png, bin/**) from the repo working tree — or from
   an extracted portable dir via -SourceDir — into the target dir, creates a
-  Start Menu shortcut (LocalMind.lnk) plus an "Uninstall LocalMind" shortcut,
+  Start Menu shortcut (OMNI.lnk) plus an "Uninstall OMNI" shortcut,
   and NEVER deletes models/: an existing models/ dir in the target is kept
   and reported.
 
@@ -15,12 +15,11 @@
   Directory holding the runtime files (default: repo root).
 
 .PARAMETER TargetDir
-  Install dir (default: %LOCALAPPDATA%\Programs\LocalMind). Exposed for
+  Install dir (default: %LOCALAPPDATA%\Programs\OMNI). Exposed for
   testability; normal installs omit it.
 
 .PARAMETER ShortcutDir
-  Start Menu folder for the shortcuts (default: StartMenu\Programs\LocalMind).
-  Exposed for testability; normal installs omit it.
+  Start Menu folder for the shortcuts (default: StartMenu\Programs\OMNI).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File packaging/install.ps1
@@ -28,29 +27,47 @@
 [CmdletBinding()]
 param(
   [string]$SourceDir = (Split-Path -Parent $PSScriptRoot),
-  [string]$TargetDir = (Join-Path $env:LOCALAPPDATA 'Programs\LocalMind'),
-  [string]$ShortcutDir = (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\LocalMind')
+  [string]$TargetDir = (Join-Path $env:LOCALAPPDATA 'Programs\OMNI'),
+  [string]$ShortcutDir = (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\OMNI')
 )
 
 $ErrorActionPreference = 'Stop'
 
-$Files = @('LocalMind.exe', 'ui.html', 'ui_fallback.html', 'localmind.ico', 'localmind.png')
-foreach ($f in $Files) {
+# P1 producción: version.txt y LEEME.txt solo existen tras build-portable.ps1
+# (los genera en el staging); en el repo en crudo faltan. Son opcionales con
+# aviso — no throw — porque no afectan al runtime.
+$RequiredFiles = @('OMNI.exe', 'ui.html', 'ui_fallback.html', 'omni.ico', 'omni.png')
+$OptionalFiles = @('version.txt', 'LEEME.txt')
+foreach ($f in $RequiredFiles) {
   # ui_fallback.html lives in src-rust/ in the repo tree; in a portable dir it sits next to the exe.
   $candidates = @((Join-Path $SourceDir $f), (Join-Path $SourceDir "src-rust/$f"))
   if (-not ($candidates | Where-Object { Test-Path $_ })) { throw "Missing source file: $f (looked in $SourceDir and $SourceDir/src-rust)" }
 }
+foreach ($f in $OptionalFiles) {
+  $candidates = @((Join-Path $SourceDir $f), (Join-Path $SourceDir "src-rust/$f"))
+  if (-not ($candidates | Where-Object { Test-Path $_ })) { Write-Warning "Opcional ausente: $f (ejecuta packaging/build-portable.ps1 para generarlo)" }
+}
+$Files = @($RequiredFiles + ($OptionalFiles | Where-Object {
+  $candidates = @((Join-Path $SourceDir $_), (Join-Path $SourceDir "src-rust/$_"))
+  $candidates | Where-Object { Test-Path $_ }
+}))
 $BinSrc = Join-Path $SourceDir 'bin'
 if (-not (Test-Path $BinSrc)) { throw "Missing source dir: $BinSrc" }
 
-# Refuse to overwrite a running LocalMind.exe *from the target dir*.
-# (Other LocalMind processes — e.g. the owner's live app elsewhere — are not ours.)
-$TargetExe = Join-Path $TargetDir 'LocalMind.exe'
-$runningHere = Get-Process -Name 'LocalMind' -ErrorAction SilentlyContinue | Where-Object {
+# Refuse to overwrite a running OMNI.exe *from the target dir*.
+# (Other OMNI processes — e.g. the owner's live app elsewhere — are not ours.)
+$TargetExe = Join-Path $TargetDir 'OMNI.exe'
+$runningHere = Get-Process -Name 'OMNI' -ErrorAction SilentlyContinue | Where-Object {
   try { $_.Path -and ($_.Path -eq $TargetExe) } catch { $false }
 }
 if ((Test-Path $TargetExe) -and $runningHere) {
-  throw 'LocalMind.exe is running from the install dir. Close it first, then re-run install.ps1.'
+  throw 'OMNI.exe is running from the install dir. Close it first, then re-run install.ps1.'
+}
+# Una actualización pendiente (staging en %TEMP%\omni-update) se aplica al
+# salir de la app: no reinstalar encima o el swap fallaría a medias.
+$PendingUpdate = Get-ChildItem ([System.IO.Path]::GetTempPath()) -Directory -Filter 'omni-update' -ErrorAction SilentlyContinue
+if ($PendingUpdate) {
+  throw 'Hay una actualización pendiente de instalar. Abre OMNI, reiníciala para aplicarla y vuelve a ejecutar install.ps1.'
 }
 
 $null = New-Item -ItemType Directory -Path $TargetDir -Force
@@ -77,12 +94,12 @@ if ($HadModels) {
 # --- Shortcuts via WScript.Shell ---
 $null = New-Item -ItemType Directory -Path $ShortcutDir -Force
 $Shell = New-Object -ComObject WScript.Shell
-$lnk = $Shell.CreateShortcut((Join-Path $ShortcutDir 'LocalMind.lnk'))
+$lnk = $Shell.CreateShortcut((Join-Path $ShortcutDir 'OMNI.lnk'))
 $lnk.TargetPath = $TargetExe
 $lnk.WorkingDirectory = $TargetDir
-$lnk.IconLocation = (Join-Path $TargetDir 'localmind.ico')
+$lnk.IconLocation = (Join-Path $TargetDir 'omni.ico')
 $lnk.Save()
-$unl = $Shell.CreateShortcut((Join-Path $ShortcutDir 'Uninstall LocalMind.lnk'))
+$unl = $Shell.CreateShortcut((Join-Path $ShortcutDir 'Uninstall OMNI.lnk'))
 $unl.TargetPath = 'powershell.exe'
 $unl.Arguments = "-ExecutionPolicy Bypass -File `"$TargetDir\uninstall.ps1`""
 $unl.WorkingDirectory = $TargetDir
@@ -91,4 +108,4 @@ $unl.Save()
 Copy-Item (Join-Path $PSScriptRoot 'uninstall.ps1') (Join-Path $TargetDir 'uninstall.ps1') -Force
 
 Write-Host "Installed to $TargetDir"
-Write-Host "Shortcut: $ShortcutDir\LocalMind.lnk"
+Write-Host "Shortcut: $ShortcutDir\OMNI.lnk"

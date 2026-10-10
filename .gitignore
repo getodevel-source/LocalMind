@@ -18,6 +18,10 @@ dist/
 # Backup executables
 *.bak-*
 
+# P1 producción: respaldos del swap de auto-update (app.prev-<ver>/).
+bin.prev*/
+OMNI.prev*/
+
 # HIP/ROCm third-party binaries (llama.cpp build variant)
 bin-hip/
 

@@ -42,7 +42,13 @@ pub fn log_file(base_dir: &Path) -> PathBuf {
 pub fn format_line(secs_epoch: u64, text: &str) -> String {
     let clean: String = text
         .chars()
-        .map(|c| if c == '\0' || c == '\n' || c == '\r' { ' ' } else { c })
+        .map(|c| {
+            if c == '\0' || c == '\n' || c == '\r' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     format!("[{}] {}", secs_epoch, clean.trim_end())
 }
@@ -69,9 +75,25 @@ pub fn rotate(base: &Path) {
 /// Anexar una línea ya formateada, rotando si hace falta. Best-effort:
 /// nunca falla al llamador (el motor no depende del log de disco).
 pub fn append_line(base: &Path, line: &str) {
+    if append_line_result(base, line).is_err() {
+        LOG_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Contador de anexados fallidos (disco lleno, permiso, ruta). Para
+/// `GET /api/version` (`log_ok:false`): el dueño ve que pierde evidencia.
+static LOG_FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// ¿El log de disco sigue escribiéndose? (falso tras el primer fallo).
+pub fn log_ok() -> bool {
+    LOG_FAILURES.load(std::sync::atomic::Ordering::Relaxed) == 0
+}
+
+/// Núcleo con error propagado (para `log_ok` y tests).
+pub fn append_line_result(base: &Path, line: &str) -> Result<(), String> {
     if let Some(parent) = base.parent() {
         if !parent.as_os_str().is_empty() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent).map_err(|e| format!("log: {}", e))?;
         }
     }
     let current = std::fs::metadata(base).map(|m| m.len()).unwrap_or(0);
@@ -79,9 +101,12 @@ pub fn append_line(base: &Path, line: &str) {
         rotate(base);
     }
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(base) {
-        let _ = writeln!(f, "{}", line);
-    }
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(base)
+        .map_err(|e| format!("log: {}", e))?;
+    writeln!(f, "{}", line).map_err(|e| format!("log: {}", e))
 }
 
 fn now_epoch_secs() -> u64 {
@@ -94,6 +119,22 @@ fn now_epoch_secs() -> u64 {
 /// Entrada perezosa del `ProcessManager`: formatea con hora UTC y anexa.
 pub fn write_log_line(base: &Path, text: &str) {
     append_line(base, &format_line(now_epoch_secs(), text));
+}
+
+/// Nivel ERROR (`[ERROR] ...`): fallos que impiden una operación.
+pub fn write_error(base: &Path, text: &str) {
+    append_line(
+        base,
+        &format_line(now_epoch_secs(), &format!("[ERROR] {}", text)),
+    );
+}
+
+/// Nivel WARN (`[WARN] ...`): degradaciones que no impiden operar.
+pub fn write_warn(base: &Path, text: &str) {
+    append_line(
+        base,
+        &format_line(now_epoch_secs(), &format!("[WARN] {}", text)),
+    );
 }
 
 #[cfg(test)]
@@ -129,7 +170,10 @@ mod tests {
         rotate(&base);
         assert!(!base.exists());
         assert_eq!(std::fs::read(dir.join("localmind.log.1")).unwrap(), b"base");
-        assert_eq!(std::fs::read(dir.join("localmind.log.2")).unwrap(), b"viej1");
+        assert_eq!(
+            std::fs::read(dir.join("localmind.log.2")).unwrap(),
+            b"viej1"
+        );
         // `.2` viejo ("viej2") descartado: solo 3 archivos como máximo.
         let entries: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
         assert_eq!(entries.len(), 2);

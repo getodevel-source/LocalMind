@@ -54,12 +54,22 @@ pub fn notify(title: &str, body: &str, tag: &str, log_on_fail: impl FnOnce(&str)
         None => return,
     };
     let mut cmd = Command::new("powershell");
-    cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script]);
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        &script,
+    ]);
     cmd.creation_flags(CREATE_NO_WINDOW);
     // Desacoplado: no se espera el hijo (el toast vive en el SO).
     match cmd.spawn() {
         Ok(_) => {}
-        Err(e) => log_on_fail(&format!("[LocalMind] Aviso de escritorio no enviado ({}).", e)),
+        Err(e) => log_on_fail(&format!(
+            "[LocalMind] Aviso de escritorio no enviado ({}).",
+            e
+        )),
     }
 }
 
