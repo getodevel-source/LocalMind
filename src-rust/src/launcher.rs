@@ -330,6 +330,8 @@ pub fn write_deepseek_patch(home: &std::path::Path, content: &str) -> Result<boo
 /// Guardar la clave remota en el dir privado (Guest): `remote.key` junto a la
 /// config del agente, solo si cambia. El lanzador la lee con `set /p` igual
 /// que `gateway.key`: nunca viaja en argv ni en el comando visible.
+/// P1 producción: tras escribir se reutiliza `auth::restrict_key_file`
+/// (misma ACL que `gateway.key`); si `icacls` falla ya avisa por stderr.
 pub fn write_remote_key_file(home: &std::path::Path, key: &str) -> Result<PathBuf, String> {
     if let Err(e) = std::fs::create_dir_all(home) {
         return Err(format!("No se pudo crear {}: {}", home.display(), e));
@@ -338,12 +340,14 @@ pub fn write_remote_key_file(home: &std::path::Path, key: &str) -> Result<PathBu
     let content = format!("{}\n", key.trim());
     if let Ok(cur) = std::fs::read_to_string(&dest) {
         if cur == content {
+            crate::auth::restrict_key_file(&dest);
             return Ok(dest);
         }
     }
     if let Err(e) = std::fs::write(&dest, &content) {
         return Err(format!("No se pudo escribir {}: {}", dest.display(), e));
     }
+    crate::auth::restrict_key_file(&dest);
     Ok(dest)
 }
 

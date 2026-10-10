@@ -715,6 +715,8 @@
       line-height: 1.45;
     }
     .toast.error { border-left-color: var(--danger); }
+    .toast-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .toast-close { margin-left: auto; }
 
     /* ---------- Metrics ---------- */
     .metric-box {
@@ -1310,7 +1312,10 @@
       flex-wrap: wrap;
     }
     .terminal-header .card-title { flex: 1 1 auto; min-width: 200px; }
-    .terminal-tools { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+    .terminal-tools { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; flex-wrap: wrap; }
+    .table-scroll { overflow-x: auto; max-width: 100%; }
+    .strip-state { flex: 1 1 auto; min-width: 0; }
+    #strip-text { min-width: 0; max-width: 100%; }
     #terminal-stream {
       flex: 1;
       min-height: 0;
@@ -1461,13 +1466,13 @@
 
     <div class="header-spacer"></div>
 
-    <div id="header-status" class="header-status stopped" role="status" aria-live="polite">
+    <div id="header-status" class="header-status stopped" aria-hidden="true">
       <span class="status-dot" aria-hidden="true"></span>
-      <span class="hdr-status-text" id="header-status-text" data-i18n="hdr.stopped">En reposo</span>
+      <span class="hdr-status-text" id="header-status-text" data-i18n="hdr.stopped" aria-hidden="true">En reposo</span>
     </div>
 
     <div class="lang-select-wrap">
-      <label for="lang-select" id="lang-label">Idioma</label>
+      <label for="lang-select" id="lang-label" data-i18n="lang.label">Idioma</label>
       <div class="select-wrapper">
         <select id="lang-select" class="lang-select" aria-labelledby="lang-label">
           <option value="es">ES</option>
@@ -1476,22 +1481,22 @@
       </div>
     </div>
 
-    <div class="role-switch" role="group" aria-label="Rol">
+    <div class="role-switch" role="group" data-i18n-aria="settings.roleGroup" aria-label="Rol">
       <button class="role-btn active" type="button" id="hs-oraculo" onclick="setRole('oraculo')" aria-pressed="true"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
       <button class="role-btn" type="button" id="hs-guest" onclick="setRole('guest')" aria-pressed="false"><span data-i18n="settings.roleGuest">Guest</span></button>
     </div>
 
-    <nav class="tabs-nav" aria-label="OMNI" id="main-nav">
-      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard">
+    <nav class="tabs-nav" aria-label="OMNI" id="main-nav" role="tablist">
+      <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')" id="nav-dashboard" role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" onkeydown="onNavKey(event)">
         <span data-i18n="nav.panel">Panel</span>
       </button>
-      <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" id="nav-chat">
+      <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" id="nav-chat" role="tab" aria-selected="false" aria-controls="tab-chat" tabindex="-1" onkeydown="onNavKey(event)">
         <span data-i18n="nav.chat">Chat</span>
       </button>
-      <button class="tab-btn" data-tab="conexion" onclick="switchTab('conexion')" id="nav-conexion">
+      <button class="tab-btn" data-tab="conexion" onclick="switchTab('conexion')" id="nav-conexion" role="tab" aria-selected="false" aria-controls="tab-conexion" tabindex="-1" onkeydown="onNavKey(event)">
         <span data-i18n="nav.conexion">Conexión</span>
       </button>
-      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" id="nav-settings">
+      <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" id="nav-settings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" onkeydown="onNavKey(event)">
         <span data-i18n="nav.settings">Ajustes</span>
       </button>
     </nav>
@@ -1500,7 +1505,7 @@
   <div id="status-strip" class="status-strip">
     <div id="strip-state" class="strip-state stopped">
       <span id="strip-dot" class="strip-dot" aria-hidden="true"></span>
-      <span id="strip-text" role="status" aria-live="polite">En reposo</span>
+      <span id="strip-text" role="status" data-i18n="strip.idle" data-i18n-ph="strip.idle">En reposo</span>
     </div>
     <span id="strip-port" class="strip-port" style="display: none;">127.0.0.1:8080</span>
     <span id="strip-countdown" class="strip-countdown" style="display: none;">auto-stop --</span>
@@ -1522,7 +1527,7 @@
       <div class="card-body">
         <div class="profile-hint" data-i18n="unlock.sub">Esta UI está en red: ingresa la clave del Servidor.</div>
         <label class="field-label" for="unlock-key"><span data-i18n="settings.clientKey">Clave</span></label>
-        <input type="password" id="unlock-key" autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Clave">
+        <input type="password" id="unlock-key" autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.clientKey" aria-label="Clave">
         <div id="unlock-error" class="error-banner" role="alert"></div>
         <div style="display: flex; gap: 6px; margin-top: 8px;">
           <button class="btn btn-primary" type="button" id="unlock-go" onclick="doUnlock()"><span data-i18n="unlock.go">Entrar</span></button>
@@ -1531,27 +1536,27 @@
     </div>
   </div>
 
-  <!-- Onboarding de rol (Fase UX): primer arranque pregunta Oráculo/Guest.
-       Se guarda en localStorage; "después" conserva el rol vigente. -->
-  <div id="onboard-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
+  <!-- Onboarding de rol (Fase UX): primer arranque pregunta Oráculo/Guest. -->
+  <!-- "Decidir después" conserva el rol vigente y deja un aviso persistente en Conexión. -->
+  <div id="onboard-overlay" role="dialog" aria-modal="true" aria-labelledby="onboard-title" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 90; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;">
     <div class="card" style="max-width: min(460px, 100%); margin: 0; width: 100%;">
       <div class="card-header">
-        <span class="card-title" data-i18n="onboard.title">Elige el rol de esta PC</span>
+        <span class="card-title" id="onboard-title" data-i18n="onboard.title">Elige el rol de esta PC</span>
       </div>
       <div class="card-body">
         <div class="profile-hint" data-i18n="onboard.sub">Puedes cambiarlo cuando quieras desde el encabezado o Conexión.</div>
         <div class="fields-row cfg-2col" style="margin-top: 8px;">
           <div class="field-group">
-            <button class="btn btn-primary" type="button" style="width: 100%;" onclick="chooseRole('oraculo')"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
+            <button class="btn btn-primary" type="button" id="onboard-oraculo" style="width: 100%;" onclick="chooseRole('oraculo')"><span data-i18n="settings.roleOraculo">Oráculo</span></button>
             <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
           </div>
           <div class="field-group">
-            <button class="tool-btn" type="button" style="width: 100%;" onclick="chooseRole('guest')"><span data-i18n="settings.roleGuest">Guest</span></button>
+            <button class="tool-btn" type="button" id="onboard-guest" style="width: 100%;" onclick="chooseRole('guest')"><span data-i18n="settings.roleGuest">Guest</span></button>
             <div class="profile-hint" data-i18n="settings.roleGuestDesc">Sin modelo: chatea y lanza CLIs contra el Oráculo.</div>
           </div>
         </div>
         <div style="margin-top: 8px; text-align: center;">
-          <button class="tool-btn" type="button" onclick="laterRole()"><span data-i18n="onboard.later">Decidir después</span></button>
+          <button class="tool-btn" type="button" id="onboard-later" onclick="laterRole()"><span data-i18n="onboard.later">Decidir después</span></button>
         </div>
       </div>
     </div>
@@ -1578,7 +1583,7 @@
 
           <div class="card-body">
             <div id="error-banner" class="error-banner" role="alert"></div>
-            <div id="update-banner" class="cfg-ok" style="display: none; cursor: pointer;" role="status" onclick="switchTab('settings')"></div>
+            <button type="button" id="update-banner" class="cfg-ok" style="display: none; cursor: pointer;" onclick="switchTab('settings')"></button>
 
             <div class="field-group">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -1702,7 +1707,7 @@
         <div class="card" id="telemetry-card">
           <div class="card-header">
             <span class="card-title" data-i18n="telemetry.title">Telemetría</span>
-            <span id="pid-display" class="card-meta">PID: --</span>
+            <span id="pid-display" class="card-meta" data-i18n-ph="telemetry.pidLabel">PID: --</span>
           </div>
 
           <div class="card-body">
@@ -1713,7 +1718,7 @@
             <div class="telemetry-title" data-i18n="telemetry.live">Telemetría en vivo</div>
             <div class="telemetry-grid" role="status" aria-live="off">
               <div class="metric-box">
-                <span class="metric-label">Gen t/s</span>
+                <span class="metric-label" data-i18n="telemetry.genRate">Gen t/s</span>
                 <span id="tel-gen-tps" class="metric-value">—</span>
               </div>
               <div class="metric-box">
@@ -1756,8 +1761,8 @@
             <span data-i18n="logs.title">Proceso llama-server.exe</span>
           </div>
           <div class="terminal-tools">
-            <button id="btn-scroll-toggle" class="tool-btn" onclick="toggleScroll()">Auto-scroll: ON</button>
-            <button class="tool-btn" onclick="copyTerminalLogs()"><span data-i18n="logs.copy">Copiar</span></button>
+            <button id="btn-scroll-toggle" class="tool-btn" onclick="toggleScroll()" data-i18n="logs.scrollOn">Auto-scroll: ON</button>
+            <button class="tool-btn" onclick="copyTerminalLogs(event)"><span data-i18n="logs.copy">Copiar</span></button>
             <button class="tool-btn" onclick="clearTerminalLogs()"><span data-i18n="logs.clear">Limpiar</span></button>
           </div>
         </div>
@@ -1768,6 +1773,7 @@
         <div class="info-card">
           <h3 data-i18n="specs.hwTitle">Hardware Detectado &amp; Motor de Inferencia</h3>
           <p data-i18n="specs.hwBody">Equipo y motor en uso.</p>
+          <div class="table-scroll">
           <table class="spec-table">
             <thead>
               <tr>
@@ -1794,6 +1800,7 @@
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
 
         <div class="info-card">
@@ -1851,7 +1858,7 @@
           </div>
           <div class="chat-dock-hints">
             <span data-i18n="chat.hint">Presiona Shift + Enter para saltos de línea</span>
-            <span id="chat-status-hint" role="status">Motor en reposo</span>
+            <span id="chat-status-hint" role="status" data-i18n="chat.hintIdle">Motor en reposo</span>
           </div>
         </div>
       </div>
@@ -1872,7 +1879,7 @@
             <span class="card-meta" id="cfg-role-meta">–</span>
           </div>
           <div class="card-body">
-            <div class="fields-row cfg-2col" role="radiogroup" aria-label="Rol">
+            <div class="fields-row cfg-2col" role="radiogroup" data-i18n-aria="settings.roleGroup" aria-label="Rol">
               <div class="field-group">
                 <label class="cfg-check"><input type="radio" name="cfg-role" value="oraculo" id="cfg-role-oraculo" onchange="setRole('oraculo')"> <span data-i18n="settings.roleOraculo">Oráculo</span></label>
                 <div class="profile-hint" data-i18n="settings.roleOraculoDesc">Tiene el modelo: computa, sirve y usa en esta PC.</div>
@@ -1885,6 +1892,7 @@
             <div class="profile-hint" data-i18n="settings.roleRestart">Exponer en LAN rige al reiniciar la app.</div>
             <div id="cfg-role-error" class="error-banner" role="alert"></div>
             <div id="cfg-role-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+            <div id="role-deferred-hint" class="profile-hint warn" style="display: none;" role="note"></div>
             <!-- Oracle panel = servidor: LAN + pairing -->
             <div id="cfg-server-panel" style="display: none; margin-top: 8px;">
               <label class="cfg-check"><input type="checkbox" id="cfg-lan-enabled" onchange="setLanExposed(this.checked)"> <span data-i18n="settings.lanExposed">Exponer en la LAN</span></label>
@@ -1894,7 +1902,11 @@
               <div class="field-label" style="margin-top: 4px;"><span data-i18n="settings.serverPairing">Emparejar (QR o copiar)</span></div>
               <div class="fields-row">
                 <div class="field-group" style="flex: 1;">
-                  <input type="text" id="cfg-server-pairing" readonly autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Pairing">
+                  <!-- P2 producción: la clave de pairing no se exhibe en texto plano (shoulder surfing / capturas): `password` + mostrar temporal con autoclear. -->
+                  <input type="password" id="cfg-server-pairing" readonly autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.serverPairing" aria-label="Pairing">
+                </div>
+                <div class="field-group" style="flex: 0 0 auto; align-self: end;">
+                  <button class="tool-btn" type="button" id="cfg-server-show" onclick="togglePairing()"><span data-i18n="settings.serverShow">Mostrar</span></button>
                 </div>
               </div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
@@ -1905,9 +1917,9 @@
             </div>
             <div id="cfg-client-panel" style="display: none; margin-top: 8px;">
               <label class="field-label" for="cfg-remote-url"><span data-i18n="settings.clientUrl">URL del Servidor</span></label>
-              <input type="text" id="cfg-remote-url" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="http://192.168.1.10:17860" aria-label="URL del Servidor">
+              <input type="text" id="cfg-remote-url" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="http://192.168.1.10:17860" data-i18n-aria="settings.clientUrl" aria-label="URL del Servidor">
               <label class="field-label" for="cfg-remote-key" style="margin-top: 4px;"><span data-i18n="settings.clientKey">Clave</span></label>
-              <input type="password" id="cfg-remote-key" autocomplete="off" spellcheck="false" style="cursor: text;" aria-label="Clave">
+              <input type="password" id="cfg-remote-key" autocomplete="off" spellcheck="false" style="cursor: text;" data-i18n-aria="settings.clientKey" aria-label="Clave">
               <div id="cfg-client-result" class="telemetry-meta" role="status" style="margin-top: 4px;"></div>
               <div id="cfg-client-error" class="error-banner" role="alert"></div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
@@ -1941,6 +1953,7 @@
             <div class="usage-section-title" data-i18n="usage.last14">Últimos 14 días</div>
             <div id="usage-chart" class="usage-chart"></div>
             <div class="usage-section-title" data-i18n="usage.byModel">Por modelo</div>
+            <div class="table-scroll">
             <table class="usage-table">
               <thead>
                 <tr>
@@ -1951,6 +1964,7 @@
               </thead>
               <tbody id="usage-by-model"></tbody>
             </table>
+            </div>
             <details class="advanced">
               <summary><span data-i18n="usage.recent">Últimas peticiones</span></summary>
               <div id="usage-raw-list" class="usage-raw-list" style="margin-top: 8px;"></div>
@@ -2002,11 +2016,11 @@
               <div class="fields-row">
                 <div class="field-group">
                   <label class="field-label" for="cfg-profile-context"><span data-i18n="settings.profileContext">Contexto (tokens)</span></label>
-                  <input type="text" id="cfg-profile-context" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="32768" aria-label="Contexto (tokens)">
+                  <input type="text" id="cfg-profile-context" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="32768" data-i18n-aria="settings.profileContext" aria-label="Contexto (tokens)">
                 </div>
                 <div class="field-group">
                   <label class="field-label" for="cfg-profile-cacheram"><span data-i18n="settings.profileCache">KV cache en RAM (MB)</span></label>
-                  <input type="text" id="cfg-profile-cacheram" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" aria-label="KV cache en RAM (MB)">
+                  <input type="text" id="cfg-profile-cacheram" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" data-i18n-aria="settings.profileCache" aria-label="KV cache en RAM (MB)">
                 </div>
               </div>
               <label class="field-label" for="cfg-profile-flags"><span data-i18n="settings.profileFlags">Flags extra (uno por línea)</span></label>
@@ -2039,21 +2053,21 @@
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-temperature"><span data-i18n="settings.temperature">Temperatura</span></label>
-                <input type="text" id="cfg-temperature" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.7" aria-label="Temperatura">
+                <input type="text" id="cfg-temperature" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.7" data-i18n-aria="settings.temperature" aria-label="Temperatura">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-top-p"><span data-i18n="settings.topP">Top-p</span></label>
-                <input type="text" id="cfg-top-p" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.9" aria-label="Top-p">
+                <input type="text" id="cfg-top-p" inputmode="decimal" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0.9" data-i18n-aria="settings.topP" aria-label="Top-p">
               </div>
             </div>
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-max-tokens"><span data-i18n="settings.maxTokens">Max tokens</span></label>
-                <input type="text" id="cfg-max-tokens" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="2048" aria-label="Max tokens">
+                <input type="text" id="cfg-max-tokens" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="2048" data-i18n-aria="settings.maxTokens" aria-label="Max tokens">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-seed"><span data-i18n="settings.seed">Seed</span></label>
-                <input type="text" id="cfg-seed" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" aria-label="Seed">
+                <input type="text" id="cfg-seed" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="0" data-i18n-aria="settings.seed" aria-label="Seed">
               </div>
             </div>
             <div class="profile-hint" data-i18n="settings.nextStart">Se aplica al próximo arranque del motor</div>
@@ -2074,12 +2088,11 @@
             <div class="fields-row cfg-2col">
               <div class="field-group">
                 <label class="field-label" for="cfg-idle-min"><span data-i18n="settings.idleMin">Auto-stop (minutos)</span></label>
-                <input type="text" id="cfg-idle-min" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="25" aria-label="Auto-stop (minutos)">
-                <div class="profile-hint" data-i18n="settings.idleHint">0 = desactivado: el motor no se apaga solo</div>
+                <input type="text" id="cfg-idle-min" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="25" data-i18n-aria="settings.idleMin" aria-label="Auto-stop (minutos)">
               </div>
               <div class="field-group">
                 <label class="field-label" for="cfg-threads"><span data-i18n="engine.threads">Hilos de CPU</span></label>
-                <input type="text" id="cfg-threads" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="6" aria-label="Hilos de CPU">
+                <input type="text" id="cfg-threads" inputmode="numeric" autocomplete="off" spellcheck="false" style="cursor: text;" placeholder="6" data-i18n-aria="engine.threads" aria-label="Hilos de CPU">
               </div>
             </div>
             <div class="field-group">
@@ -2118,8 +2131,9 @@
             <span class="card-meta" id="models-meta">–</span>
           </div>
           <div class="card-body">
-            <div id="models-empty" class="empty-state" style="display: none;" data-i18n="models.empty">Todavía no hay modelos. Importa un .gguf o descarga uno verificado.</div>
+            <div id="models-empty" class="empty-state" style="display: none;"><span data-i18n="models.empty">Sin modelos — importa un .gguf</span> <button class="tool-btn" type="button" id="btn-models-goto" onclick="gotoModelsCard()" data-i18n="models.goto">Ir a Modelos</button></div>
             <div id="models-starter" class="profile-hint" style="display: none;" role="note"><span data-i18n="models.starterHint">¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.</span> <button class="tool-btn" type="button" id="btn-starter-fill" onclick="fillStarterModel()"><span data-i18n="models.starterFill">Rellenar ejemplo</span></button></div>
+            <div class="table-scroll">
             <table class="models-table" id="models-table">
               <thead>
                 <tr>
@@ -2131,6 +2145,7 @@
               </thead>
               <tbody id="models-tbody"></tbody>
             </table>
+            </div>
 
             <div class="field-group">
               <label class="field-label" for="model-select">
@@ -2192,12 +2207,43 @@
             <div id="cfg-update-error" class="error-banner" role="alert"></div>
             <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
               <button class="tool-btn" type="button" id="cfg-update-check" onclick="checkUpdate()"><span data-i18n="settings.updateCheck">Buscar actualización</span> <span id="cfg-update-spinner" class="spinner" style="display: none;" aria-hidden="true"></span></button>
+              <button class="tool-btn" type="button" id="cfg-update-retry" onclick="checkUpdate()" style="display: none;"><span data-i18n="settings.updateRetry">Reintentar</span></button>
               <button class="tool-btn" type="button" id="cfg-update-dl" onclick="downloadUpdate()"><span data-i18n="settings.updateDownload">Descargar</span></button>
               <button class="tool-btn" type="button" id="cfg-update-cancel" onclick="cancelUpdate()"><span data-i18n="settings.updateCancel">Cancelar</span></button>
               <button class="btn btn-primary" type="button" id="cfg-update-restart" onclick="restartToInstall()" style="display: none;"><span data-i18n="settings.updateRestart">Reiniciar e instalar</span></button>
             <label class="cfg-check" style="margin-top: 6px;"><input type="checkbox" id="cfg-update-startup" onchange="saveUpdateCfg()"> <span data-i18n="settings.updateStartup">Comprobar al arrancar</span></label>
             <div class="profile-hint" data-i18n="settings.updateHint">La actualización se instala al reiniciar la app; tus modelos y ajustes se conservan.</div>
             <div id="cfg-update-ok" class="cfg-ok" style="display: none;" role="status" data-i18n="settings.saved">Guardado</div>
+          </div>
+        </div>
+
+        <div class="card" id="cfg-data-card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="settings.dataTitle">Datos y desinstalación</span>
+          </div>
+          <div class="card-body">
+            <div class="profile-hint" data-i18n="settings.dataPaths">Tus modelos y ajustes viven aquí; la actualización no los toca.</div>
+            <div class="telemetry-meta"><code id="cfg-data-appdata">%APPDATA%\LocalMind</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-appdata" onclick="copyDataPath('appdata')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+              <button class="tool-btn" type="button" id="cfg-data-open-appdata" onclick="openDataFolder('appdata')"><span data-i18n="settings.dataOpenFolder">Abrir carpeta</span></button>
+            </div>
+            <div class="telemetry-meta" style="margin-top: 6px;"><code id="cfg-data-temp">%TEMP%\omni-update</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-temp" onclick="copyDataPath('temp')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+              <button class="tool-btn" type="button" id="cfg-data-open-temp" onclick="openDataFolder('temp')"><span data-i18n="settings.dataOpenFolder">Abrir carpeta</span></button>
+            </div>
+            <div class="field-label" style="margin-top: 8px;"><span data-i18n="settings.dataBackupHint">Copia de seguridad (PowerShell):</span></div>
+            <div class="telemetry-meta"><code id="cfg-data-backup-cmd">Copy-Item "$env:APPDATA\LocalMind" "$env:USERPROFILE\Desktop\LocalMind-backup" -Recurse</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-backup" onclick="copyDataPath('backup')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+            </div>
+            <div class="field-label" style="margin-top: 8px;"><span data-i18n="settings.dataUninstallHint">Desinstalar (remueve la app, conserva tus datos salvo que borres estas carpetas):</span></div>
+            <div class="telemetry-meta"><code id="cfg-data-uninstall-cmd">powershell -ExecutionPolicy Bypass -File packaging\uninstall.ps1</code></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+              <button class="tool-btn" type="button" id="cfg-data-copy-uninstall" onclick="copyDataPath('uninstall')"><span data-i18n="settings.dataCopyPath">Copiar ruta</span></button>
+            </div>
+            <div class="profile-hint warn" role="note" data-i18n="settings.dataKeyNote">Regenerar clave rige al reiniciar.</div>
           </div>
         </div>
 
@@ -2283,6 +2329,10 @@
         'telemetry.slowTitle': 'Motor lento',
         'telemetry.slowText': 'El motor cargó lento ({median} t/s); puede mejorarse reiniciándolo una vez',
         'telemetry.slowRestart': 'Reiniciar motor',
+        'telemetry.gpuCheck': 'Verificación GPU',
+        'telemetry.genRate': 'Gen t/s',
+        'telemetry.pidLabel': 'PID',
+        'telemetry.pidActive': 'Activo',
         'launch.title': 'Accesos',
         'launch.folder': 'Carpeta de Trabajo (Proyecto)',
         'launch.folderTitle': 'Elegir directorio donde abrirán OMP y Pi',
@@ -2317,10 +2367,15 @@
         'chat.thinking': 'Proceso de razonamiento',
         'chat.stopped': 'detenido',
         'chat.error': 'Error al comunicarse con el motor: ',
+        'chat.send': 'Enviar mensaje',
+        'chat.stop': 'Detener generación',
+        'chat.welcomeEmpty': 'Aún no hay modelos: importa un .gguf o evalúa una descarga verificada en Ajustes.',
+        'chat.welcomeGuest': 'Como Guest usas el motor de tu Oráculo: configúralo en la pestaña Conexión.',
         'models.title': 'Modelos',
         'models.sub': 'Pesos GGUF locales, importación y descarga verificada.',
         'models.localTitle': 'Modelos locales',
-        'models.empty': 'Todavía no hay modelos. Importa un .gguf o descarga uno verificado.',
+        'models.empty': 'Sin modelos — importa un .gguf',
+        'models.goto': 'Ir a Modelos',
         'models.starterHint': '¿Primera vez? Empieza con uno pequeño (2-3 GB, funciona en casi cualquier GPU) y luego sube a 27B si tu VRAM lo permite.',
         'models.starterFill': 'Rellenar ejemplo',
         'models.advise': 'Evaluar',
@@ -2406,8 +2461,18 @@
         'err.profilesBad': 'Formato incorrecto',
         'err.profilesRead': 'Error al leer el archivo: ',
         'err.engineOff': 'Debes iniciar el motor desde el Panel antes de enviar mensajes.',
+        'err.engineOffGuest': 'Como Guest no tienes motor local: configúralo con tu Oráculo en la pestaña Conexión.',
         'err.startFail': 'Error al iniciar: ',
         'common.copied': 'Copiado',
+        'common.copy': 'Copiar',
+        'common.retry': 'Reintentar',
+        'common.dismiss': 'Cerrar',
+        'toast.copied': 'Copiado al portapapeles.',
+        'toast.copyFail': 'No se pudo copiar: el portapapeles no está disponible.',
+        'err.friendlyVram': 'Sin VRAM suficiente: usa un modelo más pequeño o cierra otras apps que usen la GPU.',
+        'err.friendlyPort': 'El puerto 17860 está ocupado o sin permiso: cierra la otra app o reinicia.',
+        'err.friendlyLog': 'Revisa el registro del motor (Panel → Proceso) y el log en disco para más detalle.',
+        'err.friendlyAdvise': 'Pulsa Evaluar en Ajustes → Modelos para comprobar si cabe en tu equipo antes de descargar.',
         'profile.dynHint': 'Perfil dinámico: ',
         'profile.ctxNative': '(nativo del modelo: {n}K máx.)',
         'chat.effortNoThinking': 'Este modelo no trae razonamiento: el nivel se ignora y responde directo.',
@@ -2441,6 +2506,8 @@
         'settings.profileDup': 'Duplicar',
         'settings.profileDel': 'Eliminar',
         'settings.profileConfirmDel': '¿Eliminar el perfil "{id}"? Pulsa de nuevo para confirmar',
+        'settings.profileCopySuffix': ' (copia)',
+        'settings.profileCopyId': '-copia',
         'settings.current': 'actual',
         'settings.genTitle': 'Generación',
         'settings.temperature': 'Temperatura',
@@ -2452,6 +2519,7 @@
         'settings.guardsTitle': 'Protecciones de arranque',
         'settings.idleMin': 'Auto-stop (minutos)',
         'settings.idleHint': '0 = desactivado: el motor no se apaga solo',
+        'settings.backendNote': 'Backend GPU (solo lectura, se cambia en el TOML):',
         'settings.notifTitle': 'Avisos del sistema',
         'settings.notifEnabled': 'Avisos activados',
         'settings.notifReady': 'Avisar al quedar listo',
@@ -2465,16 +2533,22 @@
         'settings.roleGuest': 'Guest',
         'settings.roleGuestDesc': 'Sin modelo: chatea y lanza CLIs contra el Oráculo.',
         'settings.roleRestart': 'Exponer en LAN rige al reiniciar la app.',
+        'settings.roleGroup': 'Rol',
         'settings.lanExposed': 'Exponer en la LAN',
         'settings.lanPlainWarn': 'La LAN va en HTTP sin cifrar: clave y prompts visibles en tu red. Solo en redes de confianza.',
         'onboard.title': 'Elige el rol de esta PC',
         'onboard.sub': 'Puedes cambiarlo cuando quieras desde el encabezado o Conexión.',
         'onboard.later': 'Decidir después',
+        'onboard.deferredHint': 'Aún no elegiste el rol de esta PC: Oráculo (tiene el modelo) o Guest (usa el de otro). Cámbialo aquí cuando quieras.',
         'settings.serverIps': 'Esta PC en la LAN',
         'settings.serverPairing': 'Emparejar (QR o copiar)',
         'settings.serverCopy': 'Copiar',
+        'settings.serverShow': 'Mostrar',
+        'settings.serverHide': 'Ocultar',
         'settings.serverRotate': 'Regenerar clave',
         'settings.serverRotateWarn': 'Clave rotada: reinicia para que tome efecto.',
+        'settings.serverCopied': 'Clave copiada al portapapeles.',
+        'settings.serverCopyFail': 'No se pudo copiar: el portapapeles no está disponible.',
         'settings.serverRefresh': 'Actualizar',
         'settings.clientUrl': 'URL del Servidor',
         'settings.clientKey': 'Clave',
@@ -2497,6 +2571,16 @@
         'settings.updateRestart': 'Reiniciar e instalar',
         'settings.updateRestarting': 'Cerrando para instalar… la app se reabrirá sola.',
         'settings.updateError': 'No se pudo actualizar: {msg}',
+        'settings.updateRetry': 'Reintentar',
+        'settings.dataTitle': 'Datos y desinstalación',
+        'settings.dataPaths': 'Tus modelos y ajustes viven aquí; la actualización no los toca.',
+        'settings.dataCopyPath': 'Copiar ruta',
+        'settings.dataOpenFolder': 'Abrir carpeta',
+        'settings.dataBackupHint': 'Copia de seguridad (PowerShell):',
+        'settings.dataBackupCmd': 'Copy-Item "$env:APPDATA\\LocalMind" "$env:USERPROFILE\\Desktop\\LocalMind-backup" -Recurse',
+        'settings.dataUninstallHint': 'Desinstalar (remueve la app, conserva tus datos salvo que borres estas carpetas):',
+        'settings.dataUninstallCmd': 'powershell -ExecutionPolicy Bypass -File packaging\\uninstall.ps1',
+        'settings.dataKeyNote': 'Regenerar clave rige al reiniciar.',
         'settings.logFailed': 'El log en disco no se escribe (disco lleno o sin permiso): los errores pueden perderse.',
         'unlock.title': 'Desbloquear',
         'unlock.sub': 'Esta UI está en red: ingresa la clave del Servidor.',
@@ -2520,7 +2604,6 @@
         'strip.verifying': 'Verifying GPU…',
         'strip.loadPct': 'Loading… {pct}% (ETA {eta})',
         'strip.loadSecs': 'Loading… {s}s',
-        'telemetry.gpuFail': 'GPU check: FAILED',
         'models.fallbackName': 'model',
         'panel.title': 'Dashboard',
         'panel.sub': 'Local engine, telemetry and shortcuts at a glance.',
@@ -2561,6 +2644,11 @@
         'telemetry.slowTitle': 'Slow engine',
         'telemetry.slowText': 'The engine loaded slowly ({median} t/s); a single restart may improve it',
         'telemetry.slowRestart': 'Restart engine',
+        'telemetry.gpuCheck': 'GPU check',
+        'telemetry.genRate': 'Gen t/s',
+        'telemetry.gpuFail': 'GPU check: FAILED',
+        'telemetry.pidLabel': 'PID',
+        'telemetry.pidActive': 'Running',
         'launch.title': 'Shortcuts',
         'launch.folder': 'Work Folder (Project)',
         'launch.folderTitle': 'Choose the directory where OMP and Pi will open',
@@ -2595,10 +2683,15 @@
         'chat.thinking': 'Reasoning process',
         'chat.stopped': 'stopped',
         'chat.error': 'Error talking to the engine: ',
+        'chat.send': 'Send message',
+        'chat.stop': 'Stop generation',
+        'chat.welcomeEmpty': 'No models yet: import a .gguf or check a verified download in Settings.',
+        'chat.welcomeGuest': 'As a Guest you use your Oráculo engine: set it up in the Connection tab.',
         'models.title': 'Models',
         'models.sub': 'Local GGUF weights, import and verified download.',
         'models.localTitle': 'Local models',
-        'models.empty': 'No models yet. Import a .gguf or download a verified one.',
+        'models.empty': 'No models — import a .gguf',
+        'models.goto': 'Go to Models',
         'models.starterHint': 'First time? Start with a small one (2-3 GB, runs on almost any GPU), then move up to 27B if your VRAM allows it.',
         'models.starterFill': 'Fill example',
         'models.advise': 'Check fit',
@@ -2684,7 +2777,18 @@
         'err.profilesBad': 'Bad format',
         'err.profilesRead': 'Error reading the file: ',
         'err.engineOff': 'Start the engine from the Dashboard before sending messages.',
+        'err.engineOffGuest': 'As a Guest you have no local engine: set it up with your Oráculo in the Connection tab.',
         'err.startFail': 'Failed to start: ',
+        'common.copied': 'Copied',
+        'common.copy': 'Copy',
+        'common.retry': 'Retry',
+        'common.dismiss': 'Dismiss',
+        'toast.copied': 'Copied to clipboard.',
+        'toast.copyFail': 'Could not copy: clipboard unavailable.',
+        'err.friendlyVram': 'Not enough VRAM: use a smaller model or close other apps using the GPU.',
+        'err.friendlyPort': 'Port 17860 is busy or denied: close the other app or restart.',
+        'err.friendlyLog': 'Check the engine log (Dashboard → Process) and the disk log for details.',
+        'err.friendlyAdvise': 'Press Evaluate in Settings → Models to check fit before downloading.',
         'profile.dynHint': 'Dynamic profile: ',
         'profile.ctxNative': '(model native: {n}K max)',
         'chat.effortNoThinking': 'This model has no reasoning: the level is ignored and it answers directly.',
@@ -2718,6 +2822,8 @@
         'settings.profileDup': 'Duplicate',
         'settings.profileDel': 'Delete',
         'settings.profileConfirmDel': 'Delete profile "{id}"? Click again to confirm',
+        'settings.profileCopySuffix': ' (copy)',
+        'settings.profileCopyId': '-copy',
         'settings.genTitle': 'Generation',
         'settings.temperature': 'Temperature',
         'settings.topP': 'Top-p',
@@ -2728,6 +2834,7 @@
         'settings.guardsTitle': 'Start guardrails',
         'settings.idleMin': 'Auto-stop (minutes)',
         'settings.idleHint': '0 = disabled: the engine never stops itself',
+        'settings.backendNote': 'GPU backend (read-only, set in the TOML):',
         'settings.notifTitle': 'System notices',
         'settings.notifEnabled': 'Notices enabled',
         'settings.notifReady': 'Notify when ready',
@@ -2741,16 +2848,22 @@
         'settings.roleGuest': 'Guest',
         'settings.roleGuestDesc': 'No model: chats and launches CLIs against the Oráculo.',
         'settings.roleRestart': 'LAN exposure applies after restarting the app.',
+        'settings.roleGroup': 'Role',
         'settings.lanExposed': 'Expose on LAN',
         'settings.lanPlainWarn': 'LAN is plain HTTP: key and prompts are visible on your network. Trusted networks only.',
         'onboard.title': 'Choose this PC role',
         'onboard.sub': 'You can change it anytime from the header or Connection.',
         'onboard.later': 'Decide later',
+        'onboard.deferredHint': 'You have not chosen this PC role yet: Oráculo (holds the model) or Guest (uses someone else\u2019s). Change it here anytime.',
         'settings.serverIps': 'This PC on the LAN',
         'settings.serverPairing': 'Pair (QR or copy)',
         'settings.serverCopy': 'Copy',
+        'settings.serverShow': 'Show',
+        'settings.serverHide': 'Hide',
         'settings.serverRotate': 'Rotate key',
         'settings.serverRotateWarn': 'Key rotated: restart to take effect.',
+        'settings.serverCopied': 'Key copied to clipboard.',
+        'settings.serverCopyFail': 'Could not copy: clipboard unavailable.',
         'settings.serverRefresh': 'Refresh',
         'settings.clientUrl': 'Server URL',
         'settings.clientKey': 'Key',
@@ -2773,6 +2886,16 @@
         'settings.updateRestarting': 'Closing to install… the app will reopen itself.',
         'settings.updateRestart': 'Restart & install',
         'settings.updateError': 'Could not update: {msg}',
+        'settings.updateRetry': 'Retry',
+        'settings.dataTitle': 'Data & uninstall',
+        'settings.dataPaths': 'Your models and settings live here; updates never touch them.',
+        'settings.dataCopyPath': 'Copy path',
+        'settings.dataOpenFolder': 'Open folder',
+        'settings.dataBackupHint': 'Backup (PowerShell):',
+        'settings.dataBackupCmd': 'Copy-Item "$env:APPDATA\\LocalMind" "$env:USERPROFILE\\Desktop\\LocalMind-backup" -Recurse',
+        'settings.dataUninstallHint': 'Uninstall (removes the app, keeps your data unless you delete these folders):',
+        'settings.dataUninstallCmd': 'powershell -ExecutionPolicy Bypass -File packaging\\uninstall.ps1',
+        'settings.dataKeyNote': 'Regenerating the key applies after restart.',
         'settings.logFailed': 'Disk log is not being written (disk full or no permission): errors may be lost.',
         'unlock.title': 'Unlock',
         'unlock.sub': 'This UI is on the network: enter the Server key.',
@@ -2847,7 +2970,8 @@
           if (!key || el.id === 'project-folder-display') return;
           // <option> labels: translate the text, never the value attribute.
           if (el.tagName === 'OPTION') { el.textContent = T(key); return; }
-          el.innerHTML = T(key);
+          if (key === 'chat.welcome') { el.innerHTML = T(key); return; }
+          el.textContent = T(key);
         });
         document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
           el.setAttribute('placeholder', T(el.getAttribute('data-i18n-placeholder')));
@@ -2858,6 +2982,22 @@
         document.querySelectorAll('[data-i18n-aria]').forEach(el => {
           el.setAttribute('aria-label', T(el.getAttribute('data-i18n-aria')));
         });
+        // P1 producción: etiquetas dinámicas que el HTML deja con texto fijo
+        // (scroll, hint de chat, métricas y estado) se re-etiquetan aquí para
+        // que el cambio de idioma no deje fósiles en inglés/español.
+        try {
+          const sc = document.getElementById('btn-scroll-toggle');
+          if (sc) sc.textContent = autoScrollTerminal ? T('logs.scrollOn') : T('logs.scrollOff');
+        } catch (e) {}
+        try {
+          const sk = document.getElementById('strip-text');
+          if (sk && sk.getAttribute && sk.getAttribute('data-i18n-ph') && lastStatus == null) sk.textContent = T(sk.getAttribute('data-i18n-ph'));
+        } catch (e) {}
+        try {
+          const ch = document.getElementById('chat-status-hint');
+          if (ch && ch.getAttribute && ch.getAttribute('data-i18n') && lastStatus == null) ch.textContent = T(ch.getAttribute('data-i18n'));
+        } catch (e) {}
+        try { renderChatWelcome(); } catch (e) {}
       } catch (e) {}
       try { setProjectFolder(selectedProjectCwd); } catch (e) {}
       try {
@@ -2869,6 +3009,7 @@
         else renderStatus({ status: 'stopped' });
       } catch (e) {}
       try { renderModelsTable(lastModelsCache); } catch (e) {}
+      try { renderRoleDeferredHint(); } catch (e) {}
     }
     let isServerRunning = false;
     let autoScrollTerminal = true;
@@ -2882,18 +3023,79 @@
     let lastStatus = null;
     // Non-blocking toast channel. All user-facing errors go here;
     // the UI never blocks on a modal dialog.
-    function toast(msg, kind) {
+    function toast(msg, kind, opts) {
       try {
         const region = document.getElementById('toast-region');
-        if (!region) return;
+        if (!region) return null;
+        const o = opts || {};
         const el = document.createElement('div');
-        el.className = 'toast' + (kind === 'error' ? ' error' : '');
-        el.textContent = msg;
+        const isErr = kind === 'error';
+        el.className = 'toast' + (isErr ? ' error' : '');
+        el.setAttribute('role', isErr ? 'alert' : 'status');
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = msg;
+        el.appendChild(body);
+        let timer = 0;
+        const close = () => { try { if (timer) clearTimeout(timer); } catch (e) {} try { if (el.parentNode === region) region.removeChild(el); } catch (e) {} };
+        if (isErr || o.actions || o.sticky) {
+          const row = document.createElement('div');
+          row.className = 'toast-actions';
+          const mkBtn = (label, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'tool-btn';
+            b.textContent = label;
+            b.addEventListener('click', (ev) => { try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (e) {} try { fn(); } catch (e2) {} });
+            row.appendChild(b);
+            return b;
+          };
+          const copySrc = (o.copyText != null) ? String(o.copyText) : String(msg);
+          mkBtn(T('common.copy'), () => {
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(copySrc).then(() => toast(T('toast.copied')), () => toast(T('toast.copyFail'), 'error'));
+              else toast(T('toast.copyFail'), 'error');
+            } catch (e) { toast(T('toast.copyFail'), 'error'); }
+          });
+          if (typeof o.onRetry === 'function') mkBtn(T('common.retry'), () => { close(); o.onRetry(); });
+          if (Array.isArray(o.actions)) o.actions.forEach(a => { if (a && a.label && typeof a.fn === 'function') mkBtn(a.label, a.fn); });
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.className = 'tool-btn toast-close';
+          x.setAttribute('aria-label', T('common.dismiss'));
+          x.textContent = '×';
+          x.addEventListener('click', close);
+          row.appendChild(x);
+          el.appendChild(row);
+        }
         region.appendChild(el);
-        setTimeout(() => { try { region.removeChild(el); } catch (e) {} }, 4500);
-      } catch (e) {}
+        if (!(isErr || o.sticky)) timer = setTimeout(close, 4500);
+        else if (typeof o.ms === 'number' && isFinite(o.ms) && o.ms > 0) timer = setTimeout(close, o.ms);
+        else timer = setTimeout(close, 30000);
+        return close;
+      } catch (e) { return null; }
     }
-    function showToast(msg, kind) { toast(msg, kind); }
+    function showToast(msg, kind, opts) { return toast(msg, kind, opts); }
+    // Substrings conocidos (crudos del backend) → mensaje T() es/en + acción.
+    // Orden: VRAM > puerto 17860 > log > Evaluar. Devuelve '' si no hay match.
+    function friendlyEngineHint(raw) {
+      try {
+        const s = String(raw || '').toLowerCase();
+        if (!s) return '';
+        if (s.indexOf('vram') >= 0 || s.indexOf('out of memory') >= 0 || s.indexOf('memoria') >= 0) return T('err.friendlyVram');
+        if (s.indexOf('17860') >= 0 || s.indexOf('puerto') >= 0 || s.indexOf('port') >= 0 || s.indexOf('bind') >= 0 || s.indexOf('eaddrinuse') >= 0) return T('err.friendlyPort');
+        if (s.indexOf('evaluar') >= 0 || s.indexOf('evaluate') >= 0 || s.indexOf('advise') >= 0) return T('err.friendlyAdvise');
+        if (s.indexOf('log') >= 0) return T('err.friendlyLog');
+        return '';
+      } catch (e) { return ''; }
+    }
+    // Error de motor con prefijo traducido + hint + toast sticky con acciones.
+    function toastEngineError(raw, retryFn) {
+      const hint = friendlyEngineHint(raw);
+      const full = T('err.startFail') + (raw || '') + (hint ? ' ' + hint : '');
+      toast(full, 'error', { sticky: true, copyText: String(raw || ''), onRetry: (typeof retryFn === 'function') ? retryFn : undefined });
+      return full;
+    }
 
     // Chat Persistence
     const CHAT_STORAGE_KEY = 'localmind_chat_v1';
@@ -2976,8 +3178,11 @@
       } catch (e) {}
     }
 
+    let telemetrySeq = 0;
     async function pollTelemetry() {
+      const tseq = ++telemetrySeq;
       const m = await api.getMetrics();
+      if (tseq !== telemetrySeq) return;
       const set = (id, v) => {
         const el = document.getElementById(id);
         if (el) el.textContent = v;
@@ -3001,9 +3206,15 @@
     }
 
     // Tab Navigation (Fase UX: 4 tabs; Uso vive en Conexión, el rol también).
-    function switchTab(name) {
+    function switchTab(name, opts) {
+      // P2 producción: al salir de la vista se limpia la clave de pairing
+      // (autoclear al cerrar/cambiar: no queda expuesta en el DOM visible).
+      try { if (typeof clearPairing === 'function') clearPairing(); } catch (e) {}
       document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
+        const on = btn.getAttribute('data-tab') === name;
+        btn.classList.toggle('active', on);
+        try { btn.setAttribute('aria-selected', on ? 'true' : 'false'); } catch (e) {}
+        try { btn.tabIndex = on ? 0 : -1; } catch (e) {}
       });
       document.querySelectorAll('.tab-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === 'tab-' + name);
@@ -3011,8 +3222,34 @@
       if (name === 'dashboard' || name === 'conexion') refreshUsage();
       if (name === 'settings') refreshSettings();
       if (name === 'conexion') refreshConexion();
+      if (!opts || opts.focus !== false) {
+        try {
+          const panel = document.getElementById('tab-' + name);
+          if (panel) { if (!panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1'); panel.focus({ preventScroll: true }); }
+        } catch (e) {}
+      }
     }
-
+    // Flechas izq/der en el tablist (P1-5): roving tabindex sin ratón.
+    var TAB_ORDER = ['dashboard', 'chat', 'conexion', 'settings'];
+    function onNavKey(ev) {
+      try {
+        const cur = ev && ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-tab') : null;
+        let i = TAB_ORDER.indexOf(cur);
+        if (i < 0) return;
+        let next = -1;
+        if (ev.key === 'ArrowRight') next = (i + 1) % TAB_ORDER.length;
+        else if (ev.key === 'ArrowLeft') next = (i + TAB_ORDER.length - 1) % TAB_ORDER.length;
+        else if (ev.key === 'Home') next = 0;
+        else if (ev.key === 'End') next = TAB_ORDER.length - 1;
+        else return;
+        if (ev.preventDefault) ev.preventDefault();
+        switchTab(TAB_ORDER[next]);
+        try {
+          const btn = document.querySelector('[data-tab="' + TAB_ORDER[next] + '"]');
+          if (btn && btn.focus) btn.focus();
+        } catch (e2) {}
+      } catch (e) {}
+    }
     // Rol + red de la tab Conexión (la tarjeta vive ahí; refreshSettings la
     // sigue actualizando cuando se abre Ajustes, con el mismo cfg).
     async function refreshConexion() {
@@ -3123,11 +3360,9 @@
       if (!card) return;
       const u = await api.getUsage();
       const emptyCard = document.getElementById('usage-empty-card');
-      const countEl = document.getElementById('nav-usage-count');
       if (!u || u.missing) {
         card.style.display = 'none';
         if (emptyCard) emptyCard.style.display = '';
-        if (countEl) countEl.textContent = '–';
         return;
       }
       const totals = u.totals || {};
@@ -3139,7 +3374,6 @@
       set('usage-prompt', fmtInt(totals.prompt_tokens));
       set('usage-completion', fmtInt(totals.completion_tokens));
       set('usage-meta', T('usage.updated') + fmtClock(Date.now()));
-      if (countEl) countEl.textContent = (typeof totals.requests === 'number' && isFinite(totals.requests)) ? String(Math.round(totals.requests)) : '–';
       renderUsageChart(u.by_day);
       renderUsageByModel(u.by_model);
       const raw = await api.getUsageRaw(50);
@@ -3160,11 +3394,12 @@
       if (box) box.textContent = '';
     }
 
-    function copyTerminalLogs() {
+    function copyTerminalLogs(ev) {
       const box = document.getElementById('terminal-stream');
       if (!box) return;
-      navigator.clipboard.writeText(box.textContent);
-      const btn = event && event.currentTarget;
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(box.textContent).catch(function(){}); }
+      const evt = ev || (typeof event !== 'undefined' ? event : null);
+      const btn = evt && evt.currentTarget;
       if (btn) {
         const orig = btn.textContent;
         btn.textContent = T('common.copied');
@@ -3224,7 +3459,7 @@
       const ctxSel = document.getElementById('context-select');
       const hint = document.getElementById('profile-hint');
       if (info) {
-        if (ctxSel && info.context && ctxSel.querySelector(`option[value="${info.context}"]`)) {
+        if (ctxSel && info.context && ctxSel.querySelector(`option[value="${CSS.escape(info.context ?? '')}"]`)) {
           ctxSel.value = String(info.context);
         }
         if (hint) hint.textContent = info.hint || info.description || '';
@@ -3517,14 +3752,15 @@
         || cfgProfilesCache.find(x => x.id === cfgCurrentProfileId)
         || cfgProfilesCache[0] || null;
       if (!src) return;
-      const base = (src.id || 'perfil') + '-copia';
+      // P1 producción: el sufijo "(copia)"/"-copia" sale del diccionario.
+      const base = (src.id || 'perfil') + T('settings.profileCopyId');
       const set = (eid, val) => {
         const el = document.getElementById(eid);
         if (el) el.value = val;
       };
       cfgEditingId = null;
       set('cfg-profile-id', base);
-      set('cfg-profile-name', (src.name || src.label || '') + ' (copia)');
+      set('cfg-profile-name', (src.name || src.label || '') + T('settings.profileCopySuffix'));
       set('cfg-profile-desc', src.description || src.hint || '');
       set('cfg-profile-context', src.context != null ? String(src.context) : '32768');
       set('cfg-profile-cacheram', src.cache_ram != null ? String(src.cache_ram) : '0');
@@ -3777,8 +4013,9 @@
     }
 
     function showSettingsCards() {
-      ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card'].forEach(id => {
+      ['cfg-profiles-card', 'cfg-generation-card', 'cfg-engine-card', 'cfg-role-card'].forEach(id => {
         const el = document.getElementById(id);
+        if (el) el.style.display = '';
       });
       const un = document.getElementById('cfg-unavailable-card');
       if (un) un.style.display = 'none';
@@ -3826,6 +4063,7 @@
       const url = document.getElementById('cfg-remote-url');
       if (url && cfg && cfg.remote && typeof cfg.remote.url === 'string' && !url.value) url.value = cfg.remote.url;
       if (role === 'oraculo') refreshLanPanel();
+      try { renderChatWelcome(); } catch (e) {}
     }
 
     // Switcher del header: refleja el rol vigente (lo llama refreshRoleCard).
@@ -3841,29 +4079,82 @@
 
     /* ---------- Onboarding de rol: una sola vez por perfil de navegador.
        Sin marca → overlay. Elegir guarda el rol y la marca; "después"
-       conserva el rol vigente y solo guarda la marca. */
+       conserva el rol vigente, guarda la marca diferida y deja un aviso
+       persistente en Conexión hasta elegir (P0 producción). */
     const ROLE_SEEN_KEY = 'omni_role_seen';
+    const ROLE_DEFERRED_KEY = 'omni_role_deferred';
+    let onboardPrevFocus = null;
     function roleSeen() {
       try { return localStorage.getItem(ROLE_SEEN_KEY) === '1'; } catch (e) { return true; }
     }
+    function roleDeferred() {
+      try { return localStorage.getItem(ROLE_DEFERRED_KEY) === '1'; } catch (e) { return false; }
+    }
     function markRoleSeen() {
       try { localStorage.setItem(ROLE_SEEN_KEY, '1'); } catch (e) {}
+      try { localStorage.removeItem(ROLE_DEFERRED_KEY); } catch (e) {}
       const ov = document.getElementById('onboard-overlay');
       if (ov) ov.style.display = 'none';
+      try { renderRoleDeferredHint(); } catch (e) {}
+      if (onboardPrevFocus && onboardPrevFocus.focus) {
+        try { onboardPrevFocus.focus(); } catch (e) {}
+        onboardPrevFocus = null;
+      }
     }
     function maybeOnboard() {
-      if (roleSeen()) return;
+      if (roleSeen()) { try { renderRoleDeferredHint(); } catch (e) {} return; }
       const ov = document.getElementById('onboard-overlay');
-      if (ov) ov.style.display = 'flex';
+      if (!ov) return;
+      try { onboardPrevFocus = document.activeElement || null; } catch (e) { onboardPrevFocus = null; }
+      ov.style.display = 'flex';
+      // P0 producción: foco inicial dentro del diálogo para lector de pantalla.
+      const first = document.getElementById('onboard-oraculo');
+      if (first && first.focus) { try { first.focus(); } catch (e) {} }
     }
+    // P0 producción: trampa de foco + Esc dentro del diálogo de rol.
+    function onboardTrapKey(ev) {
+      const ov = document.getElementById('onboard-overlay');
+      if (!ov || ov.style.display === 'none') return;
+      if (ev && ev.key === 'Escape') { laterRole(); return; }
+      if (!ev || ev.key !== 'Tab') return;
+      const ids = ['onboard-oraculo', 'onboard-guest', 'onboard-later'];
+      const els = ids.map(id => document.getElementById(id)).filter(Boolean);
+      if (!els.length) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    }
+    try {
+      if (document.addEventListener) document.addEventListener('keydown', onboardTrapKey);
+    } catch (e) {}
     async function chooseRole(role) {
       markRoleSeen();
       await setRole(role);
     }
     function laterRole() {
-      markRoleSeen();
+      try { localStorage.setItem(ROLE_SEEN_KEY, '1'); } catch (e) {}
+      try { localStorage.setItem(ROLE_DEFERRED_KEY, '1'); } catch (e) {}
+      const ov = document.getElementById('onboard-overlay');
+      if (ov) ov.style.display = 'none';
+      try { renderRoleDeferredHint(); } catch (e) {}
+      if (onboardPrevFocus && onboardPrevFocus.focus) {
+        try { onboardPrevFocus.focus(); } catch (e) {}
+        onboardPrevFocus = null;
+      }
     }
-
+    // P0 producción: hint persistente en Conexión cuando se pospone el rol.
+    function renderRoleDeferredHint() {
+      const hint = document.getElementById('role-deferred-hint');
+      if (!hint) return;
+      if (roleDeferred()) {
+        hint.style.display = '';
+        hint.textContent = T('onboard.deferredHint');
+      } else {
+        hint.style.display = 'none';
+        hint.textContent = '';
+      }
+    }
     async function setRole(role) {
       cfgInlineError('cfg-role-error', null);
       // Oráculo: sale de cliente y enciende LAN (consentimiento explícito al
@@ -3920,18 +4211,61 @@
       }
     }
 
+    // P2 producción: la clave de pairing jamás se pinta en un toast (el toast
+    // queda visible 4,5 s para cualquiera mirando la pantalla): mensaje
+    // genérico + autoclear del campo al copiar/cerrar. `togglePairing`
+    // muestra 15 s y vuelve solo a `password` (sin dejar la clave expuesta).
+    let pairingTimer = 0;
+    function clearPairing() {
+      try {
+        const p = document.getElementById('cfg-server-pairing');
+        if (p) p.value = '';
+        const b = document.getElementById('cfg-server-show');
+        if (b) b.textContent = T('settings.serverShow');
+        if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+      } catch (e) {}
+    }
+    function togglePairing() {
+      const pairing = document.getElementById('cfg-server-pairing');
+      const btn = document.getElementById('cfg-server-show');
+      if (!pairing) return;
+      if (!pairing.value) return;
+      try {
+        if (pairing.type === 'password') {
+          pairing.type = 'text';
+          if (btn) btn.textContent = T('settings.serverHide');
+          if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+          pairingTimer = setTimeout(() => {
+            try {
+              pairing.type = 'password';
+              if (btn) btn.textContent = T('settings.serverShow');
+            } catch (e) {}
+            pairingTimer = 0;
+          }, 15000);
+        } else {
+          pairing.type = 'password';
+          if (btn) btn.textContent = T('settings.serverShow');
+          if (pairingTimer) { clearTimeout(pairingTimer); pairingTimer = 0; }
+        }
+      } catch (e) {}
+    }
     function copyPairing() {
       const pairing = document.getElementById('cfg-server-pairing');
       const v = pairing ? pairing.value : '';
       if (!v) return;
+      const done = () => {
+        toast(T('settings.serverCopied'));
+        clearPairing();
+      };
+      const fail = () => { toast(T('settings.serverCopyFail')); };
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(v).then(() => toast(T('common.copied')), () => toast(v));
+          navigator.clipboard.writeText(v).then(done, fail);
         } else {
-          toast(v);
+          fail();
         }
       } catch (e) {
-        toast(v);
+        fail();
       }
     }
 
@@ -4022,9 +4356,18 @@
     }
 
     function renderUpdate(st) {
+      // P1-7: NUNCA se oculta #cfg-update-card: sin backend se muestra el
+      // motivo + Reintentar; el banner del Panel sigue siendo el aviso.
+      const card = document.getElementById('cfg-update-card');
+      if (card) card.style.display = '';
       if (!st || st.missing) {
-        const card = document.getElementById('cfg-update-card');
-        if (card) card.style.display = 'none';
+        const meta0 = document.getElementById('cfg-update-meta');
+        if (meta0) meta0.textContent = 'v?';
+        const status0 = document.getElementById('cfg-update-status');
+        if (status0) status0.textContent = T('settings.updateError', { msg: T('settings.needsNew') });
+        const banner0 = document.getElementById('update-banner');
+        if (banner0) banner0.style.display = 'none';
+        ensureUpdateRetry();
         return;
       }
       updateLastState = st.state || '';
@@ -4064,6 +4407,52 @@
           ? T('settings.updateReady', { ver })
           : T('settings.updateAvailable', { ver });
       }
+      if (st.state === 'error') ensureUpdateRetry();
+      else removeUpdateRetry();
+      renderUpdatePoll(st);
+    }
+    // Botón Reintentar dentro de la tarjeta (P1-7): se muestra con error.
+    function ensureUpdateRetry() {
+      try {
+        const b = document.getElementById('cfg-update-retry');
+        if (b) { b.style.display = ''; b.textContent = T('settings.updateRetry'); }
+      } catch (e) {}
+    }
+    function removeUpdateRetry() {
+      try {
+        const b = document.getElementById('cfg-update-retry');
+        if (b) b.style.display = 'none';
+      } catch (e) {}
+    }
+    // Rutas de datos + comandos backup/uninstall (P1-7): copiar y abrir.
+    function dataPathText(which) {
+      try {
+        const id = which === 'temp' ? 'cfg-data-temp'
+          : which === 'backup' ? 'cfg-data-backup-cmd'
+          : which === 'uninstall' ? 'cfg-data-uninstall-cmd' : 'cfg-data-appdata';
+        const el = document.getElementById(id);
+        return el ? el.textContent : '';
+      } catch (e) { return ''; }
+    }
+    function copyDataPath(which) {
+      const v = dataPathText(which);
+      if (!v) return;
+      const done = () => toast(T('toast.copied'));
+      const fail = () => toast(T('toast.copyFail'), 'error');
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done, fail);
+        else fail();
+      } catch (e) { fail(); }
+    }
+    function openDataFolder(which) {
+      // `POST /api/open_data_dir` (allowlist appdata|temp); si falla, fallback
+      // a copiar la ruta (el botón Copiar) en vez de dejar al usuario sin nada.
+      try {
+        if (which !== 'appdata' && which !== 'temp') return;
+        fetch('/api/open_data_dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ which: which }) }).then(function (r) { if (!r.ok) copyDataPath(which); }).catch(function () { copyDataPath(which); });
+      } catch (e) { try { copyDataPath(which); } catch (_) {} }
+    }
+    function renderUpdatePoll(st) {
       // Poll corto solo en curso; al terminar vuelve a estado quieto.
       const busy = (st.state === 'checking' || st.state === 'downloading');
       if (busy && !updatePollTimer) {
@@ -4082,7 +4471,6 @@
         updatePollTimer = 0;
       }
     }
-
     async function refreshUpdate() {
       const st = await fetchUpdate();
       if (st) renderUpdate(st);
@@ -4282,13 +4670,6 @@
       box.textContent = '';
       if (!cur) { box.style.display = 'none'; return; }
       if (cur.verified === true) {
-        const b = document.createElement('span');
-        b.className = 'model-badge verified';
-        b.textContent = T('badge.verified');
-        box.appendChild(b);
-      }
-      if (typeof cur.source === 'string' && cur.source && cur.source !== 'local') {
-        const b = document.createElement('span');
         b.className = 'model-badge downloaded';
         b.textContent = T('badge.downloaded');
         box.appendChild(b);
@@ -4367,9 +4748,7 @@
       const empty = document.getElementById('models-empty');
       const table = document.getElementById('models-table');
       const meta = document.getElementById('models-meta');
-      const count = document.getElementById('nav-models-count');
       if (meta) meta.textContent = T('models.count', { n: list.length });
-      if (count) count.textContent = String(list.length);
       if (empty) empty.style.display = list.length ? 'none' : '';
       const starter = document.getElementById('models-starter');
       if (starter) starter.style.display = list.length ? 'none' : '';
@@ -4422,11 +4801,12 @@
         if (!models || models.length === 0) {
           const opt = document.createElement('option');
           opt.value = '';
-          opt.textContent = T('models.searching');
+          opt.textContent = T('models.empty');
           sel.appendChild(opt);
           lastModelsCache = [];
           updateModelBadges([]);
           renderModelsTable([]);
+          try { renderChatWelcome(); } catch (e) {}
           return;
         }
         models.forEach((m, idx) => {
@@ -4439,6 +4819,7 @@
         lastModelsCache = models;
         updateModelBadges(models);
         renderModelsTable(models);
+        try { renderChatWelcome(); } catch (e) {}
       } catch (err) {
         console.error('refreshModels error:', err);
       }
@@ -4453,8 +4834,8 @@
       }
 
       const profile = document.getElementById('profile-select') ? document.getElementById('profile-select').value : 'turbo';
-      const context = parseInt(document.getElementById('context-select').value);
-      const threads = parseInt(document.getElementById('threads-select').value);
+      const context = parseInt(document.getElementById('context-select') ? document.getElementById('context-select').value : '32768', 10);
+      const threads = parseInt(document.getElementById('threads-select') ? document.getElementById('threads-select').value : '6', 10);
       const prioEl = document.getElementById('priority-select');
       const priority = prioEl ? prioEl.value : '2';
       const action = document.getElementById('strip-action');
@@ -4477,9 +4858,11 @@
         // "Error al iniciar: Modelo desconocido: 'noexiste.gguf'.".
         // Aqui se paints el estado (franja, estado del motor) y despues se
         // escribe el mensaje final, que es el que el usuario debe leer.
+        // Además, toast sticky con [Copiar][Reintentar] (P1-4).
+        const full = toastEngineError(res.error, () => { try { startEngine(); } catch (e) {} });
         renderStatus({ status: 'error', last_error: res.error });
         if (errBanner) {
-          errBanner.textContent = T('err.startFail') + res.error;
+          errBanner.textContent = full;
           errBanner.style.display = 'block';
         }
       }
@@ -4882,17 +5265,24 @@
       modelDlTimer = setInterval(pollModelDownload, 1500);
     }
 
+    function stopModelDlPolling() {
+      if (modelDlTimer) { try { clearInterval(modelDlTimer); } catch (e) {} }
+      modelDlTimer = null;
+    }
+
     async function pollModelDownload() {
-      if (!modelDlActive) return;
+      if (!modelDlActive) { stopModelDlPolling(); return; }
       const d = await api.getDownloadState();
       if (!d) return;
-      if (d.missing) { modelDlActive = false; renderDownloadState(null); return; }
+      if (d.missing) { modelDlActive = false; stopModelDlPolling(); renderDownloadState(null); return; }
       renderDownloadState(d);
       if (d.state === 'done') {
         modelDlActive = false;
+        stopModelDlPolling();
         await refreshModels();
-      } else if (d.state === 'error') {
+      } else if (d.state === 'error' || d.state === 'cancelled' || d.state === 'canceled') {
         modelDlActive = false;
+        stopModelDlPolling();
       }
     }
 
@@ -4928,6 +5318,7 @@
         await pollModelDownload();
       } catch (e) {
         modelDlActive = false;
+        stopModelDlPolling();
       }
     }
 
@@ -5070,7 +5461,7 @@
       if (quiet !== phys) mk(quiet, T('threads.quiet', { n: quiet }), false);
       if (logical && logical !== phys) mk(logical, T('threads.all', { n: logical }), false);
       if (prev) {
-        const hit = sel.querySelector(`option[value="${prev}"]`);
+        const hit = sel.querySelector(`option[value="${CSS.escape(prev ?? '')}"]`);
         if (hit) sel.value = prev;
       }
     }
@@ -5105,11 +5496,14 @@
       } catch (e) {}
       badge.textContent = 'local';
     }
-    // Status Poller
+    // Status Poller (race guard: solo el poll más nuevo pinta).
+    let statusSeq = 0;
     async function updateStatus() {
+      const seq = ++statusSeq;
       try {
         const st = await api.getStatus();
         if (!st) return;
+        if (seq !== statusSeq) return;
         isServerRunning = st.is_healthy;
         renderStatus(st);
       } catch (e) {}
@@ -5229,9 +5623,9 @@
         stripAction.setAttribute('aria-label', actionLabel);
       }
 
-      // Telemetry meta
+      // Telemetry meta (P1 producción: PID/Activo traducidos, no literales).
       set('endpoint-meta', healthy ? ('127.0.0.1:' + port + '/v1') : '127.0.0.1:—');
-      set('pid-display', 'PID: ' + (healthy ? (st.pid || 'Activo') : (status === 'starting' ? '...' : '--')));
+      set('pid-display', T('telemetry.pidLabel') + ': ' + (healthy ? (st.pid || T('telemetry.pidActive')) : (status === 'starting' ? '...' : '--')));
 
       // Telemetry card dimmed when engine down
       const telCard = document.getElementById('telemetry-card');
@@ -5310,27 +5704,18 @@
       const errBanner = document.getElementById('error-banner');
       if (errBanner) {
         if (status === 'error' && (st.last_error || st.acceptance_error || '')) {
-          // Aquí el error llega CRUDO y sin prefijo a propósito: este camino es
-          // un fallo POSTERIOR (el motor arrancó y se cayó, o la puerta de
-          // aceptación falló), no un arranque rechazado. Ponerle
-          // "Error al iniciar:" sería falso. El arranque rechazado lo escribe
-          // `startEngine`, que conoce el motivo y le pone su prefijo.
-          //
-          // Los dos caminos no se pisan SI el status llega limpio, y la
-          // precondición la garantiza el servidor, no esta función: `start()`
-          // borra `last_error`/`acceptance_error`/`acceptance_ok` al ABRIR el
-          // intento (no solo al lograrse), así que tras un arranque rechazado
-          // el poller ve esas tres a null y no entra en ninguna de las dos
-          // ramas de abajo. Antes de ese borrado el arranque rechazado
-          // heredaba el error del arranque anterior y el poller pintaba aquí un
-          // mensaje viejo, tapando el "Error al iniciar: ..." recién escrito.
-          // La exclusividad no es incondicional: si el motor se cae o falla la
-          // puerta DESPUÉS de abrirse el intento, esta rama gana, y es lo
-          // correcto (ese error sí acaba de ocurrir).
-          errBanner.textContent = st.last_error || st.acceptance_error;
+          // Fallo POSTERIOR (el motor arrancó y se cayó, o la puerta de
+          // aceptación falló): prefijo traducido siempre, nunca crudo inglés.
+          // El arranque rechazado lo reescribe `startEngine` con el mismo
+          // prefijo; el poller nunca pisa ese texto (ver rama `stopped`).
+          const raw = st.last_error || st.acceptance_error || '';
+          const hint = friendlyEngineHint(raw);
+          errBanner.textContent = T('err.startFail') + raw + (hint ? ' ' + hint : '');
           errBanner.style.display = 'block';
         } else if (st.acceptance_ok === false && (st.acceptance_error || '')) {
-          errBanner.textContent = st.acceptance_error;
+          const raw2 = st.acceptance_error || '';
+          const hint2 = friendlyEngineHint(raw2);
+          errBanner.textContent = T('err.startFail') + raw2 + (hint2 ? ' ' + hint2 : '');
           errBanner.style.display = 'block';
         } else if (status === 'online' || status === 'starting') {
           // Solo se oculta al llegar a un estado nuevo y sano. `stopped` es el estado
@@ -5453,9 +5838,10 @@
     }
 
     function copyCode(btn) {
-      const pre = btn.closest('.code-block-wrapper').querySelector('pre code');
+      const wrap = btn.closest('.code-block-wrapper');
+      const pre = wrap ? wrap.querySelector('pre code') : null;
       if (!pre) return;
-      navigator.clipboard.writeText(pre.textContent);
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(pre.textContent).catch(function(){}); }
       const span = btn.querySelector('span');
       if (span) {
         const orig = span.textContent;
@@ -5498,15 +5884,61 @@
       }
     }
 
+    // P0 producción: "Ir a Modelos" lleva a Ajustes y enfoca la tarjeta de
+    // modelos para importar/evaluar el primer .gguf.
+    function gotoModelsCard() {
+      try { switchTab('settings'); } catch (e) {}
+      try {
+        const card = document.getElementById('btn-import-gguf');
+        if (card) {
+          card.scrollIntoView({ block: 'center' });
+          card.focus();
+        }
+      } catch (e) {}
+    }
+    // P0 producción: bienvenida según estado (0 modelos → importar/evaluar;
+    // guest sin remoto → ir a Conexión). Se repinta con idioma y modelos.
+    function chatWelcomeKey() {
+      try {
+        if (typeof cfgRoleCache !== 'undefined' && cfgRoleCache === 'guest') return 'chat.welcomeGuest';
+      } catch (e) {}
+      try {
+        if (Array.isArray(lastModelsCache) && lastModelsCache.length === 0) return 'chat.welcomeEmpty';
+      } catch (e) {}
+      return 'chat.welcome';
+    }
+    function renderChatWelcome() {
+      const box = document.getElementById('chat-messages');
+      if (!box) return;
+      const sel = box.querySelector
+        ? (box.querySelector('[data-i18n="chat.welcome"]') || box.querySelector('[data-i18n-welcome]'))
+        : null;
+      if (!sel) return;
+      const key = chatWelcomeKey();
+      if (key === 'chat.welcome') {
+        sel.innerHTML = T('chat.welcome');
+        sel.setAttribute('data-i18n', 'chat.welcome');
+        sel.removeAttribute('data-i18n-welcome');
+      } else {
+        sel.innerHTML = escapeHtml(T(key));
+        sel.removeAttribute('data-i18n');
+        sel.setAttribute('data-i18n-welcome', key === 'chat.welcomeGuest' ? 'guest' : 'empty');
+      }
+    }
 
     async function sendChatMessage() {
       if (!isServerRunning) {
-        toast(T('err.engineOff'), 'error');
+        // P0 producción: el Guest sin motor local necesita Conexión, no Panel.
+        const guestOff = (typeof cfgRoleCache !== 'undefined' && cfgRoleCache === 'guest');
+        toast(guestOff ? T('err.engineOffGuest') : T('err.engineOff'), 'error');
+        if (guestOff) { try { switchTab('conexion'); } catch (e) {} }
         return;
       }
+      if (isGenerating) return;
       const input = document.getElementById('chat-input');
-      const text = input.value.trim();
+      const text = input && typeof input.value === 'string' ? input.value.trim() : '';
       if (!text) return;
+      isGenerating = true;
       input.value = '';
       input.style.height = '22px';
 
@@ -5557,7 +5989,6 @@
 
       try {
         activeAbort = new AbortController();
-        isGenerating = true;
         const stopBtn = document.getElementById('btn-stop-gen');
         if (stopBtn) stopBtn.style.display = 'flex';
 
@@ -5737,14 +6168,14 @@
         }
         if (s.profile) {
           const profileSel = document.getElementById('profile-select');
-          if (profileSel && profileSel.querySelector(`option[value="${s.profile}"]`)) {
+          if (profileSel && profileSel.querySelector(`option[value="${CSS.escape(s.profile ?? '')}"]`)) {
             profileSel.value = s.profile;
             onProfileChange();
           }
         }
         if (s.context) {
           const ctxSel = document.getElementById('context-select');
-          if (ctxSel && ctxSel.querySelector(`option[value="${s.context}"]`)) {
+          if (ctxSel && ctxSel.querySelector(`option[value="${CSS.escape(s.context ?? '')}"]`)) {
             ctxSel.value = String(s.context);
           }
         }

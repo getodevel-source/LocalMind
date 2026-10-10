@@ -15,12 +15,11 @@
   Directory holding the runtime files (default: repo root).
 
 .PARAMETER TargetDir
-  Install dir (default: %LOCALAPPDATA%\Programs\LocalMind). Exposed for
+  Install dir (default: %LOCALAPPDATA%\Programs\OMNI). Exposed for
   testability; normal installs omit it.
 
 .PARAMETER ShortcutDir
-  Start Menu folder for the shortcuts (default: StartMenu\Programs\LocalMind).
-  Exposed for testability; normal installs omit it.
+  Start Menu folder for the shortcuts (default: StartMenu\Programs\OMNI).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File packaging/install.ps1
@@ -34,12 +33,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Files = @('OMNI.exe', 'ui.html', 'ui_fallback.html', 'omni.ico', 'omni.png', 'version.txt', 'LEEME.txt')
-foreach ($f in $Files) {
+# P1 producción: version.txt y LEEME.txt solo existen tras build-portable.ps1
+# (los genera en el staging); en el repo en crudo faltan. Son opcionales con
+# aviso — no throw — porque no afectan al runtime.
+$RequiredFiles = @('OMNI.exe', 'ui.html', 'ui_fallback.html', 'omni.ico', 'omni.png')
+$OptionalFiles = @('version.txt', 'LEEME.txt')
+foreach ($f in $RequiredFiles) {
   # ui_fallback.html lives in src-rust/ in the repo tree; in a portable dir it sits next to the exe.
   $candidates = @((Join-Path $SourceDir $f), (Join-Path $SourceDir "src-rust/$f"))
   if (-not ($candidates | Where-Object { Test-Path $_ })) { throw "Missing source file: $f (looked in $SourceDir and $SourceDir/src-rust)" }
 }
+foreach ($f in $OptionalFiles) {
+  $candidates = @((Join-Path $SourceDir $f), (Join-Path $SourceDir "src-rust/$f"))
+  if (-not ($candidates | Where-Object { Test-Path $_ })) { Write-Warning "Opcional ausente: $f (ejecuta packaging/build-portable.ps1 para generarlo)" }
+}
+$Files = @($RequiredFiles + ($OptionalFiles | Where-Object {
+  $candidates = @((Join-Path $SourceDir $_), (Join-Path $SourceDir "src-rust/$_"))
+  $candidates | Where-Object { Test-Path $_ }
+}))
 $BinSrc = Join-Path $SourceDir 'bin'
 if (-not (Test-Path $BinSrc)) { throw "Missing source dir: $BinSrc" }
 

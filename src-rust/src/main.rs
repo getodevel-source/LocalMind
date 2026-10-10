@@ -351,13 +351,23 @@ fn main() {
     // sobre `app_dir()` (dir del exe), NO sobre `base_dir` (datos): en una
     // instalación ambos pueden diferir y mover el equivocado deja la app
     // pidiendo reinicio para siempre (P0 2026-10-09).
+    // Idempotente (P0 2026-10-10, re-auditoría): `CloseRequested→Exit` suele
+    // venir seguido de `Destroyed`, y restart armado + cierre manual también
+    // se combinan. Sin guard, cada ruta lanzaba su propio swap concurrente
+    // (doble move + doble relanzamiento). Un solo disparo por proceso.
+    static QUIT_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let do_quit = move |mgr: &Arc<ProcessManager>| {
+        if QUIT_DONE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        // P0 producción: parar el motor ANTES del swap/salida. Sin esto el
+        // `llama-server` quedaba huérfano reteniendo VRAM y puerto, y el
+        // relanzamiento post-update chocaba con la instancia vieja.
         mgr.stop();
         let app = app_dir();
         if let Some(pending) = crate::update::pending_update() {
             match crate::update::prepare_install_on_exit(&app) {
                 Ok(script) => {
-                    // Invisible (P0-3): PowerShell con `-WindowStyle Hidden` +
                     // `CREATE_NO_WINDOW` + stdio a null: CERO consola, CERO
                     // terminal colgada. El `.ps1` hace el swap, relanza con
                     // `Start-Process` desacoplado y se autoborra (ver

@@ -32,8 +32,25 @@ use std::sync::{Arc, LazyLock, Mutex};
 pub const DEFAULT_FEED_REPO: &str = "getodevel-source/OMNI";
 
 /// URL base de la API de releases (testeable: los tests apuntan a un stub).
+/// Sec producción: el valor de `OMNI_UPDATE_API` se valida con
+/// `config::update_api_base_ok` (solo `https://` + host con punto, sin `@`);
+/// un env `http://` interno o con credenciales cae al default seguro
+/// `https://api.github.com` en vez de redirigir el update a la LAN.
 pub fn releases_api_base() -> String {
-    std::env::var("OMNI_UPDATE_API").unwrap_or_else(|_| "https://api.github.com".to_string())
+    const DEFAULT: &str = "https://api.github.com";
+    match std::env::var("OMNI_UPDATE_API") {
+        Err(_) => DEFAULT.to_string(),
+        Ok(v) if v.trim().is_empty() => DEFAULT.to_string(),
+        Ok(v) if crate::config::update_api_base_ok(&v) => v.trim().to_string(),
+        Ok(v) => {
+            eprintln!(
+                "[LocalMind] [WARN] OMNI_UPDATE_API inválida (se usa {}): {:?}",
+                DEFAULT,
+                v.trim()
+            );
+            DEFAULT.to_string()
+        }
+    }
 }
 
 /// URL del `latest` para un repo `owner/name`.
@@ -270,8 +287,14 @@ pub fn update_snapshot() -> UpdateState {
 }
 
 fn update_set(f: impl FnOnce(&mut UpdateState)) {
-    if let Ok(mut g) = inner().state.lock() {
-        f(&mut g);
+    match inner().state.lock() {
+        Ok(mut g) => f(&mut g),
+        Err(p) => {
+            eprintln!(
+                "[LocalMind] Estado de actualización con Mutex envenenado: se recupera el estado anterior"
+            );
+            f(&mut p.into_inner());
+        }
     }
 }
 
@@ -280,17 +303,29 @@ pub fn update_busy() -> bool {
     inner().busy.load(Ordering::Relaxed)
 }
 
+/// ¿Lleva `busy` tomado más de 10 min? Puro: decide sin tocar atómicos.
+fn busy_stale(since: u64, now: u64) -> bool {
+    since > 0 && now.saturating_sub(since) >= 600
+}
+
 /// Tomar `busy` o recuperarlo por watchdog (P0-2): si estaba tomado hace más
 /// de 10 min, el worker murió sin liberarlo (pánico) y se recupera en vez de
 /// bloquear el canal para siempre. Devuelve `false` si había trabajo VIVO
 /// (el llamador responde 409). Puro en decisión salvo los atómicos.
+/// Latido del worker de descarga: marca `busy` como vivo ahora mismo para
+/// que el watchdog no lo robe a mitad de una descarga lenta. Lo llama el
+/// loop de `download_asset` por chunk (barato: un `store` + `now_secs`).
+fn heartbeat_busy() {
+    inner().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+}
+
 fn take_busy_or_recover() -> bool {
     if !inner().busy.swap(true, Ordering::SeqCst) {
         inner().busy_since_secs.store(now_secs(), Ordering::Relaxed);
         return true;
     }
     let since = inner().busy_since_secs.load(Ordering::Relaxed);
-    if since > 0 && now_secs().saturating_sub(since) >= 600 {
+    if busy_stale(since, now_secs()) {
         inner().busy_since_secs.store(now_secs(), Ordering::Relaxed);
         inner().cancel.store(false, Ordering::Relaxed);
         return true;
@@ -385,11 +420,29 @@ pub fn fits_download(need: Option<u64>, free: Option<u64>) -> Option<bool> {
     }
 }
 
+/// Tamaños mínimos sanos de un staging recuperable (P1 producción): el EXE
+/// real pesa varios MB y el HTML varios KB; un apagón a mitad de `stage_zip`
+/// deja ficheros de 0–pocos bytes que antes se marcaban `ready` e instalaban
+/// un staging corrupto. Puro y testeable.
+fn staging_sizes_ok(exe_len: u64, html_len: u64) -> bool {
+    exe_len > 1_048_576 && html_len > 1024
+}
+
+/// ¿Staging huérfano con antigüedad >7 días? (P1 producción, puro testeable).
+/// Solo los incompletos viejos se borran; sin dato de fecha no se toca nada.
+fn staging_stale_old(mtime_secs: u64, now: u64) -> bool {
+    now.saturating_sub(mtime_secs) > 7 * 24 * 3600
+}
+
 /// Barrer stagings huérfanos de arranques previos (apagón duro entre la
 /// descarga y el swap): todo `%TEMP%\omni-update\<tag>\staging` con
-/// `OMNI.exe` + `ui.html` se registra como `pending` para que el próximo
-/// reinicio normal lo instale. Devuelve las versiones recuperadas.
-/// Puro en efectos salvo el `set_pending`: sin red, sin borrados.
+/// `OMNI.exe` + `ui.html` SANOS (>1MB/>1KB) y tag semver parseable se
+/// registra como `pending` para que el próximo reinicio normal lo instale.
+/// Los stagings INCOMPLETOS con antigüedad >7 días se borran (evitan acumular
+/// basura en %TEMP% tras apagones repetidos). Devuelve las versiones
+/// recuperadas. Efectos: `set_pending` + borrado solo de huérfanos viejos;
+/// sin red. Los borrados se anuncian por `eprintln` (P1 producción: el
+/// arranque aún no tiene `mgr` a mano aquí; `main.rs` loguea lo recuperado).
 pub fn recover_stale_stagings() -> Vec<String> {
     let mut found = Vec::new();
     let mut base = std::env::temp_dir();
@@ -399,27 +452,51 @@ pub fn recover_stale_stagings() -> Vec<String> {
         .unwrap_or_default();
     for d in dirs {
         let staging = d.path().join("staging");
-        let ok = staging.join("OMNI.exe").is_file() && staging.join("ui.html").is_file();
-        if !ok {
-            continue;
-        }
         let tag = d.file_name().to_string_lossy().to_string();
         let ver = tag.trim_start_matches('v').to_string();
-        if parse_version(&ver).is_none() {
+        // P1 producción: EXE+HTML presentes Y con tamaños sanos Y tag semver.
+        // Sin esto un apagón a mitad de staging instalaba ficheros truncados.
+        let exe_len = std::fs::metadata(staging.join("OMNI.exe"))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let html_len = std::fs::metadata(staging.join("ui.html"))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if staging.join("OMNI.exe").is_file()
+            && staging.join("ui.html").is_file()
+            && staging_sizes_ok(exe_len, html_len)
+            && parse_version(&ver).is_some()
+        {
+            set_pending(Some(PendingUpdate {
+                version: ver.clone(),
+                zip_path: String::new(),
+                staging_dir: staging.to_string_lossy().to_string(),
+                notes: "recuperado de un staging previo".to_string(),
+            }));
+            update_set(|s| {
+                s.state = "ready".to_string();
+                s.latest = ver.clone();
+                s.percent = 100;
+            });
+            found.push(ver);
             continue;
         }
-        set_pending(Some(PendingUpdate {
-            version: ver.clone(),
-            zip_path: String::new(),
-            staging_dir: staging.to_string_lossy().to_string(),
-            notes: "recuperado de un staging previo".to_string(),
-        }));
-        update_set(|s| {
-            s.state = "ready".to_string();
-            s.latest = ver.clone();
-            s.percent = 100;
-        });
-        found.push(ver);
+        // Incompleto o corrupto: solo se borra si lleva >7 días huérfano
+        // (un staging en curso de escritura es reciente y no se toca).
+        let mtime = std::fs::metadata(d.path())
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|dd| dd.as_secs());
+        if let Some(mt) = mtime {
+            if staging_stale_old(mt, now_secs()) {
+                let _ = std::fs::remove_dir_all(d.path());
+                eprintln!(
+                    "[LocalMind] Staging incompleto {} eliminado (>7 días huérfano).",
+                    tag
+                );
+            }
+        }
     }
     found
 }
@@ -451,10 +528,12 @@ fn get_text(url: &str, timeout_secs: u64) -> Result<String, String> {
 fn snippet(s: &str) -> String {
     const MAX: usize = 200;
     let t = s.trim();
-    if t.len() <= MAX {
+    if t.chars().count() <= MAX {
         t.to_string()
     } else {
-        format!("{}…", &t[..MAX])
+        // Por chars, no por bytes: `&t[..MAX]` parte un char multibyte y
+        // panica (UTF-8 boundary). `take(MAX)` nunca corta a medias.
+        format!("{}…", t.chars().take(MAX).collect::<String>())
     }
 }
 
@@ -585,6 +664,9 @@ pub fn download_asset(
             .map_err(|e| format!("Error al guardar {}: {}", part.display(), e))?;
         written += n as u64;
         inner().bytes_n.fetch_add(n as u64, Ordering::Relaxed);
+        // Latido: la descarga sigue viva; sin esto el watchdog roba `busy`
+        // a mitad de una descarga lenta y deja dos workers + 409s fantasma.
+        heartbeat_busy();
     }
     drop(out);
     let meta = std::fs::metadata(&part)
@@ -645,6 +727,23 @@ pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
     if archive.is_empty() {
         return Err("ZIP de actualización vacío".to_string());
     }
+    // Canónico del staging una sola vez: sin `.` (y `..` replegado por si
+    // el llamador pasa una ruta no normalizada). `starts_with` abajo compara
+    // por componentes, no por longitud.
+    let staging_norm: std::path::PathBuf = {
+        let mut p = std::path::PathBuf::new();
+        for c in staging.components() {
+            use std::path::Component;
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    p.pop();
+                }
+                _ => p.push(c.as_os_str()),
+            }
+        }
+        p
+    };
     let mut seen_exe = false;
     let mut seen_ui = false;
     for i in 0..archive.len() {
@@ -679,18 +778,24 @@ pub fn stage_zip(zip_path: &Path, staging: &Path) -> Result<(), String> {
             seen_ui = true;
         }
         let out = staging.join(&name);
-        // Contención: el destino debe quedar dentro del staging.
-        let root: Vec<_> = staging.components().collect();
-        let mut cur: Vec<_> = Vec::new();
-        for c in out.components() {
-            use std::path::Component;
-            match c {
-                Component::ParentDir => return Err(format!("Ruta fuera del staging: {}", name)),
-                Component::CurDir => {}
-                _ => cur.push(c),
+        // Contención por prefijo real: normalizar `out` igual que el staging
+        // y exigir que quede dentro. La vieja comparación de longitudes
+        // aceptaba `C:/<largo>/x.exe` (absoluta larga) como contenida.
+        let out_norm: std::path::PathBuf = {
+            let mut p = std::path::PathBuf::new();
+            for c in out.components() {
+                use std::path::Component;
+                match c {
+                    Component::CurDir => {}
+                    Component::ParentDir => {
+                        return Err(format!("Ruta fuera del staging: {}", name));
+                    }
+                    _ => p.push(c.as_os_str()),
+                }
             }
-        }
-        if cur.len() < root.len() {
+            p
+        };
+        if !out_norm.starts_with(&staging_norm) {
             return Err(format!("Ruta fuera del staging: {}", name));
         }
         if entry.is_dir() {
@@ -734,17 +839,29 @@ pub fn swap_script(app_dir: &Path, staging_dir: &Path, version: &str) -> String 
     let prev = app_dir.with_extension(format!("prev-{}", safe_tag(version)));
     let prev_models = prev.join("models");
     let log = std::env::temp_dir().join(format!("omni-swap-{}.log", safe_tag(version)));
+    // Escape PowerShell (P0 2026-10-10, re-auditoría C): TODAS las rutas van
+    // en comillas SIMPLES con `'`→`''` (en `"..."` el `$`, el backtick y
+    // `$(...)` se expanden: un dir con `$` en el nombre rompía el swap).
+    // `version` ya pasa por `safe_tag` ([A-Za-z0-9._-]); `lock` es fijo.
+    fn q(p: std::path::Display<'_>) -> String {
+        format!("'{}'", p.to_string().replace('\'', "''"))
+    }
+    // P1 producción: rama `FAIL exe-missing` con rollback `{prev}→{app}` antes
+    // de salir + orden manual en el log. Antes el swap dejaba la app MOVIDA a
+    // `.prev-<ver>` sin relanzar nada (ladrillo hasta intervención manual).
+    let tail = "W 'FAIL exe-missing'; try { Move-Item -LiteralPath {prev} -Destination {app} -ErrorAction Stop; W 'rollback-prev-app OK' } catch { W (\"FAIL rollback \"+$_.Exception.Message) }; W 'ORDEN MANUAL: copia la carpeta {prev} sobre {app} y reabre OMNI.exe'; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1";
     format!(
-        "$LOG='{log}'\r\nfunction W($m){{ Add-Content -Path $LOG -Value (\"[\"+(Get-Date -Format o)+\"] \"+$m) }}\r\nW 'swap {ver} start app={app}'\r\nfor ($i=0; $i -lt 75 -and (Test-Path \"{lock}\"); $i++) {{ Start-Sleep -Milliseconds 200 }}\r\nif (Test-Path \"{prev}\") {{ Remove-Item -Recurse -Force \"{prev}\" }}\r\ntry {{ Move-Item -Path \"{app}\" -Destination \"{prev}\" -ErrorAction Stop; W 'move-app-prev OK' }} catch {{ W (\"FAIL move-app-prev \"+$_.Exception.Message); Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\ntry {{ Move-Item -Path \"{staging}\" -Destination \"{app}\" -ErrorAction Stop; W 'move-staging-app OK' }} catch {{ W (\"FAIL move-staging-app \"+$_.Exception.Message); Move-Item -Path \"{prev}\" -Destination \"{app}\" -ErrorAction SilentlyContinue; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\nif (Test-Path \"{prev_models}\") {{ robocopy \"{prev_models}\" \"{app_models}\" /E /NFL /NDL /NJH /NJS >>$LOG 2>&1; W 'robocopy-models exit' }}\r\nif (Test-Path \"{exe}\") {{ W 'OK relaunch'; Start-Process -FilePath \"{exe}\" -WindowStyle Normal; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 0 }}\r\nW 'FAIL exe-missing'; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1\r\n",
-        log = log.display().to_string().replace('\'', "''"),
+        "$LOG={log}\r\nfunction W($m){{ Add-Content -LiteralPath $LOG -Value (\"[\"+(Get-Date -Format o)+\"] \"+$m) }}\r\nW 'swap {ver} start'\r\nfor ($i=0; $i -lt 75 -and (Test-Path -LiteralPath {lock}); $i++) {{ Start-Sleep -Milliseconds 200 }}\r\nif (Test-Path -LiteralPath {prev}) {{ Remove-Item -Recurse -Force -LiteralPath {prev} }}\r\ntry {{ Move-Item -LiteralPath {app} -Destination {prev} -ErrorAction Stop; W 'move-app-prev OK' }} catch {{ W (\"FAIL move-app-prev \"+$_.Exception.Message); Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\ntry {{ Move-Item -LiteralPath {staging} -Destination {app} -ErrorAction Stop; W 'move-staging-app OK' }} catch {{ W (\"FAIL move-staging-app \"+$_.Exception.Message); Move-Item -LiteralPath {prev} -Destination {app} -ErrorAction SilentlyContinue; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 1 }}\r\nif (Test-Path -LiteralPath {prev_models}) {{ robocopy {prev_models} {app_models} /E /NFL /NDL /NJH /NJS >>$LOG 2>&1; W 'robocopy-models exit' }}\r\nif (Test-Path -LiteralPath {exe}) {{ W 'OK relaunch'; Start-Process -FilePath {exe} -WindowStyle Normal; Remove-Item -Path $MyInvocation.MyCommand.Path -Force; exit 0 }}\r\n{tail}\r\n",
+        log = q(log.display()),
         ver = version,
-        app = app_dir.display(),
-        prev = prev.display(),
-        staging = staging_dir.display(),
-        prev_models = prev_models.display(),
-        app_models = app_dir.join("models").display(),
-        exe = app_dir.join("OMNI.exe").display(),
-        lock = std::env::temp_dir().join("localmind.lock").display(),
+        app = q(app_dir.display()),
+        prev = q(prev.display()),
+        staging = q(staging_dir.display()),
+        prev_models = q(prev_models.display()),
+        app_models = q(app_dir.join("models").display()),
+        exe = q(app_dir.join("OMNI.exe").display()),
+        lock = q(std::env::temp_dir().join("localmind.lock").display()),
+        tail = tail,
     )
 }
 
@@ -1121,14 +1238,25 @@ mod tests {
     #[test]
     fn swap_simulado_en_sandbox_sin_consola() {
         // El .ps1 generado debe existir y parsear (verificado fuera con el
-        // parser oficial); aquí se verifica el contrato de rutas.
+        // parser oficial); aquí se verifica el contrato de rutas: comillas
+        // SIMPLES (sin expansión `$`) + `-LiteralPath` en cmdlets.
         let s = swap_script(
             Path::new("C:\\OMNI"),
             Path::new("C:\\TEMP\\staging"),
             "9.9.9",
         );
-        assert!(s.contains("Start-Process -FilePath \"C:\\OMNI\\OMNI.exe\""));
+        assert!(
+            s.contains("Start-Process -FilePath 'C:\\OMNI\\OMNI.exe'"),
+            "{}",
+            &s[..s.len().min(400)]
+        );
         assert!(s.contains("localmind.lock"));
+        assert!(
+            !s.contains("\"C:\\OMNI\""),
+            "rutas en comillas dobles expanden `$`: {}",
+            &s[..s.len().min(400)]
+        );
+        assert!(s.contains("-LiteralPath"), "{}", &s[..s.len().min(400)]);
     }
 
     #[test]
@@ -1146,6 +1274,50 @@ mod tests {
             w.finish().unwrap();
         }
         let out = stage_zip(&zp, &dir.join("staging"));
+        assert!(out.is_err(), "el zip con .. debe rechazarse");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ZipSlip por longitud (2026-10-10): la vieja contención comparaba
+    /// longitudes, así que una entrada absoluta LARGA (`C:/<largo>/x.exe`,
+    /// con más componentes que el staging) pasaba como "contenida" y se
+    /// escribía fuera del staging. Hoy se exige prefijo real (`starts_with`
+    /// sobre el staging canónico). Solo Windows: en Unix `C:/...` no es
+    /// absoluta y `join` jamás sale del staging.
+    #[cfg(windows)]
+    #[test]
+    fn staging_rechaza_absoluta_larga() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("omni-upd-abs-{}", now_secs()));
+        let _ = std::fs::create_dir_all(&dir);
+        // Absoluta FUERA del staging pero más larga que él, bajo el temp del
+        // test: si el bug volviera, el daño queda en el temp y lo limpia el
+        // propio test.
+        let fuera = dir.join("relleno1").join("relleno2").join("x.exe");
+        let evil = fuera.display().to_string().replace('\\', "/");
+        assert!(!evil.contains(".."), "{}", evil);
+        let zp = dir.join("abs.zip");
+        {
+            let f = std::fs::File::create(&zp).unwrap();
+            let mut w = zip::ZipWriter::new(f);
+            for name in [evil.as_str(), "OMNI.exe", "ui.html"] {
+                w.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                w.write_all(b"x").unwrap();
+            }
+            w.finish().unwrap();
+        }
+        let stg = dir.join("stg");
+        let out = stage_zip(&zp, &stg);
+        assert!(
+            out.is_err(),
+            "la absoluta fuera del staging debe rechazarse"
+        );
+        assert!(
+            out.unwrap_err().contains("fuera del staging"),
+            "el rechazo debe ser por contención"
+        );
+        assert!(!fuera.exists(), "nada debe escribirse fuera del staging");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1294,6 +1466,7 @@ mod tests {
     /// tomado hace poco bloquea (409). Sin `since` (0) no se toca.
     #[test]
     fn busy_watchdog_recupera_clavado_y_respeta_vivo() {
+        let _g = TEST_BUSY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Limpio: se toma normal.
         inner().busy.store(false, Ordering::SeqCst);
         assert!(take_busy_or_recover());
@@ -1306,5 +1479,128 @@ mod tests {
         assert!(take_busy_or_recover());
         release_busy();
         assert!(!update_busy());
+    }
+
+    /// Candado para los tests que tocan `busy`/`busy_since_secs` globales:
+    /// `cargo test` corre en hilos y sin esto el watchdog y el latido se
+    /// pisan entre sí de forma intermitente.
+    static TEST_BUSY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// `snippet` corta por chars, no por bytes: con tildes/emoji el viejo
+    /// `&t[..200]` partía un char multibyte y panica (límite UTF-8).
+    #[test]
+    fn snippet_no_corta_utf8_a_medias() {
+        // El byte 200 cae A MEDIAS de un char multibyte: el viejo `&t[..200]`
+        // panica (límite UTF-8); por chars nunca corta a medias.
+        let tilde = "a".repeat(199) + &"é".repeat(100);
+        let emoji = "a".repeat(199) + &"🚀".repeat(100);
+        for s in [&tilde, &emoji] {
+            let out = snippet(s);
+            assert!(out.ends_with('…'), "{}", out);
+            assert!(out.is_char_boundary(out.len()));
+            std::str::from_utf8(out.as_bytes()).expect("UTF-8 válido");
+        }
+        let s = "áéíóúñ".repeat(50) + &"🚀".repeat(50);
+        let out = snippet(&s);
+        assert!(out.ends_with('…'), "{}", out);
+        assert_eq!(out.chars().count(), 201, "{}", out);
+        // Corto: intacto, sin puntos suspensivos.
+        assert_eq!(snippet("hola"), "hola");
+        assert_eq!(snippet(""), "");
+    }
+
+    /// El latido evita que el watchdog robe `busy` a una descarga viva pero
+    /// lenta: tras `heartbeat_busy` el `since` deja de verse stale.
+    #[test]
+    fn heartbeat_evita_robo_a_descarga_viva() {
+        let _g = TEST_BUSY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // Decisión pura: stale a los 11 min, vivo recién tomado, 0 = libre.
+        let now = now_secs();
+        assert!(busy_stale(now.saturating_sub(660), now));
+        assert!(!busy_stale(now, now));
+        assert!(!busy_stale(0, now));
+        // Descarga viva hace 11 min sin latido: el watchdog la robaría.
+        inner()
+            .busy_since_secs
+            .store(now.saturating_sub(660), Ordering::Relaxed);
+        assert!(busy_stale(
+            inner().busy_since_secs.load(Ordering::Relaxed),
+            now_secs()
+        ));
+        // Con latido justo antes del chequeo: ya no es stale, no se roba.
+        heartbeat_busy();
+        let since = inner().busy_since_secs.load(Ordering::Relaxed);
+        assert!(!busy_stale(since, now_secs()));
+        inner().busy_since_secs.store(0, Ordering::Relaxed);
+    }
+
+    /// `update_set` sobrevive a un Mutex envenenado: recupera con
+    /// `into_inner` + log y sigue escribiendo (antes tragaba el error en
+    /// silencio y el estado quedaba congelado).
+    #[test]
+    fn update_set_sobrevive_a_mutex_envenenado() {
+        let _g = TEST_BUSY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // Envenenar a propósito: pánico con el lock tomado.
+        let r = std::panic::catch_unwind(|| {
+            let _held = inner().state.lock().unwrap_or_else(|p| p.into_inner());
+            panic!("envenenamiento provocado del Mutex de update");
+        });
+        assert!(r.is_err(), "el pánico provocado debe ocurrir");
+        // El estado sigue escribiéndose tras el envenenamiento.
+        update_set(|s| {
+            s.state = "checking".to_string();
+            s.error = "tras veneno".to_string();
+        });
+        let snap = update_snapshot();
+        assert_eq!(snap.state, "checking");
+        assert_eq!(snap.error, "tras veneno");
+        // Dejar limpio para el resto del suite.
+        update_set(|s| {
+            *s = UpdateState::idle();
+        });
+    }
+    /// P1 producción: `recover` revalida tamaños (un staging truncado por
+    /// apagón NO se marca ready) y las puras deciden sin tocar disco.
+    #[test]
+    fn recover_revalida_tamanos_y_puras_deciden() {
+        // Puras: EXE>1MB + HTML>1KB sanos; a medias no.
+        assert!(staging_sizes_ok(2_000_000, 5_000));
+        assert!(!staging_sizes_ok(10, 5_000), "exe truncado");
+        assert!(!staging_sizes_ok(2_000_000, 10), "html truncado");
+        assert!(!staging_sizes_ok(0, 0));
+        // Stale: >7 días borrable; reciente y futuro no.
+        let now = now_secs();
+        assert!(staging_stale_old(now - 8 * 24 * 3600, now));
+        assert!(!staging_stale_old(now - 3600, now));
+        assert!(
+            !staging_stale_old(now + 60, now),
+            "reloj al futuro no borra"
+        );
+    }
+
+    /// P1 producción: la rama `FAIL exe-missing` intenta rollback y deja la
+    /// orden manual en el log (antes dejaba la app movida a `.prev` = ladrillo).
+    #[test]
+    fn swap_exe_missing_hace_rollback_y_orden_manual() {
+        let s = swap_script(
+            std::path::Path::new("C:\\OMNI"),
+            std::path::Path::new("C:\\TEMP\\staging"),
+            "9.9.9",
+        );
+        assert!(
+            s.contains("FAIL exe-missing"),
+            "{}",
+            &s[s.len().saturating_sub(600)..]
+        );
+        assert!(
+            s.contains("rollback-prev-app OK"),
+            "{}",
+            &s[s.len().saturating_sub(600)..]
+        );
+        assert!(
+            s.contains("ORDEN MANUAL"),
+            "{}",
+            &s[s.len().saturating_sub(600)..]
+        );
     }
 }

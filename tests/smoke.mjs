@@ -137,7 +137,7 @@ async function main() {
   }
 
   // --- 2. favicons (200 or 404 both acceptable) ---
-  for (const p of ["/localmind.ico", "/localmind.png"]) {
+  for (const p of ["/localmind.ico", "/localmind.png", "/omni.ico", "/omni.png"]) {
     const r = await safeGet(p, `GET ${p}`);
     if (r) {
       const ok = r.res.status === 200 || r.res.status === 404;
@@ -294,7 +294,13 @@ async function main() {
     }
   }
 
-  // --- 12. GET /api/events (SSE, aborted after check) ---
+  // --- 12. GET /api/events (SSE: el PASS honesto es "el stream abre") ---
+  // src-rust/src/sse.rs: EventReader sirve el history del anillo + el live
+  // por mpsc, SIN heartbeat. Con arranque fresco y anillo vacío, un stream
+  // abierto y sano puede no traer ninguna línea `data:` dentro del timeout
+  // (no hay logs nuevos que empujar). Por eso NO se exige `data:`: el check
+  // verifica que el stream abre (200 + content-type SSE) y documenta si
+  // llegó algún evento o no.
   {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), SSE_TIMEOUT_MS);

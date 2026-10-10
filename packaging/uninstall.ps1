@@ -38,6 +38,32 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- Guardarraíl: TargetDir debe parecer una instalación OMNI real ---
+# Exige huella (OMNI.exe o version.txt) para no borrar un dir equivocado
+# (p. ej. un -TargetDir mal escrito). Los paths cortos o raíz se bloquean
+# siempre: borrar C:\, el home o un drive nunca es una desinstalación.
+function Test-UnsafeTarget([string]$Dir) {
+  if ([string]::IsNullOrWhiteSpace($Dir)) { return 'vacío' }
+  $Full = [System.IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+  $Root = [System.IO.Path]::GetPathRoot($Full).TrimEnd('\', '/')
+  if ($Full -eq $Root) { return 'raíz del drive' }
+  $UserHome = [System.IO.Path]::GetFullPath($HOME).TrimEnd('\', '/')
+  $LocalApp = [System.IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\', '/')
+  $AppData = [System.IO.Path]::GetFullPath($env:APPDATA).TrimEnd('\', '/')
+  foreach ($Stop in @($UserHome, $LocalApp, $AppData)) {
+    if ($Full -eq $Stop) { return "dir protegido ($Stop)" }
+  }
+  if (($Full.Split([System.IO.Path]::DirectorySeparatorChar) | Where-Object { $_ -ne '' }).Count -lt 2) {
+    return 'path demasiado corto'
+  }
+  return $null
+}
+$Unsafe = Test-UnsafeTarget $TargetDir
+if ($Unsafe) { throw "TargetDir inseguro ($Unsafe): '$TargetDir'. Pasa el dir de instalación real de OMNI." }
+if ((Test-Path $TargetDir) -and -not ((Test-Path (Join-Path $TargetDir 'OMNI.exe')) -or (Test-Path (Join-Path $TargetDir 'version.txt')))) {
+  throw "TargetDir sin huella OMNI (falta OMNI.exe y version.txt): '$TargetDir'. Nada que desinstalar ahí."
+}
+
 $TargetExe = Join-Path $TargetDir 'OMNI.exe'
 $runningHere = Get-Process -Name 'OMNI' -ErrorAction SilentlyContinue | Where-Object {
   try { $_.Path -and ($_.Path -eq $TargetExe) } catch { $false }
@@ -63,8 +89,21 @@ if (-not (Test-Path $TargetDir)) {
 }
 
 # Remove runtime files, keep models/ by default.
+# No autodestruir el uninstaller en uso: si este script corre desde el
+# TargetDir (atajo del Menú Inicio → $TargetDir\uninstall.ps1), su propio
+# fichero se excluye del barrido. Borrar el script en ejecución es frágil
+# (y rompe re-ejecuciones); lo ya cargado en memoria sigue corriendo.
 $Keep = @('models')
 if ($RemoveModels) { $Keep = @() }
+$SelfName = $null
+try {
+  $SelfFull = [System.IO.Path]::GetFullPath($PSCommandPath)
+  $TargetFull = [System.IO.Path]::GetFullPath($TargetDir).TrimEnd('\', '/')
+  if ($SelfFull.StartsWith($TargetFull + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    $SelfName = Split-Path $SelfFull -Leaf
+    if ($Keep -notcontains $SelfName) { $Keep += $SelfName }
+  }
+} catch {}
 Get-ChildItem $TargetDir -Force | Where-Object { $Keep -notcontains $_.Name } | Remove-Item -Recurse -Force
 if ($RemoveModels) {
   Write-Host 'Removed models/ as requested (-RemoveModels).'

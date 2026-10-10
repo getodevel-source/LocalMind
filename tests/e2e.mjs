@@ -43,11 +43,13 @@ const { key: API_KEY, source: KEY_SOURCE } = resolveKey();
 const H = () => ({ Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" });
 console.log(`key source: ${KEY_SOURCE} | base: ${BASE} | with-engine: ${WITH_ENGINE}`);
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const check = (ok, name, detail = "") => {
   if (ok) { pass++; console.log(`PASS ${name}${detail ? " :: " + detail : ""}`); }
   else { fail++; console.log(`FAIL ${name}${detail ? " :: " + detail : ""}`); }
 };
+// SKIP honesto: informa sin inflar el contador de PASS.
+const skip = (name, detail = "") => { skipped++; console.log(`SKIP ${name}${detail ? " :: " + detail : ""}`); };
 
 async function fetchT(path, { method = "GET", body = null, auth = true, timeout = 15000 } = {}) {
   const ctl = new AbortController();
@@ -137,12 +139,13 @@ async function main() {
       check(lo.status === 409, "POST /api/launch_omp engine-off 409", `status=${lo.status} body=${lo.text.slice(0, 120)}`);
       let unchanged = true;
       for (const [p, mt] of Object.entries(before)) if (statSync(p).mtimeMs !== mt) unchanged = false;
-      check(unchanged, "launch-off writes nothing", `${Object.keys(before).length} tracked files`);
+      if (Object.keys(before).length === 0) skip("launch-off writes nothing", "0 tracked files (nada que validar)");
+      else check(unchanged, "launch-off writes nothing", `${Object.keys(before).length} tracked files`);
     } else {
-      console.log("SKIP engine-off 502/409 branches: engine running (use engine-on path)");
+      skip("engine-off 502/409 branches", "engine running (use engine-on path)");
     }
   }
-  if (!WITH_ENGINE) { console.log(`engine-off only (--with-engine not given): ${pass} pass ${fail} fail`); return fail ? 1 : 0; }
+  if (!WITH_ENGINE) { console.log(`engine-off only (--with-engine not given): ${pass} pass ${fail} fail ${skipped} skipped`); return fail ? 1 : 0; }
   if (!API_KEY) { console.log("FAIL: --with-engine needs a key"); return 1; }
 
   // ---- engine-on path: exactly two sequential loads, never concurrent ----
@@ -221,7 +224,7 @@ async function main() {
           env: { ...process.env, PI_CODING_AGENT_DIR: join(process.env.APPDATA, "LocalMind", "agents", "omp"), OPENAI_BASE_URL: `${BASE}/v1` },
         });
         check(r.status === 0 && (r.stdout || "").includes("ok"), "omp one-shot via local engine", `exit=${r.status} ms=${Date.now() - t} out=${(r.stdout || "").trim().slice(0, 80)}`);
-      } else check(true, "omp one-shot SKIP (not installed)", "");
+      } else skip("omp one-shot (not installed)", "sin binario omp en PATH: no suma PASS");
     }
 
     const stop = await fetchT("/api/stop", { method: "POST", timeout: 60000 });
@@ -232,7 +235,7 @@ async function main() {
   // engine-off tail
   const met = await fetchT("/api/metrics");
   check(met.status === 502, "final metrics 502 engine_down", `status=${met.status}`);
-  console.log(`== SUMMARY: ${pass} passed, ${fail} failed ==`);
+  console.log(`== SUMMARY: ${pass} passed, ${fail} failed, ${skipped} skipped ==`);
   return fail ? 1 : 0;
 }
 

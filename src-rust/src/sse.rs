@@ -62,11 +62,18 @@ impl Read for EventReader {
                     Ok(g) => g,
                     Err(po) => po.into_inner(),
                 };
-                match g.recv() {
+                // P1 producción: `recv_timeout` en vez de `recv()` bloqueante.
+                // Un cliente que se va sin leer ya no fuga el hilo de
+                // respuesta para siempre; cada 25 s sale un heartbeat `: ping`
+                // (forza flush y detecta desconexión en la siguiente escritura).
+                match g.recv_timeout(std::time::Duration::from_secs(25)) {
                     Ok(line) => {
                         let seq = self.next_live_seq;
                         self.next_live_seq += 1;
                         self.chunk = self.encode(seq, &line);
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        self.chunk = b": ping\n\n".to_vec();
                     }
                     Err(_) => {
                         self.done = true;
@@ -77,7 +84,6 @@ impl Read for EventReader {
         }
         let n = self.chunk.len().min(buf.len());
         buf[..n].copy_from_slice(&self.chunk[..n]);
-        self.chunk.drain(..n);
         Ok(n)
     }
 }

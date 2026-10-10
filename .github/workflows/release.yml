@@ -25,6 +25,13 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-rust/Cargo.toml
 
+      # P1 producción: no publicar lo que rompe (mirror ci.yml:20-28).
+      - name: Rust fmt
+        run: cargo fmt --check --manifest-path src-rust/Cargo.toml
+
+      - name: Clippy (warnings deny)
+        run: cargo clippy --manifest-path src-rust/Cargo.toml --all-targets -- -D warnings
+
       - name: Version matches tag
         shell: pwsh
         run: |
@@ -40,18 +47,37 @@ jobs:
           # 10743 verificado en SRS §3.2) y viaja en .gitignore: el checkout
           # de CI no lo trae y build-portable.ps1 lo exige. Se descarga el
           # asset canónico y se extrae a bin/ (layout plano del ZIP upstream).
+          # Cómo actualizar el hash: descargar el asset nuevo, calcular
+          # (Get-FileHash <zip> -Algorithm SHA256).Hash y pegar el hex en
+          # $ExpectedSha256 junto con el tamaño en $ExpectedBytes.
           $Tag = 'prism-b10743-adfffbe'
           $Asset = 'llama-prism-b10743-adfffbe-bin-win-vulkan-x64.zip'
           $Url = "https://github.com/PrismML-Eng/llama.cpp/releases/download/$Tag/$Asset"
+          $ExpectedSha256 = 'd66e0c4d11ea937c8cb197d6c59ffc8c41599bd30ea58057e7e6a4d5a3ced466'
+          $ExpectedBytes = 31302954
           Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP/engine.zip"
-          if ((Get-Item "$env:TEMP/engine.zip").Length -lt 10MB) { throw 'engine ZIP demasiado pequeño: descarga rota' }
+          $Got = Get-Item "$env:TEMP/engine.zip"
+          if ($Got.Length -ne $ExpectedBytes) { throw "engine ZIP tamaño inesperado: $($Got.Length) (esperado $ExpectedBytes): descarga rota o asset cambiado" }
+          $Hex = (Get-FileHash "$env:TEMP/engine.zip" -Algorithm SHA256).Hash.ToLower()
+          if ($Hex -ne $ExpectedSha256.ToLower()) { throw "engine ZIP SHA256 no coincide: $Hex (esperado $ExpectedSha256)" }
           Expand-Archive -Path "$env:TEMP/engine.zip" -DestinationPath 'bin' -Force
           if (-not (Test-Path 'bin/llama-server.exe')) { throw 'bin/llama-server.exe ausente tras extraer el runtime' }
           Get-ChildItem bin | Measure-Object | ForEach-Object { Write-Host "bin/: $($_.Count) ficheros" }
 
       - name: Build portable ZIP
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1
+        run: |
+          # Firma Authenticode opcional: si el repo tiene el secreto del
+          # certificado, se firma; si no, build-portable.ps1 avisa y sigue
+          # sin firmar (los ZIP sin firma son válidos; SmartScreen avisará
+          # en la primera ejecución). Sin secreto NO se falla la release.
+          $SignArgs = @()
+          if ($env:CERT_THUMBPRINT -or ($env:WINDOWS_PFX_PATH -and $env:WINDOWS_PFX_PASSWORD)) { $SignArgs += '-Sign' }
+          & powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1 @SignArgs
+        env:
+          WINDOWS_PFX_PATH: ${{ secrets.WINDOWS_PFX_PATH }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+          CERT_THUMBPRINT: ${{ secrets.CERT_THUMBPRINT }}
 
       - name: Collect artifacts
         shell: pwsh

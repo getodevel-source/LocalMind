@@ -335,7 +335,7 @@ pub fn profile_id_ok(id: &str) -> bool {
 }
 /// Contexto de perfil: 1024..=1048576 en pasos de 1024.
 pub fn profile_context_ok(v: usize) -> bool {
-    (1024..=1048576).contains(&v) && v % 1024 == 0
+    (1024..=1048576).contains(&v) && v.is_multiple_of(1024)
 }
 /// `cache_ram` (MB): 0..=65536.
 pub fn profile_cache_ram_ok(v: usize) -> bool {
@@ -355,9 +355,13 @@ pub fn profile_flags_ok(flags: &[String]) -> bool {
     flags.len() <= 8 && flags.iter().all(|f| profile_flag_ok(f))
 }
 
-/// Candado PSU (LM-NF-3): flags que suben el consumo más allá del set seguro
-/// medido. Rechaza `-ub`/`--ubatch-size` > 512, `-b`/`--batch-size` > 1024 y
-/// cualquier `--spec-*` (el draft especulativo mueve el pico de potencia).
+/// Candado PSU + escritura en disco (LM-NF-3, P1-IO): flags que suben el consumo
+/// más allá del set seguro medido o que permiten escribir ficheros arbitrarios.
+/// Rechaza `-ub`/`--ubatch-size` > 512, `-b`/`--batch-size` > 1024, cualquier
+/// `--spec-*` (el draft especulativo mueve el pico de potencia) y cualquier
+/// `--log-file`/`--out-file` (el motor escribiría en disco fuera de su log
+/// rotado). Vale TAMBIÉN en persistencia (`extra_flags_persist_ok`): lo guardado
+/// ya pasa este candado, no solo el arranque.
 /// Devuelve la flag ofensora en español. Sin pánicos.
 pub fn psu_unsafe_flag(flags: &[String]) -> Option<String> {
     let mut i = 0;
@@ -394,6 +398,16 @@ pub fn psu_unsafe_flag(flags: &[String]) -> Option<String> {
             }
         } else if f == "--spec-type" || f.starts_with("--spec-") {
             return Some(format!("Flag bloqueada por seguridad de energía (PSU): «{}» altera el draft especulativo medido.", flags[i]));
+        } else if f == "--log-file"
+            || f.starts_with("--log-file=")
+            || f.starts_with("--log-file ")
+            || f == "--out-file"
+            || f.starts_with("--out-file=")
+            || f.starts_with("--out-file ")
+        {
+            // P1-IO: el motor escribiría ficheros arbitrarios fuera de su log
+            // rotado. Bloqueo por presencia (cualquier valor es una ruta).
+            return Some(format!("Flag bloqueada por seguridad de escritura: «{}» permite escribir ficheros fuera del log rotado.", flags[i]));
         } else if takes_val("--ubatch-size") || takes_val("--batch-size") {
             // Formas con espacio ya cubiertas arriba por prefijo; sin valor
             // explícito no se puede juzgar: se deja pasar (el default manda).
@@ -804,14 +818,22 @@ impl ConfigStore {
         // sin esta nota el siguiente `save()` sobrescribe la config del usuario
         // con defaults y nadie se entera nunca.
         let mut ilegible_note: Option<String> = None;
+        // P2 producción: el TOML ilegible también deja `.bak` (antes solo la
+        // migración v5 lo escribía). Sin copia, un `save()` posterior pisa la
+        // config rota del usuario con defaults y no hay forma de rescatarla.
         let mut cfg = match raw.as_ref() {
             Some(text) => match toml::from_str::<AppConfig>(text) {
                 Ok(c) => c,
                 Err(e) => {
+                    let bak = path.with_extension("toml.bak");
+                    // P2 producción: best-effort igual que la migración v5; el
+                    // test exige el `.bak`, no el `is_ok` intermedio.
+                    let _ = std::fs::write(&bak, text);
                     ilegible_note = Some(format!(
-                        "[LocalMind] No se pudo leer la configuración de {}: {}. Se usan los valores por defecto; corregir o borrar el archivo restaura la config.",
+                        "[LocalMind] No se pudo leer la configuración de {}: {}. Se usan los valores por defecto (copia de seguridad en {}); corregir o borrar el archivo restaura la config.",
                         path.display(),
-                        e
+                        e,
+                        bak.display()
                     ));
                     AppConfig::default()
                 }
@@ -1290,6 +1312,65 @@ pub fn remote_url_ok(url: &str) -> bool {
     }
 }
 
+/// ¿Base de la API de actualización aceptable (`OMNI_UPDATE_API`)?
+/// Sec producción: exige `https://` + host con punto y rechaza `http://`
+/// y credenciales (`@`). Modelo: `remote_url_ok` (dominio no-IP solo por TLS).
+/// Sin esto, un env local redirige el chequeo/descarga del update a un
+/// `http://` interno (MITM en la LAN: el binario sustituto llegaría igual,
+/// solo lo frenaría el checksum del body). `None`/vacío = defecto seguro
+/// (`https://api.github.com`); el llamador lo aplica antes de usar.
+pub fn update_api_base_ok(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("https://") else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    // Autoridad hasta el primer `/`, `?` o `#` (igual que `remote_url_ok`).
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let auth = &rest[..auth_end];
+    if auth.is_empty() || auth.contains('@') {
+        return false;
+    }
+    // Host sin puerto (IPv6 entre corchetes; sin corchetes se rechaza).
+    let host = if let Some(s) = auth.strip_prefix('[') {
+        let end = match s.find(']') {
+            Some(i) => i,
+            None => return false,
+        };
+        let after = &s[end + 1..];
+        if !after.is_empty() {
+            let p = match after.strip_prefix(':') {
+                Some(p) => p,
+                None => return false,
+            };
+            if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
+                return false;
+            }
+        }
+        &s[..end]
+    } else {
+        let mut parts = auth.split(':');
+        let h = parts.next().unwrap_or("");
+        match parts.next() {
+            None => h,
+            Some(p) => {
+                if parts.next().is_some() {
+                    return false;
+                }
+                if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
+                    return false;
+                }
+                h
+            }
+        }
+    };
+    // Host con punto (dominio/API real); sin punto sería un nombre LAN al que
+    // un env local redirigiría el update. Sin espacios ni barras invertidas.
+    !host.is_empty() && host.contains('.') && !host.contains([' ', '/', '\\'])
+}
+
 /// ¿Feed de actualización aceptable? `owner/name` GitHub (vacío = defecto).
 /// Misma gramática estricta que `models::check_repo`: sin `..`, sin espacios,
 /// sin backslash; cada lado `owner`/`name` no vacío, charset acotado.
@@ -1427,7 +1508,13 @@ mod tests {
         assert!(psu_unsafe_flag(&f(&["-b", "2048"])).is_some());
         assert!(psu_unsafe_flag(&f(&["--spec-type", "draft-mtp"])).is_some());
         assert!(psu_unsafe_flag(&f(&["--spec-draft-n-max", "3"])).is_some());
-        // Valores seguros pasan: -ub 512, -b 1024, flags de tuning medido.
+        // P1-IO: flags de escritura arbitraria en disco rechazadas.
+        assert!(psu_unsafe_flag(&f(&["--log-file", "C:/tmp/hack.log"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--log-file=rel/log.txt"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--out-file", "dump.bin"])).is_some());
+        assert!(psu_unsafe_flag(&f(&["--out-file=out.txt"])).is_some());
+        let err_log = psu_unsafe_flag(&f(&["--log-file", "out.log"])).unwrap();
+        assert!(err_log.contains("seguridad de escritura"), "{}", err_log);
         assert!(psu_unsafe_flag(&f(&["-ub", "512"])).is_none());
         assert!(psu_unsafe_flag(&f(&["-b", "1024"])).is_none());
         assert!(psu_unsafe_flag(&f(&["--load-mode", "none"])).is_none());
@@ -1569,6 +1656,38 @@ mod tests {
             "localhost:17860",
         ] {
             assert!(!remote_url_ok(u), "{}", u);
+        }
+    }
+
+    /// Sec producción: la base de la API de update solo acepta `https://` +
+    /// host con punto (modelo `remote_url_ok` para dominios) y rechaza
+    /// `http://` y credenciales (`@`). Sin esto un env local redirige el
+    /// update a http interno.
+    #[test]
+    fn update_api_base_solo_https_con_punto() {
+        for u in [
+            "https://api.github.com",
+            "https://api.github.com/",
+            "https://ghe.mi-empresa.com/api/v3",
+            "https://api.github.com:443/repos",
+        ] {
+            assert!(update_api_base_ok(u), "{}", u);
+        }
+        for u in [
+            "",
+            "http://api.github.com",
+            "http://192.168.1.10:17860",
+            "http://localhost:17860",
+            "https://localhost",
+            "https://intranet",
+            "https://user:clave@api.github.com",
+            "https://user@api.github.com/",
+            "ftp://api.github.com",
+            "api.github.com",
+            "https://",
+            "https:///repos",
+        ] {
+            assert!(!update_api_base_ok(u), "{}", u);
         }
     }
 
@@ -1846,8 +1965,13 @@ mod tests {
         // Carga: defaults en memoria, archivo corrupto intacto en disco.
         assert_eq!(store.get().profiles_version, PROFILES_VERSION);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), roto);
-        // La nota se consume una sola vez.
-        assert!(store.take_migration_note().is_none());
+        // P2 producción: el TOML ilegible deja `.bak` con el contenido roto
+        // (antes solo la migración v5 lo escribía) y la nota lo nombra.
+        assert_eq!(
+            std::fs::read_to_string(path.with_extension("toml.bak")).unwrap(),
+            roto
+        );
+        assert!(note.contains(".bak") || note.contains("copia"), "{}", note);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

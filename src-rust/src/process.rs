@@ -180,6 +180,16 @@ pub struct ProcessManager {
     /// `stop()`/transición final. El reintento usa ESTO, nunca el status.
     pending_start: Arc<Mutex<Option<ResolvedStart>>>,
     base_dir: PathBuf,
+    /// Lock global de arranque (P1-seg): `start()` lo toma con `try_lock` al
+    /// abrir y lo sostiene hasta volver; si está ocupado devuelve
+    /// `Err("...en curso...")` sin tocar estado. Hace atómico el
+    /// check→spawn: dos `POST /api/start` concurrentes (el gateway atiende
+    /// cada request en su hilo) no pueden validar y lanzar dos hijos a la vez.
+    start_lock: Arc<Mutex<()>>,
+    /// Lock de importación (P1 2026-10-10, re-auditoría B): `import_model_from_path`
+    /// lo sostiene durante check+copy para que dos `POST /api/import_model`
+    /// concurrentes con el mismo nombre no pasen ambos el 409 y se pisen.
+    import_lock: Arc<Mutex<()>>,
     bin_dir: PathBuf,
     models_dir: PathBuf,
 }
@@ -232,6 +242,8 @@ impl ProcessManager {
         let start_history: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
         let mtp_retry_done = Arc::new(AtomicBool::new(false));
         let pending_start: Arc<Mutex<Option<ResolvedStart>>> = Arc::new(Mutex::new(None));
+        let start_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+        let import_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
         let load_times_path = Self::load_times_path();
         let load_times: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(
             load_times_load(&load_times_path).unwrap_or_default(),
@@ -706,8 +718,10 @@ impl ProcessManager {
             log_file,
             start_history,
             mtp_retry_done,
-            config,
             pending_start,
+            import_lock,
+            start_lock,
+            config,
             base_dir,
             bin_dir,
             models_dir,
@@ -722,7 +736,14 @@ impl ProcessManager {
     /// D-47: esta es la FUENTE ÚNICA de las flags del motor. `start()` ya no
     /// las vuelve a anexar: cada flag llega al hijo exactamente una vez y el
     /// argv del log es, por fin, el argv del hijo. `api_key` es la clave del
-    /// gateway, que el motor exige vía `--api-key` (D-45).
+    /// gateway, que el motor exige SIN ir en argv (P1-seg): viaja por la
+    /// variable de entorno del hijo `LLAMA_API_KEY` (D-45). El build 10743
+    /// documenta `(env: LLAMA_API_KEY)` junto a `--api-key` en su `--help`,
+    /// así que el soporte vía env está verificado contra el binario real.
+    /// Motivo: el argv es legible por cualquier proceso local (Task Manager,
+    /// `wmic process get commandline`, ETW); el env del hijo solo lo lee su
+    /// propio proceso. El proxy interno sigue mandando
+    /// `Authorization: Bearer <clave>` en cada llamada al motor.
     #[allow(clippy::too_many_arguments)]
     fn build_engine_cmd(
         llama_bin: &std::path::PathBuf,
@@ -793,13 +814,16 @@ impl ProcessManager {
             cmd.arg("--metrics");
         }
         // LM-NF-6 / P29: el puerto crudo del motor deja de ser una puerta
-        // abierta. El build 10743 acepta `--api-key` y rechaza sin el
-        // `Authorization: Bearer <clave>` (`unauthorized: Invalid API Key`),
-        // así que el mismo puerto deja de servir el modelo a cualquier proceso
-        // local sin credenciales. Reutiliza la clave del gateway: no se acuña
-        // una segunda. Los 8 puntos que hablan con el motor (health/slots/
-        // props/chat en `process.rs`, metrics/chat en `server.rs`) la envían.
-        cmd.args(["--api-key", api_key]);
+        // abierta. El build 10743 acepta la clave por `--api-key` o por su env
+        // `LLAMA_API_KEY` (`--help`: `(env: LLAMA_API_KEY)`), y rechaza sin el
+        // `Authorization: Bearer <clave>` (`unauthorized: Invalid API Key`).
+        // Se usa el ENV del hijo, no el argv: el argv lo lee cualquier proceso
+        // local y la clave quedaba expuesta en Task Manager / wmic / ETW.
+        // `Command::env` solo afecta al hijo (no toca el env del gateway).
+        // Reutiliza la clave del gateway: no se acuña una segunda. Los 8
+        // puntos que hablan con el motor (health/slots/props/chat en
+        // `process.rs`, metrics/chat en `server.rs`) la envían.
+        cmd.env("LLAMA_API_KEY", api_key);
         if let Some(spec) = engine
             .speculation
             .as_ref()
@@ -1337,23 +1361,45 @@ impl ProcessManager {
             vram_total_mb: crate::engine_gate::vram_total_mb(),
         }
     }
-
-    pub fn import_model_from_path(&self, source_path: &std::path::Path) -> Result<String, String> {
+    /// Importar un `.gguf` a `models/` con `overwrite` opt-in. Delega la
+    /// resolución+copia en la primitiva compartida de `models`
+    /// (`resolve_import_dest` + `copy_atomic_tmp`, wave-4): mismas garantías
+    /// en ambas vías de import (self-import no-op, tmp+rename sin parciales).
+    /// El `import_lock` serializa check+copy+rename del proceso (TOCTOU
+    /// 2026-10-10); `Exists` → el handler lo traduce a 409 por VARIANTE
+    /// (ABIERTO-1 wave-6: nunca por substring).
+    pub fn import_model_from_path(
+        &self,
+        source_path: &std::path::Path,
+        overwrite: bool,
+    ) -> Result<String, crate::models::ImportError> {
+        let _guard = self.import_lock.lock();
         if !source_path.exists() {
-            return Err(format!("Archivo no encontrado: {:?}", source_path));
+            return Err(crate::models::ImportError::Invalid(format!(
+                "Archivo no encontrado: {:?}",
+                source_path
+            )));
         }
-        let filename = source_path
-            .file_name()
-            .ok_or_else(|| "Nombre de archivo inválido".to_string())?
-            .to_string_lossy()
-            .to_string();
-        if !filename.ends_with(".gguf") {
-            return Err("El archivo debe ser un modelo con extensión .gguf".to_string());
+        let (filename, dest, self_import) =
+            crate::models::resolve_import_dest(&self.models_dir, source_path, overwrite)?;
+        if self_import {
+            return Ok(filename);
         }
-        let dest = self.models_dir.join(&filename);
-        std::fs::copy(source_path, &dest).map_err(|e| format!("Error al copiar modelo: {}", e))?;
+        crate::models::copy_atomic_tmp(source_path, &dest)?;
         self.log(&format!("[LocalMind] Modelo importado: {}", filename));
         Ok(filename)
+    }
+
+    /// Vía `POST /api/models/import_pick` (ABIERTO-1 wave-5): mismo
+    /// `import_lock` que `import_model_from_path`, así que pick-vs-pick y
+    /// pick-vs-import_model no violan el 409 (`overwrite=false`).
+    pub fn import_picked(
+        &self,
+        files: &[std::path::PathBuf],
+        overwrite: bool,
+    ) -> Result<Vec<String>, crate::models::ImportError> {
+        let _guard = self.import_lock.lock();
+        crate::models::copy_picked(&self.models_dir, files, overwrite)
     }
 
     pub fn models_dir(&self) -> &std::path::Path {
@@ -1386,7 +1432,8 @@ impl ProcessManager {
                     continue;
                 };
                 let name = fname.to_string_lossy().to_string();
-                if name.ends_with(".gguf") && !name.to_lowercase().contains("mmproj") {
+                if name.to_lowercase().ends_with(".gguf") && !name.to_lowercase().contains("mmproj")
+                {
                     let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
                     let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
                     models.push(ModelInfo {
@@ -1432,6 +1479,18 @@ impl ProcessManager {
     }
 
     pub fn start(&self, req: StartRequest) -> Result<u32, String> {
+        // Lock global de arranque (P1-seg): hace atómico el check→spawn. El
+        // gateway atiende cada request en su hilo, así que dos `POST
+        // /api/start` concurrentes llegaban juntos a validar y lanzar dos
+        // hijos. `try_lock` (no bloqueante): el segundo recibe
+        // `Err("...en curso...")` en vez de encolar y duplicar el motor. Se
+        // toma ANTES de tocar cualquier estado y se sostiene hasta volver
+        // (`_guard` vive toda la fn); los rechazos tempranos también quedan
+        // serializados, que es lo correcto: el epoch y la pizarra se mueven
+        // por intento. Sin pánicos: `try_lock` devuelve `None` si ocupado.
+        let _guard = self.start_lock.try_lock().ok_or_else(|| {
+            "Ya hay un arranque en curso: esperá a que termine antes de reintentar.".to_string()
+        })?;
         // Intento nuevo = pizarra de error limpia, y se limpia AL ABRIRLO, no
         // solo al lograrse (el `= None` de más abajo, tras el `spawn()`): una
         // validación rechazada devuelve ANTES de `stop()` y del `spawn()`, así
@@ -2102,7 +2161,6 @@ fn validate_req_model(
 /// `engine_slow`, auto-stop, motor perdido, ETA, clave de duraciones y VRAM:
 /// viven en `engine_gate.rs` (extraído de este fichero). Uso cualificado
 /// `crate::engine_gate::`.
-
 /// Firma MTP-no-soportado (pura y testeable): el motor murió en el arranque
 /// porque el modelo no trae capas MTP (`creating MTP draft context` →
 /// `model doesn't contain MTP layers` / `failed to create MTP context`).
@@ -2189,7 +2247,7 @@ fn resolve_model_path(models_dir: &Path, requested: &str) -> Result<PathBuf, Str
     if norm.split('/').any(|seg| seg == "..") {
         return Err(format!("Ruta de modelo no válida: {:?}", requested));
     }
-    let candidate = models_dir.join(norm.replace('/', &std::path::MAIN_SEPARATOR.to_string()));
+    let candidate = models_dir.join(norm.replace('/', std::path::MAIN_SEPARATOR_STR));
     // Cinturón: aunque el join no debería escapar tras los filtros, verificarlo.
     let base = models_dir;
     if candidate != *base && !candidate.starts_with(base) {
@@ -2733,11 +2791,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// D-45: el puerto crudo del motor deja de ser una puerta abierta. El argv
-    /// debe llevar `--api-key` con la MISMA clave que el gateway, no una
-    /// acuñada aparte: si divergieran, el motor exigiría una credencial que el
-    /// proxy no tiene y todo el tráfico interno (health, puerta de aceptación,
-    /// metrics) respondería 401.
+    /// D-45 / P1-seg: el puerto crudo del motor deja de ser una puerta abierta.
+    /// La clave del gateway viaja por el ENV del hijo (`LLAMA_API_KEY`), NUNCA
+    /// en el argv: el argv lo lee cualquier proceso local (Task Manager, `wmic
+    /// process get commandline`, ETW) y la clave quedaba expuesta. El build
+    /// 10743 documenta `(env: LLAMA_API_KEY)` junto a `--api-key` en su
+    /// `--help`, así que el soporte vía env está verificado contra el binario.
+    /// Debe ser la MISMA clave del gateway, no una acuñada aparte: si
+    /// divergieran, el proxy interno (health, puerta, metrics) respondería 401.
     #[test]
     fn argv_lleva_la_clave_del_gateway_al_motor() {
         let dir = std::env::temp_dir().join(format!("lm-argv-key-{}", std::process::id()));
@@ -2761,27 +2822,38 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        let i = argv
-            .iter()
-            .position(|a| a == "--api-key")
-            .expect("--api-key en el argv");
-        assert_eq!(
-            argv.get(i + 1).map(String::as_str),
-            Some(key),
-            "--api-key debe ir seguido de la clave del gateway"
-        );
-        // La clave no puede colarse por otro lado del argv (p. ej. suelta).
-        assert_eq!(
-            argv.iter().filter(|a| a.as_str() == key).count(),
-            1,
-            "la clave aparece una sola vez: {:?}",
+        // La clave NO puede ir en el argv (expuesta a cualquier proceso local).
+        assert!(
+            !argv.iter().any(|a| a == "--api-key"),
+            "`--api-key` no debe aparecer en el argv: la clave va por env: {:?}",
             argv
+        );
+        assert!(
+            !argv.iter().any(|a| a.as_str() == key),
+            "la clave no puede colarse en el argv ni suelta ni como valor: {:?}",
+            argv
+        );
+        // ...sino en el env del hijo, con la MISMA clave del gateway.
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|s| s.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "LLAMA_API_KEY" && v.as_deref() == Some(key)),
+            "LLAMA_API_KEY debe llevar la clave del gateway en el env del hijo: {:?}",
+            envs
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// El reintento MTP relanza el mismo arranque sin `--spec-*`, pero con la
-    /// MISMA clave: si la olvidara, el motor pediría credenciales y el
+    /// MISMA clave por env: si la olvidara, el motor pediría credenciales y el
     /// reintento moriría en 401 en vez de probar la hipótesis de decodificación
     /// especulativa.
     #[test]
@@ -2807,11 +2879,208 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        let i = argv
-            .iter()
-            .position(|a| a == "--api-key")
-            .expect("--api-key");
-        assert_eq!(argv.get(i + 1).map(String::as_str), Some(key));
+        assert!(
+            !argv.iter().any(|a| a == "--api-key"),
+            "`--api-key` no debe aparecer ni en el reintento: {:?}",
+            argv
+        );
+        assert!(
+            !argv.iter().any(|a| a.as_str() == key),
+            "la clave no puede colarse en el argv del reintento: {:?}",
+            argv
+        );
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|s| s.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "LLAMA_API_KEY" && v.as_deref() == Some(key)),
+            "el reintento también lleva la clave por env: {:?}",
+            envs
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P1-seg: dos `start()` concurrentes no pueden lanzar dos hijos. El lock
+    /// global (`try_lock` al abrir) hace atómico el check→spawn: el segundo
+    /// intento recibe `Err("...en curso...")` sin tocar estado.
+    ///
+    /// Se alcanza sin motor real: el `base_dir` temporal no tiene
+    /// `bin/llama-server.exe`, así que el primer intento toma el lock y muere
+    /// en `No se encontró llama-server` (lock sostenido hasta volver), y el
+    /// segundo —lanzado mientras el primero duerme dentro del lock— debe caer
+    /// en `en curso`. Sin el lock ambos pasarían la validación y el segundo
+    /// pisaría el `child`/estado del primero.
+    #[test]
+    fn arranques_concurrentes_un_solo_intento_prospera() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-startlock-{}-{}",
+            "concurrente",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = std::sync::Arc::new(ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        ));
+        // El guard sostiene el lock mientras el hilo intenta `start()`: simula
+        // un `start()` en vuelo dentro de la ventana check→spawn. El hilo debe
+        // rebotar con `en curso`. Se suelta (`drop`) antes de `drop(mgr)`:
+        // el guard pide prestado `mgr` y el orden inverso no compila (E0505).
+        let guard = mgr.start_lock.lock();
+        let mgr2 = std::sync::Arc::clone(&mgr);
+        let h = std::thread::spawn(move || {
+            mgr2.start(StartRequest {
+                model: None,
+                profile: None,
+                context: None,
+                threads: None,
+                priority: None,
+            })
+        });
+        // Pequeña espera para que el hilo llegue al `try_lock` (el lock sigue
+        // sostenido por este test; 50 ms sobran en CI local).
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let res = h.join().expect("el hilo de arranque no debe abortar");
+        drop(guard);
+        assert!(
+            res.is_err(),
+            "con el lock ocupado el segundo start debe rebotar"
+        );
+        let msg = res.unwrap_err();
+        assert!(
+            msg.contains("en curso"),
+            "el rechazo debe decir `en curso`, no otro motivo: {}",
+            msg
+        );
+        drop(mgr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P1-IO (cambio pedido por el slice de IO): `import_model_from_path` y
+    /// `list_models` aceptan `.GGUF` en mayúsculas, coherente con
+    /// `list_gguf_files`/`copy_picked` en `models.rs` (ya case-insensitive).
+    /// En Windows el casing se preserva y un modelo válido no puede
+    /// rechazarse por mayúsculas.
+    #[test]
+    fn import_y_listado_aceptan_gguf_en_mayusculas() {
+        let dir = std::env::temp_dir().join(format!(
+            "lm-ggufcase-{}-{}",
+            "mayusculas",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = ProcessManager::new_with_log_file(dir.clone(), cfg, scratch_log(&dir));
+        // `import_model_from_path` no rechaza por casing...
+        let fuente = dir.join("MODELO.GGUF");
+        std::fs::write(&fuente, b"gguf").unwrap();
+        let nombre = mgr
+            .import_model_from_path(&fuente, false)
+            .expect("MODELO.GGUF debe importarse");
+        assert_eq!(nombre, "MODELO.GGUF");
+        // ...y `list_models` lo enumera (antes lo filtraba `ends_with`).
+        let modelos = mgr.list_models();
+        assert!(
+            modelos.iter().any(|m| m.filename == "MODELO.GGUF"),
+            "list_models debe incluir el .GGUF en mayúsculas: {:?}",
+            modelos.iter().map(|m| &m.filename).collect::<Vec<_>>()
+        );
+        drop(mgr);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TOCTOU 2026-10-10 (re-auditoría B): el chequeo `overwrite` vive DENTRO
+    /// de `import_model_from_path`. Sin `overwrite`, el segundo import del
+    /// mismo nombre falla con "ya existe"; con `overwrite=true`, pisa.
+    /// Concurrente: de N hilos con `overwrite=false`, exactamente UNO gana.
+    #[test]
+    fn import_colision_y_concurrencia_no_pisan() {
+        let dir = std::env::temp_dir().join(format!("lm-import-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        let cfg = std::sync::Arc::new(crate::config::ConfigStore::load_from_path(
+            &dir.join("config.toml"),
+        ));
+        let mgr = std::sync::Arc::new(ProcessManager::new_with_log_file(
+            dir.clone(),
+            cfg,
+            scratch_log(&dir),
+        ));
+        let fuente = dir.join("dupe.gguf");
+        std::fs::write(&fuente, b"gguf-1").unwrap();
+        assert_eq!(
+            mgr.import_model_from_path(&fuente, false).unwrap(),
+            "dupe.gguf"
+        );
+        let err = mgr.import_model_from_path(&fuente, false).unwrap_err();
+        assert!(err.is_exists(), "{}", err);
+        // Carrera: N hilos, mismo nombre, sin overwrite → 1 gana, N-1 ven 409.
+        let fuente2 = dir.join("carrera.gguf");
+        std::fs::write(&fuente2, b"gguf").unwrap();
+        let mut hilos = Vec::new();
+        for _ in 0..8 {
+            let (m, f) = (std::sync::Arc::clone(&mgr), fuente2.clone());
+            hilos.push(std::thread::spawn(move || {
+                m.import_model_from_path(&f, false)
+            }));
+        }
+        let res: Vec<_> = hilos.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(res.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(
+            res.iter()
+                .filter(|r| matches!(r, Err(e) if e.is_exists()))
+                .count(),
+            7
+        );
+        // N1 wave-3: sin parciales — no queda ningún `.tmp-*` tras todo lo
+        // anterior (ni tras la carrera ni tras los overwrite).
+        let restos: Vec<_> = std::fs::read_dir(dir.join("models"))
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(restos.is_empty(), "tmps sin limpiar: {:?}", restos);
+        // B3 wave-3: self-import (origen == destino) es no-op, no trunca.
+        let ya = dir.join("models").join("dupe.gguf");
+        let antes = std::fs::read(&ya).unwrap();
+        assert_eq!(mgr.import_model_from_path(&ya, true).unwrap(), "dupe.gguf");
+        assert_eq!(std::fs::read(&ya).unwrap(), antes);
+        assert_eq!(mgr.import_model_from_path(&ya, false).unwrap(), "dupe.gguf");
+        // ABIERTO-1 wave-5: pick-vs-pick y pick-vs-import comparten el lock:
+        // 4 `import_picked` + 4 `import_model_from_path` concurrentes del
+        // mismo nombre sin overwrite → exactamente 1 gana con ok.
+        let fuente3 = dir.join("mezcla.gguf");
+        std::fs::write(&fuente3, b"gguf").unwrap();
+        let mut h2 = Vec::new();
+        for i in 0..8 {
+            let (m, f) = (std::sync::Arc::clone(&mgr), fuente3.clone());
+            h2.push(std::thread::spawn(move || {
+                if i % 2 == 0 {
+                    m.import_picked(std::slice::from_ref(&f), false)
+                        .map(|v| v.join(","))
+                } else {
+                    m.import_model_from_path(&f, false)
+                }
+            }));
+        }
+        let r2: Vec<_> = h2.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(r2.iter().filter(|r| r.is_ok()).count(), 1);
+        drop(mgr);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

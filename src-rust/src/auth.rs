@@ -63,8 +63,9 @@ pub fn load_or_create_key() -> String {
 
 /// Restringir `gateway.key` al usuario actual (Windows, best-effort).
 /// Quita la herencia y concede acceso total solo al SID del dueño. Si `icacls`
-/// falla (o no existe), no pasa nada: la clave sigue válida, solo sin
-/// endurecer. Pura en el sentido de efectos: sin pánicos, sin `Result`.
+/// falla (o no existe), avisa por stderr y sigue: la clave sigue válida, solo
+/// sin endurecer. Pura en el sentido de efectos: sin pánicos, sin `Result`.
+/// Sec producción: el aviso NUNCA incluye la clave, solo la ruta.
 pub fn restrict_key_file(path: &std::path::Path) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -76,15 +77,30 @@ pub fn restrict_key_file(path: &std::path::Path) {
         return;
     }
     let grant = format!("{}:(R,W)", user.trim());
-    let _ = std::process::Command::new("icacls")
+    match std::process::Command::new("icacls")
         .args([arg.as_str(), "/inheritance:r", "/grant:r", grant.as_str()])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        // P1 producción: antes el fallo de `icacls` era silencio total y el
+        // fichero quedaba legible para otros usuarios sin que nadie lo
+        // supiera. Ahora se avisa (ruta, jamás la clave); el arranque sigue.
+        Ok(out) => eprintln!(
+            "[LocalMind] [WARN] icacls no pudo restringir {} (código {})",
+            path.display(),
+            out.status.code().unwrap_or(-1)
+        ),
+        Err(e) => eprintln!(
+            "[LocalMind] [WARN] icacls no disponible para {}: {}",
+            path.display(),
+            e
+        ),
+    }
 }
-
 /// Rotar la clave del gateway (Fase B3, pairing): genera una nueva, la persiste
 /// y la devuelve. Toma efecto al REINICIAR: el gateway usa la instantánea del
-/// arranque y el motor su `--api-key` del spawn (más el caché `gateway_key()`).
+/// arranque y el motor su `LLAMA_API_KEY` del spawn (más el caché `gateway_key()`).
 /// El llamador responde `restart_required: true` y lo loguea.
 pub fn rotate_key() -> Result<String, String> {
     rotate_key_at(&gateway_key_path())
@@ -128,6 +144,19 @@ pub fn set_cookie_value(key: &str) -> String {
 /// Freno de fuerza bruta en `/api/unlock`: 5 fallos seguidos bloquean 5 min.
 /// Contador global del proceso (el gateway es un solo proceso; sin estado
 /// por IP: el peer ya está acotado a loopback/red privada por el gate B2).
+///
+/// P1-seg (decisión con evidencia: SE QUEDA el `sleep(500 ms)` del handler en
+/// `server.rs`, no se sustituye por "contador con ventana sin bloquear"):
+/// el contador+bloqueo de este módulo frena ráfagas SOSTENIDAS (5 fallos →
+/// 429 durante 5 min), pero NO la cadencia DENTRO de la ventana: sin el sleep,
+/// un 401 inmediato permite ~miles de intentos/s por conexión en LAN antes de
+/// llegar al 5.º fallo, y el atacante prueba el espacio de claves a velocidad
+/// de red local. El sleep baja eso a ~2 intentos/s por conexión sin molestar
+/// al dueño (un desbloqueo real es un intento cada muchos minutos; 500 ms son
+/// imperceptibles). Es un sleep POR REQUEST (en el hilo de ese request, no un
+/// lock global), así que no bloquea al resto del gateway: solo retrasa la
+/// respuesta del intento fallido. Quitarlo sería cambiar seguridad medible
+/// por elegancia; se documenta y se conserva.
 static UNLOCK_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static UNLOCK_BLOCKED_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -178,9 +207,9 @@ pub fn gateway_key() -> &'static str {
     CACHED_KEY.get_or_init(load_or_create_key)
 }
 
-/// Cabecera `Authorization` que el MOTOR espera cuando se le pasa
-/// `--api-key` (D-45). Mismo esquema `Bearer` que ya valida el gateway: una
-/// sola forma de hablar con la clave, no dos literales repartidos.
+/// Cabecera `Authorization` que el MOTOR espera cuando recibe la clave por
+/// `LLAMA_API_KEY` (D-45). Mismo esquema `Bearer` que ya valida el gateway:
+/// una sola forma de hablar con la clave, no dos literales repartidos.
 pub fn bearer(key: &str) -> String {
     format!("Bearer {}", key)
 }
@@ -202,10 +231,11 @@ pub fn is_authorized(headers: &[Header], key: &str) -> bool {
     // 1. Authorization: Bearer <key>
     if let Some(auth) = header_value(headers, "Authorization") {
         let auth = auth.trim();
-        if auth.len() > 7 && auth[..7].eq_ignore_ascii_case("bearer ") {
-            if key_matches(auth[7..].trim(), key) {
-                return true;
-            }
+        if auth.len() > 7
+            && auth[..7].eq_ignore_ascii_case("bearer ")
+            && key_matches(auth[7..].trim(), key)
+        {
+            return true;
         }
     }
     // 2. x-api-key: <key> (clientes Anthropic)

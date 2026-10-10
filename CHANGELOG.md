@@ -6,6 +6,56 @@ Todos los cambios publicables de la app. El formato sigue
 
 ## [Unreleased]
 
+### Añadido
+- Topes anti-OOM: 25 MB en `/v1/*` (413 si excede) y 64 KiB en los JSON
+  pequeños (`/api/unlock`, `/api/import_model`, `/api/config`…).
+- Watchdogs de `busy` (10 min + latido por chunk) en update y descargas de
+  modelos: un worker muerto ya no deja 409 para siempre.
+- SSE con heartbeat `: ping` cada 25 s: un cliente ido ya no fuga el hilo.
+- `POST /api/open_data_dir` (allowlist `appdata|temp`) + tarjeta «Datos y
+  desinstalación» en Ajustes (rutas, Abrir carpeta, comando `Copy-Item` de
+  backup, flags de desinstalación). Claves es/en.
+- Botón **Reintentar** en la tarjeta de update; `GET /api/models/download`
+  traduce la falta de espacio a 507 temprano.
+- Pre-chequeo de espacio en descargas de modelos (regla 2×, mensaje 507 con GB).
+- `localmind.toml` ilegible deja `localmind.toml.bak` antes de usar defaults.
+- `OMNI_UPDATE_API` solo acepta `https://` con host real (un env `http://`
+  cae al default seguro).
+- Recuperación de update revalida tamaños (EXE > 1 MB, HTML > 1 KB) y purga
+  stagings huérfanos de >7 días; el swap fallido restaura `.prev-<ver>` y
+  deja la orden manual en el log.
+- Import unificado (misma resolución + tmp+rename atómico + `import_lock`):
+  409 por variante `Exists`, `.GGUF` en mayúsculas aceptado.
+- UI: pairing oculto con Mostrar temporal, PID/Activo y Gen t/s traducidos,
+  «Decidir después» con aviso persistente en Conexión, tablas con scroll
+  horizontal, tabs con `tablist` + flechas.
+- Packaging/CI: `cargo fmt --check` + `clippy -D warnings` en la release,
+  firma Authenticode opcional desde secretos, SHA256+tamaño pineados del
+  runtime, `install.ps1` con opcionales (`version.txt`/`LEEME.txt`),
+  `uninstall.ps1` con guardarraíl de TargetDir y sin autodestruirse.
+
+### Seguridad
+- La clave del motor viaja por env `LLAMA_API_KEY` del hijo, nunca en argv
+  (el argv lo lee cualquier proceso local: Task Manager, wmic, ETW).
+- Puerta D-7: todo lo no público exige clave, incluido `GET /api/version`;
+  `hf.token` y `remote.key` con ACL solo-usuario (aviso si `icacls` falla,
+  sin filtrar la clave).
+- Flags `--log-file`/`--out-file` bloqueadas (escritura arbitraria fuera del
+  log rotado); el candado también rige en persistencia.
+- `POST /api/start` serializado (`start_lock`): dos arranques concurrentes
+  no lanzan dos motores.
+- ZipSlip por prefijo real en `stage_zip` y descargas; swap `.ps1` con
+  comillas simples + `-LiteralPath` (sin expansión `$`).
+
+### Corregido
+- `catch_unwind` por request y en workers: un pánico ya no mata gateway+UI
+  ni deja `busy` clavado.
+- `update_set` sobrevive a Mutex envenenado; `snippet` corta por chars (sin
+  pánicos UTF-8).
+- `POST /api/profiles/import` propaga el error de `save` (500) en vez de un
+  falso «actualizado».
+- Tests con SKIP honesto (sin PASS inflados) y favicons `omni.*` cubiertos.
+
 ## [2.0.12] - 2026-10-10
 
 ### Corregido (canal invisible: cero consola, reapertura garantizada)

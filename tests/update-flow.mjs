@@ -41,9 +41,16 @@ const API_KEY = resolveKey();
 const authHeaders = () => (API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {});
 
 const results = [];
+let skipped = 0;
 function report(ok, check, observed) {
   results.push({ ok, check });
   console.log(`${ok ? "PASS" : "FAIL"} ${check} — ${observed}`);
+}
+// SKIP honesto: no suma PASS ni FAIL, solo se cuenta aparte en el resumen.
+function reportSkip(check, observed) {
+  results.push({ ok: true, skipped: true, check });
+  skipped++;
+  console.log(`SKIP ${check} — ${observed}`);
 }
 
 async function req(path, { method = "GET" } = {}) {
@@ -96,7 +103,7 @@ async function main() {
         const st = fs2.readdirSync(path2.join(os2.tmpdir(), "omni-update"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
         report(st.length > 0, "ready con staging en disco", `dirs: ${st.slice(0, 4).join(",")}`);
       } else {
-        report(true, "ready con staging en disco", `state=${u.state} (no aplica)`);
+        reportSkip("ready con staging en disco", `state=${u.state} (no aplica en este estado)`);
       }
     } catch (e) {
       report(false, "ready con staging en disco", String(e.message).slice(0, 120));
@@ -113,15 +120,29 @@ async function main() {
   } catch (e) {
     report(false, "UI trae Reiniciar e instalar", `request failed: ${e.message}`);
   }
-  // 4. Scripts pendientes nunca apuntan a desarrollo
+  // 4. Scripts pendientes nunca apuntan a desarrollo. Sin scripts (máquina
+  // limpia/CI) NO hay nada que validar: SKIP honesto, nunca PASS.
+  // P1 producción: el swap genera omni-install-<ver>.ps1 (PowerShell);
+  // se aceptan .ps1 y .cmd heredados, y los .ps1 deben traer marcadores
+  // PowerShell (Start-Process/-LiteralPath, sin cmd.exe).
   try {
-    const files = readdirSync(tmpdir()).filter((f) => f.startsWith("omni-install-") && f.endsWith(".cmd"));
-    let bad = [];
-    for (const f of files) {
-      const body = readFileSync(join(tmpdir(), f), "utf8");
-      if (/PROYECTOS|src-rust|\.git/i.test(body)) bad.push(f);
+    const files = readdirSync(tmpdir()).filter((f) => f.startsWith("omni-install-") && (f.endsWith(".ps1") || f.endsWith(".cmd")));
+    if (files.length === 0) {
+      reportSkip("scripts swap sin rutas dev", "sin scripts pendientes en %TEMP% (nada que validar)");
+    } else {
+      let bad = [];
+      let badPs = [];
+      for (const f of files) {
+        const body = readFileSync(join(tmpdir(), f), "utf8");
+        if (/PROYECTOS|src-rust|\.git/i.test(body)) bad.push(f);
+        if (f.endsWith(".ps1")) {
+          const powershell = body.includes("Start-Process") && body.includes("-LiteralPath") && !/cmd\.exe/i.test(body);
+          if (!powershell) badPs.push(f);
+        }
+      }
+      const problems = [...bad.map((f) => `CONTAMINADO:${f}`), ...badPs.map((f) => `NO-POWERSHELL:${f}`)];
+      report(problems.length === 0, "scripts swap sin rutas dev", problems.length ? problems.join(",") : `${files.length} script(s), limpios (PowerShell OK)`);
     }
-    report(bad.length === 0, "scripts swap sin rutas dev", bad.length ? `CONTAMINADOS: ${bad.join(",")}` : (files.length ? `${files.length} script(s), limpios` : "sin scripts pendientes (nada que validar)"));
   } catch (e) {
     report(false, "scripts swap sin rutas dev", String(e.message).slice(0, 120));
   }
@@ -135,7 +156,7 @@ async function main() {
     report(false, "GET /api/version.update", `request failed: ${e.message}`);
   }
   const failed = results.filter((r) => !r.ok);
-  console.log(`\n== SUMMARY: ${results.length - failed.length}/${results.length} passed ==`);
+  console.log(`\n== SUMMARY: ${results.length - failed.length - skipped}/${results.length} passed, ${skipped} skipped ==`);
   return failed.length ? 1 : 0;
 }
 

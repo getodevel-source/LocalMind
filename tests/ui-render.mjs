@@ -142,7 +142,9 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
   ok('html lang flips to en', d.documentElement.lang === 'en', d.documentElement.lang);
   a.setLanguage('es');
   ok('language flips back to es', d.documentElement.lang === 'es' && a.getLanguage() === 'es');
-  ok('en dictionary covers known keys', a.T('nav.models') !== 'nav.models' || true);
+  a.setLanguage('en');
+  ok('en dictionary covers known keys', a.T('nav.models') === 'Models', JSON.stringify(a.T('nav.models')));
+  a.setLanguage('es');
   const dEn = makeDoc();
   const aEn = load(script, dEn, (() => { const s = mkStorage(); s.setItem('localmind_lang', 'en'); return s; })());
   ok('I18N has es+en with same key sets',
@@ -156,6 +158,7 @@ ok('usage 404 hides card', doc5.reg.get('usage-card')?.style.display === 'none')
     const enKeys = new Set(Object.keys(aEn.I18N.en));
     const missingEs = [...used].filter(k => !esKeys.has(k)).sort();
     const missingEn = [...used].filter(k => !enKeys.has(k)).sort();
+    ok('every T() literal exists in es', missingEs.length === 0, JSON.stringify(missingEs.slice(0, 10)));
     ok('every T() literal exists in en', missingEn.length === 0, JSON.stringify(missingEn.slice(0, 10)));
   }
 }

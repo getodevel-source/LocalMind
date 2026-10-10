@@ -13,8 +13,8 @@ before touching anything. Contract: `docs/SRS.md` §3.5 +
    `<html` (or the embedded fallback marker
    `LocalMind Studio: Cargando interfaz...` from
    `src-rust/ui_fallback.html`).
-2. `GET /localmind.ico`, `GET /localmind.png` → 200 or 404 (both
-   accepted, the script prints which).
+2. `GET /localmind.ico`, `GET /localmind.png`, `GET /omni.ico`,
+   `GET /omni.png` → 200 or 404 (both accepted, the script prints which).
 3. `GET /api/status` → 200 JSON with the `ServerStatus` shape
    (`process.rs:27-38`): requires `status` (string, one of
    `stopped|starting|running|error`); `idle_remaining_secs` is
@@ -64,8 +64,8 @@ node tests/smoke.mjs [baseUrl]   # default http://127.0.0.1:17860
 At startup the script prints one line stating the key source in use:
 `key source: LM_KEY | gateway.key | none`.
 
-No-key mode (current app has no auth — nothing is sent):
-
+Sin clave no se envía credencial; los checks protegidos responden 401
+(la app exige clave por la puerta D-7):
 ```bash
 node tests/smoke.mjs
 ```
@@ -124,11 +124,10 @@ key header too if the server enforces it, e.g.
 
 ## Known limitation
 
-Read-only: the script never starts/stops the engine and never POSTs
-to any endpoint (checks 9 and 10 read state / send OPTIONS only).
-`GET /api/metrics` and `GET /api/events` results therefore depend on
-whether the engine happens to be running — the script asserts the
-branch matching the observed state, it does not drive the state.
+Read-only salvo el POST de contrato: el único POST es el check 14
+(`POST /api/start` con cuerpo mal formado → 400, no toca el motor).
+Los checks 9 y 10 solo leen estado / envían OPTIONS, sea cual sea el estado
+del motor: el script afirma la rama observada, no la dirige.
 
 ## Performance benchmark
 

@@ -85,7 +85,7 @@ try {
     if ($Pfx -and (Test-Path $Pfx) -and $PfxPass) {
       $Secure = ConvertTo-SecureString $PfxPass -AsPlainText -Force
       $Cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $Secure)
-      $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'http://timestamp.digicert.com'
+      $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'https://timestamp.digicert.com'
       $Signed = $true
     } elseif ($Thumb) {
       $Cert = Get-ChildItem Cert:\CurrentUser\My |
@@ -95,7 +95,7 @@ try {
           Where-Object { $_.Thumbprint -eq $Thumb } | Select-Object -First 1
       }
       if ($Cert) {
-        $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'http://timestamp.digicert.com'
+        $null = Set-AuthenticodeSignature -FilePath $ExeToSign -Certificate $Cert -TimestampServer 'https://timestamp.digicert.com'
         $Signed = $true
       } else {
         Write-Warning "CERT_THUMBPRINT no encontrado en el almacén: se sigue sin firmar."

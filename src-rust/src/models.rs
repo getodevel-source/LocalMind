@@ -240,6 +240,33 @@ pub fn check_revision(rev: &str) -> Result<(), String> {
 // Token de HF: env `HF_TOKEN` o `%APPDATA%\LocalMind\hf.token`
 // ---------------------------------------------------------------------------
 
+/// Ruta del token persistido (`%APPDATA%\LocalMind\hf.token`).
+/// `None` sin `APPDATA` (entorno mínimo): el token solo vive en `HF_TOKEN`.
+pub fn hf_token_path() -> Option<PathBuf> {
+    std::env::var("APPDATA")
+        .map(|a| PathBuf::from(a).join("LocalMind").join("hf.token"))
+        .ok()
+}
+
+/// Guardar el token de HF en disco con la misma ACL que `gateway.key`.
+/// P1 producción: reutiliza `auth::restrict_key_file` tras escribir (antes
+/// el fichero quedaba con la ACL heredada, legible para otros usuarios);
+/// si `icacls` falla ya avisa por stderr. Núcleo testeable con ruta inyectada.
+/// Hoy sin llamador en prod (el token solo se lee de `HF_TOKEN`/archivo):
+/// primitiva lista para el endpoint de token de repos privados.
+#[allow(dead_code)]
+pub fn save_hf_token_at(path: &Path, token: &str) -> Result<(), String> {
+    let content = format!("{}\n", token.trim());
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("No se pudo crear {}: {}", parent.display(), e))?;
+    }
+    std::fs::write(path, &content)
+        .map_err(|e| format!("No se pudo escribir {}: {}", path.display(), e))?;
+    crate::auth::restrict_key_file(path);
+    Ok(())
+}
+
 pub fn hf_token() -> Option<String> {
     if let Ok(t) = std::env::var("HF_TOKEN") {
         let t = t.trim().to_string();
@@ -247,9 +274,7 @@ pub fn hf_token() -> Option<String> {
             return Some(t);
         }
     }
-    let p = std::env::var("APPDATA")
-        .map(|a| PathBuf::from(a).join("LocalMind").join("hf.token"))
-        .ok()?;
+    let p = hf_token_path()?;
     let raw = std::fs::read_to_string(p).ok()?;
     let t = raw.trim().to_string();
     if t.is_empty() {
@@ -410,10 +435,12 @@ pub fn advise_fit(
 fn snippet(s: &str) -> String {
     const MAX: usize = 300;
     let t = s.trim();
-    if t.len() <= MAX {
+    // Por chars, no por bytes: `&t[..MAX]` parte un char multibyte y panica
+    // (misma clase que el P0 de update.rs; ver `snippet` allí).
+    if t.chars().count() <= MAX {
         t.to_string()
     } else {
-        format!("{}…", &t[..MAX])
+        format!("{}…", t.chars().take(MAX).collect::<String>())
     }
 }
 
@@ -479,6 +506,10 @@ struct JobInner {
     busy: AtomicBool,
     cancel: AtomicBool,
     bytes_done: AtomicU64,
+    /// Cuándo se tomó `busy` (epoch s). Watchdog (P1 producción, espejo de
+    /// `update.rs`): si el worker muere sin liberarlo, el próximo `start_job`
+    /// lo recupera tras 10 min en vez de dar 409 para siempre.
+    busy_since_secs: AtomicU64,
 }
 
 static JOB: LazyLock<JobInner> = LazyLock::new(|| JobInner {
@@ -486,6 +517,7 @@ static JOB: LazyLock<JobInner> = LazyLock::new(|| JobInner {
     busy: AtomicBool::new(false),
     cancel: AtomicBool::new(false),
     bytes_done: AtomicU64::new(0),
+    busy_since_secs: AtomicU64::new(0),
 });
 
 fn job() -> &'static JobInner {
@@ -512,6 +544,41 @@ fn job_set(f: impl FnOnce(&mut JobState)) {
 /// Usada por la ruta `POST /api/models/download/cancel` (server.rs).
 pub fn job_busy() -> bool {
     job().busy.load(Ordering::Relaxed)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Tomar `busy` o recuperarlo por watchdog (P1 producción, espejo de
+/// `update.rs`): si estaba tomado hace más de 10 min, el worker murió sin
+/// liberarlo y se recupera en vez de dar 409 para siempre. `true` = vía libre.
+fn take_busy_or_recover() -> bool {
+    if !job().busy.swap(true, Ordering::SeqCst) {
+        job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        return true;
+    }
+    let since = job().busy_since_secs.load(Ordering::Relaxed);
+    if since > 0 && now_secs().saturating_sub(since) >= 600 {
+        job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+        job().cancel.store(false, Ordering::Relaxed);
+        return true;
+    }
+    false
+}
+
+/// Latido del worker: marca `busy` como vivo para que el watchdog no lo robe
+/// a mitad de una descarga lenta. Llamar por chunk/no-op periódico.
+fn heartbeat_busy() {
+    job().busy_since_secs.store(now_secs(), Ordering::Relaxed);
+}
+
+fn release_busy() {
+    job().busy.store(false, Ordering::SeqCst);
+    job().busy_since_secs.store(0, Ordering::Relaxed);
 }
 
 pub fn job_cancel() -> JobState {
@@ -555,23 +622,52 @@ pub fn dest_for(models_dir: &Path, repo: &str, files: &[TreeFile]) -> Result<Pat
 }
 
 fn check_inside(models_dir: &Path, p: &Path) -> Result<(), String> {
-    // Comparación por componentes normalizados (sin tocar disco).
-    let root: Vec<_> = models_dir.components().collect();
-    let mut cur: Vec<_> = Vec::new();
+    // Contención por prefijo real: normalizar ambas rutas (sin `.`, `..`
+    // replegado) y exigir `starts_with`. La vieja comparación de longitudes
+    // aceptaba `C:/<largo>/x.gguf` (absoluta larga) como contenida.
+    fn normalizar(base: &Path) -> PathBuf {
+        use std::path::Component;
+        let mut out = PathBuf::new();
+        for c in base.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                _ => out.push(c.as_os_str()),
+            }
+        }
+        out
+    }
+    // `..` explícito jamás se repliega: es escape, no normalización.
     for c in p.components() {
         use std::path::Component;
-        match c {
-            Component::ParentDir => {
-                return Err(format!("Ruta fuera de models/: {}", p.display()));
-            }
-            Component::CurDir => {}
-            _ => cur.push(c),
+        if matches!(c, Component::ParentDir) {
+            return Err(format!("Ruta fuera de models/: {}", p.display()));
         }
     }
-    if cur.len() < root.len() {
+    let root = normalizar(models_dir);
+    let cur = normalizar(p);
+    if !cur.starts_with(&root) {
         return Err(format!("Ruta fuera de models/: {}", p.display()));
     }
     Ok(())
+}
+/// Pre-chequeo de espacio (P1 producción): ¿cabe `need` bytes en el volumen
+/// de `models_dir` con margen 2× (misma regla que `update::fits_download`)?
+/// Reutiliza `update::free_bytes_for` + `update::fits_download` (ver
+/// update.rs:359-403 como modelo). `None` = sin veredicto (sin dato medido el
+/// llamador NO bloquea). Puro en decisión salvo la medición best-effort.
+pub fn models_space_ok(models_dir: &Path, need: u64) -> Option<bool> {
+    crate::update::fits_download(Some(need), crate::update::free_bytes_for(models_dir))
+}
+
+/// Mensaje 507 en español con el tamaño que no cabe (P1 producción).
+pub fn models_no_space_msg(need: u64) -> String {
+    format!(
+        "Sin espacio en el disco de modelos para descargar {:.1} GB (se exigen el doble libres): libera espacio o cambia la carpeta de modelos.",
+        need as f64 / (1024.0 * 1024.0 * 1024.0)
+    )
 }
 
 /// Descargar un fichero con resume y verificación. Devuelve bytes finales.
@@ -589,6 +685,11 @@ fn download_one(
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("No se pudo crear {}: {}", parent.display(), e))?;
+    }
+    // P1 producción: pre-chequeo por fichero (un resume a mitad de un .gguf
+    // de 15GB también se queda sin disco). Error temprano con mensaje 507.
+    if models_space_ok(models_dir, tf.size) == Some(false) {
+        return Err(models_no_space_msg(tf.size));
     }
     // Omitir lo ya verificado (mismo tamaño + mismo sha registrado).
     if dest.exists() {
@@ -675,9 +776,10 @@ fn download_one(
             .map_err(|e| format!("Error al guardar {}: {}", part.display(), e))?;
         written += n as u64;
         job().bytes_done.fetch_add(n as u64, Ordering::Relaxed);
+        // Latido: la descarga sigue viva aunque sea lenta (watchdog 10 min).
+        heartbeat_busy();
     }
     drop(out);
-    // Verificar tamaño y sha256 antes del rename atómico.
     let meta = std::fs::metadata(&part)
         .map_err(|e| format!("No se pudo medir {}: {}", part.display(), e))?;
     if meta.len() != tf.size {
@@ -727,7 +829,7 @@ pub fn start_job(
     revision: Option<String>,
     only_file: Option<String>,
 ) -> Result<(), String> {
-    if job().busy.swap(true, Ordering::SeqCst) {
+    if !take_busy_or_recover() {
         return Err("Ya hay una descarga en curso".to_string());
     }
     job().cancel.store(false, Ordering::Relaxed);
@@ -746,13 +848,18 @@ pub fn start_job(
         }
     });
     std::thread::spawn(move || {
-        let err = run_job(
-            &models_dir,
-            &repo,
-            revision.as_deref(),
-            only_file.as_deref(),
-            &log,
-        );
+        // P0 producción (panic=abort): el worker libera `busy` aunque
+        // `run_job` panique; si no, el canal quedaba en 409 para siempre.
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_job(
+                &models_dir,
+                &repo,
+                revision.as_deref(),
+                only_file.as_deref(),
+                &log,
+            )
+        }))
+        .unwrap_or_else(|_| Some("el worker de descarga abortó (pánico interno)".to_string()));
         match err {
             None => {
                 job_set(|s| {
@@ -773,7 +880,7 @@ pub fn start_job(
                 log(format!("[LocalMind] Error al descargar modelo: {}", e));
             }
         }
-        job().busy.store(false, Ordering::SeqCst);
+        release_busy();
     });
     Ok(())
 }
@@ -840,6 +947,12 @@ fn run_job(
         s.files_total = files.len();
         s.bytes_total = total;
     });
+    // P1 producción: pre-chequeo de espacio ANTES de bajar ~15GB. Con dato
+    // medido y sin 2× se aborta temprano con el mismo mensaje del 507 (el
+    // handler lo mapea a 507). Sin dato no se bloquea.
+    if models_space_ok(models_dir, total) == Some(false) {
+        return Some(models_no_space_msg(total));
+    }
     // 3. Descarga + verificación, fichero a fichero.
     // `single` = mismo criterio que `dest_for`: UN solo `.gguf` → plano.
     let single = files.len() == 1 && files[0].path.to_lowercase().ends_with(".gguf");
@@ -945,41 +1058,149 @@ pub fn list_gguf_files(models_dir: &Path) -> Vec<(String, PathBuf, u64)> {
 }
 
 // ---------------------------------------------------------------------------
+// import: primitiva compartida (wave-4: `import_model_from_path` en process.rs
+// y `copy_picked` debajo usan ESTO; antes cada vía tenía su propia copia con
+// propiedades distintas — parcial visible, sin self-check — según qué camino
+// se auditara).
+/// Error tipado de importación (ABIERTO-1 wave-6): el 409 (`Exists`) se mapea
+/// por VARIANTE, nunca por substring del mensaje. Sin esto, un fichero
+/// llamado `ya existe.txt` (u otro error con esas palabras en la ruta)
+/// producía un 409 espurio donde tocaba 400.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportError {
+    /// El destino ya existe y `overwrite=false` → HTTP 409.
+    Exists(String),
+    /// Nombre/extensión inválidos → HTTP 400.
+    Invalid(String),
+    /// Fallo de I/O (crear dir, copiar, renombrar) → HTTP 400.
+    Io(String),
+}
+impl std::fmt::Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImportError::Exists(m) | ImportError::Invalid(m) | ImportError::Io(m) => {
+                write!(f, "{}", m)
+            }
+        }
+    }
+}
+impl ImportError {
+    /// ¿Es colisión con `overwrite=false`? Único caso que mapea a HTTP 409.
+    pub fn is_exists(&self) -> bool {
+        matches!(self, ImportError::Exists(_))
+    }
+}
+/// Validar nombre + resolver destino de un `.gguf` para `models_dir`.
+/// Pura salvo `dest.exists()`/`canonicalize` (lecturas, sin escritura).
+/// - `Err(Invalid)` si no es `.gguf` (case-insensitive) o el nombre es hostil.
+/// - Self-import (`src` canónico == `dest` canónico) → `Ok((nombre, dest, true))`.
+/// - `exists && !overwrite` → `Err(Exists)` (el handler→409 por variante).
+pub fn resolve_import_dest(
+    models_dir: &Path,
+    source_path: &Path,
+    overwrite: bool,
+) -> Result<(String, PathBuf, bool), ImportError> {
+    let name = source_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| ImportError::Invalid("Nombre de archivo inválido".to_string()))?;
+    if !name.to_lowercase().ends_with(".gguf") {
+        return Err(ImportError::Invalid(format!("'{}' no es un .gguf", name)));
+    }
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err(ImportError::Invalid(format!("Nombre rechazado: {}", name)));
+    }
+    let dest = models_dir.join(&name);
+    if let (Ok(src_c), Ok(dst_c)) = (source_path.canonicalize(), dest.canonicalize()) {
+        if src_c == dst_c {
+            return Ok((name, dest, true));
+        }
+    }
+    if dest.exists() && !overwrite {
+        return Err(ImportError::Exists(format!(
+            "'{}' ya existe (marque sobreescribir para reemplazarlo)",
+            name
+        )));
+    }
+    Ok((name, dest, false))
+}
+
+/// Copia atómica tmp+rename a un destino ya resuelto. Jamás deja un parcial
+/// en `dest`: el parcial vive en `<dest>.tmp-<pid>` (hermano, mismo volumen
+/// → `rename` atómico en Windows; `list_models` solo enumera `*.gguf`, así
+/// que nunca es visible/lanzable) y en cualquier fallo se limpia.
+pub fn copy_atomic_tmp(src: &Path, dest: &Path) -> Result<(), ImportError> {
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "modelo".to_string());
+    let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ImportError::Io(format!("Error al copiar {}: {}", name, e)));
+    }
+    if let Err(e) = std::fs::rename(&tmp, dest) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ImportError::Io(format!("Error al copiar {}: {}", name, e)));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // import_pick: diálogo nativo + copia (corrección de D-10)
 /// Copiar ficheros elegidos a `models/`. Sin sobreescribir salvo `overwrite`.
-/// Devuelve los nombres copiados.
+/// Vía `resolve_import_dest` + `copy_atomic_tmp`: mismas garantías que la vía
+/// `POST /api/import_model` (self-import no-op, tmp+rename sin parciales).
+/// Devuelve los nombres copiados. SIN lock: el llamador (`import_pick` en el
+/// handler corre en su hilo; `import_model_from_path` aporta el suyo) — para
+/// `copy_picked` multi-fichero el lock vive en el llamador si lo necesita.
 pub fn copy_picked(
     models_dir: &Path,
     files: &[PathBuf],
     overwrite: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, ImportError> {
     if let Err(e) = std::fs::create_dir_all(models_dir) {
-        return Err(format!("No se pudo crear {}: {}", models_dir.display(), e));
+        return Err(ImportError::Io(format!(
+            "No se pudo crear {}: {}",
+            models_dir.display(),
+            e
+        )));
     }
     let mut done = Vec::new();
     for src in files {
-        let name = src
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .filter(|n| !n.is_empty())
-            .ok_or_else(|| "Nombre de archivo inválido".to_string())?;
-        if !name.to_lowercase().ends_with(".gguf") {
-            return Err(format!("'{}' no es un .gguf", name));
+        let (name, dest, self_import) = resolve_import_dest(models_dir, src, overwrite)?;
+        if self_import {
+            done.push(name);
+            continue;
         }
-        if name.contains("..") || name.contains('/') || name.contains('\\') {
-            return Err(format!("Nombre rechazado: {}", name));
-        }
-        let dest = models_dir.join(&name);
-        if dest.exists() && !overwrite {
-            return Err(format!(
-                "'{}' ya existe (marque sobreescribir para reemplazarlo)",
-                name
-            ));
-        }
-        std::fs::copy(src, &dest).map_err(|e| format!("Error al copiar {}: {}", name, e))?;
+        copy_atomic_tmp(src, &dest)?;
         done.push(name);
     }
     Ok(done)
+}
+
+/// Valida y resuelve el destino de importación de un modelo desde ruta local.
+///
+/// Delega en `resolve_import_dest` (misma resolución que el interior,
+/// incluido self-import no-op): previo e interior nunca divergen.
+/// - Si el fichero destino ya existe y `overwrite` es `false`, devuelve
+///   `Err((409, mensaje))`.
+/// - En caso de nombre o extensión inválidos, devuelve `Err((400, mensaje))`.
+/// - Si es válido, devuelve `Ok((nombre_limpio, ruta_destino))`.
+pub fn check_import_dest(
+    models_dir: &Path,
+    source_path: &Path,
+    overwrite: bool,
+) -> Result<(String, PathBuf), (u16, String)> {
+    // UX temprana del handler: misma resolución que el interior (incluido el
+    // self-import no-op de wave-4), así que previo e interior nunca divergen
+    // (BUG-1 wave-4: el previo decía 409 donde el interior decía ok).
+    match resolve_import_dest(models_dir, source_path, overwrite) {
+        Ok((name, dest, _)) => Ok((name, dest)),
+        Err(ImportError::Exists(m)) => Err((409, m)),
+        Err(e) => Err((400, e.to_string())),
+    }
 }
 
 /// Decisión de timeout del diálogo `import_pick`: espera acotada (120 s) para
@@ -1011,9 +1232,8 @@ pub fn model_capabilities(filename: &str) -> serde_json::Value {
         "llama"
     } else if low.contains("mistral") || low.contains("mixtral") {
         "mistral"
-    } else if low.contains("phi") || low.contains("gemma") {
-        "generic"
     } else {
+        // `phi`/`gemma`/desconocido comparten capacidades genéricas.
         "generic"
     };
     // Contexto nativo por familia/generación conocida (null = se desconoce,
@@ -1280,6 +1500,38 @@ mod tests {
         assert!(check_inside(&root, &PathBuf::from("C:/m/models/../fuera")).is_err());
     }
 
+    /// Misma clase que el ZipSlip de `stage_zip` (2026-10-10): la vieja
+    /// `check_inside` comparaba longitudes, así que una ruta fuera del root
+    /// pero igual o más larga pasaba como "contenida". Hoy se exige prefijo
+    /// real (`starts_with` sobre rutas normalizadas).
+    #[test]
+    fn check_inside_exige_prefijo() {
+        let root = PathBuf::from("C:/m/models");
+        // Fuera del root pero larga: el chequeo por longitud la aceptaba.
+        assert!(check_inside(&root, &PathBuf::from("C:/m/models-vecina/x.gguf")).is_err());
+        assert!(check_inside(&root, &PathBuf::from("C:/m/otro/camino/largo/x.gguf")).is_err());
+        // Dentro: pasa (plano y anidado).
+        assert!(check_inside(&root, &root.join("a.gguf")).is_ok());
+        assert!(check_inside(&root, &root.join("sub").join("b.gguf")).is_ok());
+    }
+
+    /// P1 producción: el token persistido queda con la ACL del dueño (vía
+    /// `auth::restrict_key_file`, mismo endurecer que `gateway.key`) y el
+    /// contenido coincide. En Linux `icacls` no existe: el aviso va por
+    /// stderr pero el guardado sigue válido.
+    #[test]
+    fn save_hf_token_escribe_y_relee() {
+        let dir = std::env::temp_dir().join(format!("lm-hftok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("LocalMind").join("hf.token");
+        save_hf_token_at(&path, "  tok-secreto-1  ").expect("guarda");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-secreto-1\n");
+        // Re-guardar idempotente: mismo contenido, sin error.
+        save_hf_token_at(&path, "tok-secreto-1").expect("re-guarda");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok-secreto-1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn listado_anidado_sin_cache_ni_verified() {
         let dir = std::env::temp_dir().join(format!("lm-list-{}", std::process::id()));
@@ -1319,5 +1571,133 @@ mod tests {
         assert!(import_pick_timed_out(IMPORT_PICK_TIMEOUT_SECS));
         assert!(import_pick_timed_out(IMPORT_PICK_TIMEOUT_SECS + 999));
         assert_eq!(IMPORT_PICK_TIMEOUT_SECS, 120);
+    }
+
+    #[test]
+    fn check_import_dest_overwrite_y_case_insensitive() {
+        let dir = std::env::temp_dir().join(format!("lm-dest-{}", std::process::id()));
+        let models = dir.join("models");
+        let _ = std::fs::create_dir_all(&models);
+
+        // 1. Caso insensitive pasa (.GGUF mayúsculas).
+        let src_upper = PathBuf::from("C:/downloads/Model-Q4.GGUF");
+        let (name, dest) = check_import_dest(&models, &src_upper, false).unwrap();
+        assert_eq!(name, "Model-Q4.GGUF");
+        assert_eq!(dest, models.join("Model-Q4.GGUF"));
+
+        // 2. Extensión no gguf da 400.
+        let src_bad = PathBuf::from("C:/downloads/Model.bin");
+        let err_bad = check_import_dest(&models, &src_bad, false).unwrap_err();
+        assert_eq!(err_bad.0, 400);
+        assert!(err_bad.1.contains("no es un .gguf"));
+
+        // 3. Destino existente sin overwrite da 409.
+        let target = models.join("existente.gguf");
+        let _ = std::fs::write(&target, b"dummy");
+        let src_exist = PathBuf::from("D:/otra/existente.gguf");
+        let err_exist = check_import_dest(&models, &src_exist, false).unwrap_err();
+        assert_eq!(err_exist.0, 409);
+        assert!(err_exist.1.contains("ya existe"));
+
+        // 4. Con overwrite=true pasa aunque exista.
+        let ok_overwrite = check_import_dest(&models, &src_exist, true).unwrap();
+        assert_eq!(ok_overwrite.0, "existente.gguf");
+
+        // 5. ABIERTO-1 wave-6: un nombre con "ya existe" en OTRO error no da
+        // 409 espurio — el mapeo es por variante, no por substring.
+        let src_trampa = PathBuf::from("C:/downloads/ya existe.txt");
+        let err_trampa = check_import_dest(&models, &src_trampa, false).unwrap_err();
+        assert_eq!(err_trampa.0, 400, "falso positivo 409: {:?}", err_trampa);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Wave-4 B1: `copy_picked` (vía `import_pick`) con las mismas garantías
+    /// que `import_model_from_path`: self-import no-op, 409 sin overwrite,
+    /// tmp+rename sin parciales visibles.
+    #[test]
+    fn copy_picked_atomico_sin_parciales() {
+        let dir = std::env::temp_dir().join(format!("lm-picked-{}", std::process::id()));
+        let models = dir.join("models");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&models);
+        let f1 = dir.join("a.gguf");
+        let f2 = dir.join("b.gguf");
+        std::fs::write(&f1, b"gguf-a").unwrap();
+        std::fs::write(&f2, b"gguf-b").unwrap();
+        let names = copy_picked(&models, &[f1.clone(), f2.clone()], false).unwrap();
+        assert_eq!(names, vec!["a.gguf".to_string(), "b.gguf".to_string()]);
+        // Sin overwrite, el segundo intento falla con "ya existe".
+        let err = copy_picked(&models, &[f1.clone()], false).unwrap_err();
+        assert!(err.is_exists(), "{}", err);
+        // Con overwrite, pisa sin dejar tmps.
+        std::fs::write(&f1, b"gguf-a2").unwrap();
+        assert_eq!(
+            copy_picked(&models, &[f1.clone()], true).unwrap(),
+            vec!["a.gguf".to_string()]
+        );
+        assert_eq!(std::fs::read(models.join("a.gguf")).unwrap(), b"gguf-a2");
+        // Self-import: el fichero que ya vive en models/ es no-op.
+        let ya = models.join("b.gguf");
+        assert_eq!(
+            copy_picked(&models, &[ya.clone()], false).unwrap(),
+            vec!["b.gguf".to_string()]
+        );
+        // Sin parciales: ningún `.tmp-*` en models/.
+        let restos: Vec<_> = std::fs::read_dir(&models)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+            .filter(|n| n.contains("tmp-"))
+            .collect();
+        assert!(restos.is_empty(), "tmps sin limpiar: {:?}", restos);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Candado para los tests que tocan `busy`/`busy_since_secs` globales:
+    /// `cargo test` corre en hilos y sin esto se pisan entre sí.
+    static TEST_JOB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Watchdog (P1 producción, espejo de `update.rs`): clavado hace 11 min
+    /// se recupera; vivo se respeta; `release_busy` deja libre.
+    #[test]
+    fn job_watchdog_recupera_clavado_y_respeta_vivo() {
+        let _g = TEST_JOB_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        job().busy.store(false, Ordering::SeqCst);
+        assert!(take_busy_or_recover());
+        assert!(!take_busy_or_recover());
+        job()
+            .busy_since_secs
+            .store(now_secs().saturating_sub(660), Ordering::Relaxed);
+        assert!(take_busy_or_recover());
+        heartbeat_busy();
+        assert!(!take_busy_or_recover(), "tras latido el busy está vivo");
+        release_busy();
+        assert!(!job_busy());
+    }
+
+    /// Gemelo del P0 de update.rs: `snippet` no debe partir un char multibyte
+    /// (tildes/emoji en errores HF) aunque el corte caiga a medias.
+    #[test]
+    fn snippet_no_corta_utf8_a_medias() {
+        let s = format!("{}é", "a".repeat(299));
+        let out = snippet(&s);
+        assert!(out.chars().count() <= 301, "{}", out.chars().count());
+        let e = "😀".repeat(400);
+        let out2 = snippet(&e);
+        assert_eq!(out2.chars().count(), 301, "300 + …");
+    }
+    /// P1 producción: el mensaje 507 nombra los GB y la regla 2× se hereda
+    /// de `update::fits_download` (sin dato no se bloquea).
+    #[test]
+    fn espacio_mensaje_y_regla_doble() {
+        let msg = models_no_space_msg(15 * 1024 * 1024 * 1024);
+        assert!(msg.contains("Sin espacio"), "{}", msg);
+        assert!(msg.contains("15.0 GB"), "{}", msg);
+        assert!(msg.contains("doble"), "{}", msg);
+        assert_eq!(
+            crate::update::fits_download(Some(100), Some(199)),
+            Some(false)
+        );
+        assert!(models_space_ok(&std::env::temp_dir(), u64::MAX) != Some(true));
     }
 }

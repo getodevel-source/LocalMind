@@ -73,7 +73,22 @@ fn session_cookie_header(gateway_key: &str) -> Option<Header> {
     .ok()
 }
 
-/// Respuesta JSON con CORS solo para origen loopback (o sin CORS si `None`).
+/// Carpeta de datos para `POST /api/open_data_dir` (P1-7 producción).
+/// Allowlist cerrada: `appdata` y `temp`. Cualquier otro valor → `None`
+/// (el handler responde 400). Pura y testeable.
+fn data_dir_for(which: &str) -> Option<std::path::PathBuf> {
+    match which {
+        // Misma resolución que `filelog::logs_dir` (APPDATA, si no temp).
+        "appdata" => Some(
+            std::env::var("APPDATA")
+                .map(|p| std::path::Path::new(&p).join("LocalMind"))
+                .unwrap_or_else(|_| std::env::temp_dir().join("LocalMind")),
+        ),
+        "temp" => Some(std::env::temp_dir().join("omni-update")),
+        _ => None,
+    }
+}
+
 fn json_response_for_origin(
     status_code: u16,
     body: String,
@@ -102,11 +117,61 @@ fn unauthorized_json_for_origin(origin: Option<&str>) -> Response<Cursor<Vec<u8>
 // `unwrap`: todo fallo del cliente es un 4xx que el handler convierte en
 // respuesta.
 
+/// Tope para POST pequeños con JSON (`/api/unlock`, `/api/import_model`):
+/// 64 KiB. Puro y testeable: `bytes` ya leídos con `Take(max+1)` para detectar
+/// el exceso sin cargar más; `Err` en español → el handler responde 413.
+///
+/// El proxy `/v1/*` usa `MAX_V1_BODY` (25 MB), no este tope: necesita el
+/// cuerpo completo (prompts de MB) pero con cota anti-OOM; el límite fino es
+/// el del motor (contexto/modelo). Todo exige clave por la puerta D-7.
+pub(crate) const MAX_SMALL_JSON_BODY: usize = 64 * 1024;
+///
+/// Tope del cuerpo `/v1/*` (P1 producción): 25 MB. El proxy necesita el
+/// cuerpo completo (prompts de MB), pero sin cota un cliente LAN puede
+/// OOMear el gateway thread-per-request. 25 MB cubre cualquier prompt real
+/// (el contexto máximo es 262K tokens ≈ 1 MB de texto); el exceso → 413.
+pub(crate) const MAX_V1_BODY: usize = 25 * 1024 * 1024;
+///
+/// Lee hasta `max + 1` bytes crudos y valida con `limit_body`.
+/// `Ok(bytes)` si cabe; `Err((413, msg))` si excede; `Err((400, msg))` en I/O.
+fn read_capped_bytes(reader: &mut dyn Read, max: usize) -> Result<Vec<u8>, (u16, String)> {
+    let mut buf = Vec::new();
+    reader
+        .take((max as u64) + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| (400, format!("error de lectura: {}", e)))?;
+    if let Err(e) = limit_body(&buf, max) {
+        return Err((413, e));
+    }
+    Ok(buf)
+}
+/// ¿Cabe `bytes` en `max`? `Err` si excede (mensaje en español, sin I/O).
+pub(crate) fn limit_body(bytes: &[u8], max: usize) -> Result<(), String> {
+    if bytes.len() > max {
+        return Err(format!(
+            "cuerpo demasiado grande: {} bytes (máximo {} bytes)",
+            bytes.len(),
+            max
+        ));
+    }
+    Ok(())
+}
+/// Lee hasta `max + 1` bytes de un reader y valida con `limit_body`.
+/// `Ok(cadena)` si cabe y es UTF-8; `Err(413, msg)` si excede;
+/// `Err(400, msg)` si no es UTF-8 o hay error de I/O.
+fn read_bounded_body(reader: &mut dyn Read, max: usize) -> Result<String, (u16, String)> {
+    let mut buf = Vec::new();
+    reader
+        .take((max as u64) + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| (400, format!("error de lectura: {}", e)))?;
+    if let Err(e) = limit_body(&buf, max) {
+        return Err((413, e));
+    }
+    String::from_utf8(buf).map_err(|_| (400, "el cuerpo no es UTF-8 válido".to_string()))
+}
+///
 /// `POST /api/start`: un cuerpo MAL FORMADO no puede degradarse a un arranque
-/// con defaults. Antes, `serde_json::from_str(...).unwrap_or(default)` hacía
-/// que `{"context":"abc"}` pasara todos los `validate_req_*` en vacío y
-/// arrancara el motor con 200. Ahora es 400. Un cuerpo VACÍO sigue siendo
-/// `StartRequest::default()` (llamadores que hacen POST sin cuerpo).
 fn parse_start_body(body: &str) -> Result<StartRequest, String> {
     if body.trim().is_empty() {
         return Ok(StartRequest {
@@ -143,8 +208,40 @@ fn parse_profiles_import(body: &str) -> Result<Vec<crate::config::HardwareProfil
         if !crate::config::profile_flags_ok(&p.extra_flags) {
             return Err(bad("extra_flags"));
         }
+        if let Some(err) = crate::config::psu_unsafe_flag(&p.extra_flags) {
+            return Err(err);
+        }
     }
     Ok(imported)
+}
+
+/// Parámetros de `POST /api/import_model`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportModelRequest {
+    pub path: String,
+    pub overwrite: bool,
+}
+
+/// Parseo de `POST /api/import_model`. Exige objeto con `path` no vacío.
+/// `overwrite` es opcional (default `false`).
+pub(crate) fn parse_import_model_body(body: &str) -> Result<ImportModelRequest, String> {
+    let val: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("JSON inválido: {}", e))?;
+    let obj = val
+        .as_object()
+        .ok_or_else(|| "cuerpo inválido: se esperaba un objeto JSON".to_string())?;
+    let path = obj
+        .get("path")
+        .and_then(|p| p.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Falta el parámetro 'path'".to_string())?
+        .to_string();
+    let overwrite = obj
+        .get("overwrite")
+        .and_then(|o| o.as_bool())
+        .unwrap_or(false);
+    Ok(ImportModelRequest { path, overwrite })
 }
 
 /// Añadir CORS a una respuesta ya construida: fijas + `Origin` si es loopback.
@@ -469,13 +566,11 @@ fn prepare_chat_payload(body: &[u8], served: &str) -> (Vec<u8>, String, bool) {
                 serde_json::Value::String(served.to_string()),
             );
         }
-        if stream_req {
-            if obj.get("stream_options").is_none() {
-                obj.insert(
-                    "stream_options".to_string(),
-                    serde_json::json!({"include_usage": true}),
-                );
-            }
+        if stream_req && obj.get("stream_options").is_none() {
+            obj.insert(
+                "stream_options".to_string(),
+                serde_json::json!({"include_usage": true}),
+            );
         }
     }
     match v {
@@ -591,11 +686,18 @@ impl HttpServer {
                 let key = gateway_key.clone();
 
                 thread::spawn(move || {
-                    handle_request(req, method, url, mgr, cfg, base, key, bound_port);
+                    // P0 producción (panic=abort): un pánico en un request NO
+                    // puede matar gateway+UI. Se captura y solo muere ese hilo.
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handle_request(req, method, url, mgr, cfg, base, key, bound_port);
+                    }))
+                    .is_err()
+                    {
+                        eprintln!("[LocalMind] request abortado por pánico (contenido)");
+                    }
                 });
             }
         });
-
         Ok(Self { port })
     }
 
@@ -632,6 +734,37 @@ fn icon_asset_for(path: &str) -> Option<(&'static str, &'static [u8])> {
     }
 }
 
+/// Decisión pura de la puerta D-7 (testeable sin socket): ¿esta petición
+/// necesita credencial? Falso SOLO para rutas públicas (`is_public_path`: UI,
+/// iconos, OPTIONS) y para el login (`POST /api/unlock`). Todo lo demás —
+/// incluido `GET /api/version` por decisión documentada arriba — exige clave.
+fn puerta_auth_exige_clave(method: &str, url: &str) -> bool {
+    if is_public_path(method, url) {
+        return false;
+    }
+    if method == "POST" && url == "/api/unlock" {
+        return false;
+    }
+    true
+}
+
+/// Puerta de auth D-7: todo lo no público exige clave.
+///
+/// Orden en `handle_request`: peer-gate B2 (403) → OPTIONS → UI/iconos
+/// públicos → `POST /api/unlock` (login) → ESTA puerta → resto de rutas.
+///
+/// Regla: si `!is_public_path(&method, &url)` y la ruta no es el login
+/// (`POST /api/unlock`), se exige `crate::auth::is_authorized` (Bearer,
+/// `x-api-key` o cookie `lm_key`) y sin credencial válida se responde 401
+/// (`unauthorized_json_for_origin`). Excepción documentada: NINGUNA otra —
+/// `GET /api/version` también exige clave (decisión de esta ronda: antes era
+/// pública de facto; el smoke la llama ya con clave como el resto).
+///
+/// Riesgo conocido (diseño B4 vigente, NO tocado aquí): `GET /` y los iconos
+/// siguen fijando la cookie `lm_key` a loopback SIN pedir clave antes. En la
+/// WebView local eso es auto-login por diseño; en un loopback compartido otro
+/// proceso local podría recogerla. Endurecerlo (pedir clave también en `/`)
+/// rompería el arranque sin fricción y queda como decisión pendiente.
 fn handle_request(
     mut req: tiny_http::Request,
     method: String,
@@ -761,8 +894,17 @@ fn handle_request(
     // La clave viaja en el cuerpo (nunca en URL/logs); el error no distingue
     // motivos.
     if method == "POST" && url == "/api/unlock" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin_ref,
+                ));
+                return;
+            }
+        };
         let candidate = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| v.get("key").and_then(|k| k.as_str()).map(str::to_string))
@@ -799,6 +941,19 @@ fn handle_request(
         let mut resp = json_response_for_origin(200, r#"{"status":"ok"}"#.to_string(), origin_ref);
         resp.add_header(cookie);
         let _ = req.respond(resp);
+        return;
+    }
+    // Puerta D-7: tras peer-gate (403), OPTIONS, UI/iconos públicos y el login
+    // `POST /api/unlock`. Todo lo demás exige credencial (Bearer, `x-api-key`
+    // o cookie `lm_key`); sin ella → 401. `GET /api/version` también la exige
+    // (decisión documentada en el docstring: antes era pública de facto).
+    // Las rutas públicas ya retornaron arriba, pero se re-chequea
+    // `is_public_path` por defensa en profundidad (si mañana se añade una
+    // pública nueva, nace abierta sin tocar la puerta).
+    if puerta_auth_exige_clave(&method, &url)
+        && !crate::auth::is_authorized(req.headers(), &gateway_key)
+    {
+        let _ = req.respond(unauthorized_json_for_origin(origin_ref));
         return;
     }
 
@@ -866,7 +1021,7 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/update/check" {
-        let _ = req.as_reader().read_to_string(&mut String::new());
+        let _ = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY);
         if crate::update::update_busy() {
             let _ = req.respond(json_response_for_origin(
                 409,
@@ -901,8 +1056,7 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/update/download" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let _ = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY);
         if crate::update::update_busy() {
             let _ = req.respond(json_response_for_origin(
                 409,
@@ -1040,7 +1194,7 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/update/cancel" {
-        let _ = req.as_reader().read_to_string(&mut String::new());
+        let _ = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY);
         let _ = req.respond(json_response_for_origin(
             200,
             crate::update::update_cancel().json(),
@@ -1053,7 +1207,7 @@ fn handle_request(
     // salida ordenada; el tick del loop ejecuta stop+swap+Exit en ≤5 s y el
     // script desacoplado relanza la app ya actualizada. Sin `ready` → 409.
     if method == "POST" && url == "/api/update/restart" {
-        let _ = req.as_reader().read_to_string(&mut String::new());
+        let _ = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY);
         let snap = crate::update::update_snapshot();
         // Invariante P0-2: `ready` exige pending + staging VÁLIDO en disco
         // (con OMNI.exe+ui.html). Si el staging se perdió (limpieza de %TEMP%),
@@ -1079,6 +1233,7 @@ fn handle_request(
             "[LocalMind] Reinicio para instalar OMNI {}: la app se cerrará y reabrirá sola.",
             snap.latest
         ));
+        crate::update::arm_restart();
         let _ = req.respond(json_response_for_origin(
             200,
             serde_json::json!({ "status": "restarting", "version": snap.latest }).to_string(),
@@ -1086,8 +1241,6 @@ fn handle_request(
         ));
         return;
     }
-
-    // Export del anillo de logs en memoria (mismo contenido que /api/logs).
     if method == "GET" && url == "/api/logs/export" {
         let lines = mgr.get_recent_logs();
         let mut resp = Response::from_string(lines.join("\n")).with_status_code(StatusCode(200));
@@ -1135,14 +1288,37 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/profiles/import" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin_ref,
+                ));
+                return;
+            }
+        };
         match parse_profiles_import(&body) {
             Ok(imported) => {
                 cfg.update(|c| {
                     c.profiles = imported;
                 });
-                let _ = cfg.save();
+                // Sec producción: el error de `save` se propaga al handler
+                // (500 + log) en vez de tragarse con `let _ =`. Antes la UI
+                // mostraba "Perfiles actualizados" aunque nada se persistió.
+                if let Err(e) = cfg.save() {
+                    mgr.log_error(&format!(
+                        "[LocalMind] No se pudo guardar la importación de perfiles: {}",
+                        e
+                    ));
+                    let _ = req.respond(json_response_for_origin(
+                        500,
+                        serde_json::json!({ "error": format!("no se pudo guardar la importación de perfiles: {}", e) }).to_string(),
+                        origin_ref,
+                    ));
+                    return;
+                }
                 let _ = req.respond(json_response_for_origin(
                     200,
                     r#"{"status":"ok","message":"Perfiles actualizados"}"#.into(),
@@ -1159,13 +1335,21 @@ fn handle_request(
         }
         return;
     }
-
     // Alta/edición de un perfil (`upsert`): valida id/contexto/cache/flags y
     // devuelve la lista completa en la forma de `GET /api/profiles`. Nada se
     // persiste si algún campo es inválido.
     if method == "POST" && url == "/api/profiles/save" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin_ref,
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -1275,6 +1459,14 @@ fn handle_request(
             ));
             return;
         }
+        if let Some(err) = crate::config::psu_unsafe_flag(&extra_flags) {
+            let _ = req.respond(json_response_for_origin(
+                400,
+                serde_json::json!({ "error": err }).to_string(),
+                origin_ref,
+            ));
+            return;
+        }
         let mut next = cfg.get();
         let prof = crate::config::HardwareProfile {
             id: id.clone(),
@@ -1310,8 +1502,17 @@ fn handle_request(
     // Borrado de un perfil: 400 si no existe, si es el último o si está en
     // uso (perfil del motor en curso o `last.profile` de arranque).
     if method == "POST" && url == "/api/profiles/delete" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin_ref,
+                ));
+                return;
+            }
+        };
         let id = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| v.get("id").and_then(|j| j.as_str().map(str::to_string)))
@@ -1374,36 +1575,62 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/import_model" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
-        let source_path_str = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("path").and_then(|p| p.as_str().map(str::to_string)));
-
-        if let Some(src) = source_path_str {
-            let p = std::path::Path::new(&src);
-            match mgr.import_model_from_path(p) {
-                Ok(filename) => {
-                    let _ = req.respond(json_response_for_origin(
-                        200,
-                        serde_json::json!({ "status": "ok", "filename": filename }).to_string(),
-                        origin.as_deref(),
-                    ));
-                }
-                Err(e) => {
-                    let _ = req.respond(json_response_for_origin(
-                        400,
-                        serde_json::json!({ "error": e }).to_string(),
-                        origin.as_deref(),
-                    ));
-                }
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
             }
-        } else {
+        };
+        let parsed = match parse_import_model_body(&body) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    serde_json::json!({ "error": e }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
+        let src = std::path::Path::new(&parsed.path);
+        // P1-IO + TOCTOU (2026-10-10, wave-4): el 409 previo es solo UX
+        // temprana (misma resolución que el interior, sin divergencias); la
+        // protección real vive DENTRO de `import_model_from_path` (lock +
+        // tmp+rename atómico), así que dos imports concurrentes no se pisan.
+        if let Err((code, msg)) =
+            crate::models::check_import_dest(mgr.models_dir(), src, parsed.overwrite)
+        {
             let _ = req.respond(json_response_for_origin(
-                400,
-                r#"{"error":"Falta el parámetro 'path'"}"#.into(),
+                code,
+                serde_json::json!({ "error": msg }).to_string(),
                 origin.as_deref(),
             ));
+            return;
+        }
+        match mgr.import_model_from_path(src, parsed.overwrite) {
+            Ok(filename) => {
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    serde_json::json!({ "status": "ok", "filename": filename }).to_string(),
+                    origin.as_deref(),
+                ));
+            }
+            Err(e) => {
+                // 409 por VARIANTE (ABIERTO-1 wave-6): `Exists` → 409, resto
+                // → 400. Nunca por substring: un nombre con "ya existe" en
+                // otro error no produce un 409 espurio.
+                let code = if e.is_exists() { 409 } else { 400 };
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": e.to_string() }).to_string(),
+                    origin.as_deref(),
+                ));
+            }
         }
         return;
     }
@@ -1418,19 +1645,53 @@ fn handle_request(
         ));
         return;
     }
+
+    // Abrir carpeta de datos (P1-7 producción): allowlist cerrada
+    // (`appdata` = %APPDATA%\LocalMind, `temp` = %TEMP%\omni-update). Sin
+    // esto la tarjeta Datos solo podía copiar la ruta. Cuerpo acotado 64 KiB.
+    if method == "POST" && url == "/api/open_data_dir" {
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
+        let which = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("which").and_then(|w| w.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        let dir: Option<std::path::PathBuf> = data_dir_for(&which);
+        match dir {
+            Some(p) => {
+                let _ = std::fs::create_dir_all(&p);
+                let _ = std::process::Command::new("explorer.exe").arg(&p).spawn();
+                let _ = req.respond(json_response_for_origin(
+                    200,
+                    r#"{"status":"ok"}"#.into(),
+                    origin.as_deref(),
+                ));
+            }
+            None => {
+                let _ = req.respond(json_response_for_origin(
+                    400,
+                    r#"{"error":"campo inválido: which (appdata|temp)"}"#.into(),
+                    origin.as_deref(),
+                ));
+            }
+        }
+        return;
+    }
     if method == "GET" && url == "/api/status" {
         let _ = req.respond(json_response_for_origin(
             200,
             status_json(mgr.get_status()),
             origin.as_deref(),
         ));
-        return;
-    }
-
-    if method == "GET" && url == "/api/settings" {
-        let c = cfg.get();
-        let json = settings_json(&c, cfg.path(), c.engine.http_port);
-        let _ = req.respond(json_response_for_origin(200, json, origin.as_deref()));
         return;
     }
 
@@ -1449,9 +1710,31 @@ fn handle_request(
         return;
     }
 
+    // Última sesión (la UI restaura modelo/perfil/contexto al arrancar).
+    // Ruta viva: `api.getSettings()` la usa en el boot (ui.html) y sin ella
+    // responde 404 y la UI nunca restaura (dead_code en `settings_json`).
+    if method == "GET" && url == "/api/settings" {
+        let c = cfg.get();
+        let _ = req.respond(json_response_for_origin(
+            200,
+            settings_json(&c, cfg.path(), http_port),
+            origin.as_deref(),
+        ));
+        return;
+    }
+
     if method == "POST" && url == "/api/config" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -1559,8 +1842,17 @@ fn handle_request(
             ));
             return;
         }
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let start_req: StartRequest = match parse_start_body(&body) {
             Ok(r) => r,
             Err(e) => {
@@ -1662,8 +1954,17 @@ fn handle_request(
     // contra el candidato (8 s). La clave viaja solo en el header Bearer del
     // chequeo; el error nunca la incluye.
     if method == "POST" && url == "/api/remote/test" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -1735,8 +2036,17 @@ fn handle_request(
     // Persistir remoto: valida la URL y guarda sin devolver la clave (el GET
     // de estado nunca la expone completa; el log no la nombra).
     if method == "POST" && url == "/api/remote" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -1898,8 +2208,17 @@ fn handle_request(
     // cabe en el HW del host y devuelve `{verdict, file, size_mb, profile?,
     // detail, hint_quant?}`. Sin descargas, sin estado: solo lectura + red HF.
     if method == "POST" && url == "/api/models/advise" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -1995,8 +2314,17 @@ fn handle_request(
         return;
     }
     if method == "POST" && url == "/api/models/download" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let v: serde_json::Value = match serde_json::from_str(&body) {
             Ok(v) => v,
             Err(e) => {
@@ -2053,6 +2381,11 @@ fn handle_request(
             }
         }
         let models_dir = mgr.models_dir().to_path_buf();
+        // P1 producción (espacio, ver models.rs `run_job`/`download_one` como
+        // modelo + `fits_download` 2×): el pre-chequeo fino vive en el worker
+        // (ahí se conoce el total real del árbol, ~15GB); aquí NO se bloquea
+        // sin dato. El worker devuelve el mensaje 507 y el estado del job lo
+        // expone; este POST solo rechaza el 409 de trabajo en curso.
         let logger: std::sync::Arc<dyn Fn(String) + Send + Sync> = {
             let m = Arc::clone(&mgr);
             std::sync::Arc::new(move |line: String| m.log(&line))
@@ -2075,9 +2408,24 @@ fn handle_request(
         }
         return;
     }
+    // P1 producción: estado del job de descarga con 507 temprano. El worker
+    // (`models.rs run_job`/`download_one`) aborta sin bajar nada si no cabe
+    // el total con margen 2×; el GET lo traduce a 507 con el mismo mensaje
+    // para que la UI no espere un `downloading` que nunca avanza. Sin error
+    // de espacio → 200 con el snapshot.
+    if method == "GET" && url == "/api/models/download" {
+        let snap = crate::models::job_snapshot();
+        let body = snap.json();
+        if snap.state == "error" && body.contains("Sin espacio") {
+            let _ = req.respond(json_response_for_origin(507, body, origin.as_deref()));
+        } else {
+            let _ = req.respond(json_response_for_origin(200, body, origin.as_deref()));
+        }
+        return;
+    }
 
     if method == "POST" && url == "/api/models/download/cancel" {
-        let _ = req.as_reader().read_to_string(&mut String::new());
+        let _ = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY);
         let _ = req.respond(json_response_for_origin(
             200,
             crate::models::job_cancel().json(),
@@ -2087,13 +2435,21 @@ fn handle_request(
     }
 
     if method == "POST" && url == "/api/models/import_pick" {
-        let mut body = String::new();
-        let _ = req.as_reader().read_to_string(&mut body);
+        let body = match read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY) {
+            Ok(b) => b,
+            Err((code, msg)) => {
+                let _ = req.respond(json_response_for_origin(
+                    code,
+                    serde_json::json!({ "error": msg }).to_string(),
+                    origin.as_deref(),
+                ));
+                return;
+            }
+        };
         let overwrite = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| v.get("overwrite").and_then(|o| o.as_bool()))
             .unwrap_or(false);
-        // El diálogo nativo bloquea: hilo propio, nunca el hilo HTTP; espera
         // acotada (120 s) para no dejar la conexión colgada. Al vencer se
         // responde `cancelled/timeout` y el hilo del diálogo queda inofensivo
         // (su resultado ya nadie lo lee).
@@ -2119,24 +2475,34 @@ fn handle_request(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => None,
         };
-        let body_out = match picked {
-            None => r#"{"status":"cancelled"}"#.to_string(),
-            Some(files) if files.is_empty() => r#"{"status":"cancelled"}"#.to_string(),
-            Some(files) => match crate::models::copy_picked(&models_dir, &files, overwrite) {
+        // 409 por VARIANTE (ABIERTO-1 wave-6): se mapea junto al error, no
+        // por substring del JSON (un nombre con "ya existe" en otro error no
+        // produce un 409 espurio).
+        let (code, body_out) = match picked {
+            None => (200, r#"{"status":"cancelled"}"#.to_string()),
+            Some(files) if files.is_empty() => (200, r#"{"status":"cancelled"}"#.to_string()),
+            // ABIERTO-1 wave-5: vía `mgr.import_picked` (mismo `import_lock`
+            // que `import_model_from_path`); pick-vs-pick y pick-vs-import ya
+            // no violan el 409.
+            Some(files) => match mgr.import_picked(&files, overwrite) {
                 Ok(names) => {
                     mgr.log(&format!(
                         "[LocalMind] Modelos importados: {}",
                         names.join(", ")
                     ));
-                    serde_json::json!({ "status": "ok", "files": names }).to_string()
+                    (
+                        200,
+                        serde_json::json!({ "status": "ok", "files": names }).to_string(),
+                    )
                 }
-                Err(e) => serde_json::json!({ "error": e }).to_string(),
+                Err(e) => {
+                    let code = if e.is_exists() { 409 } else { 400 };
+                    (
+                        code,
+                        serde_json::json!({ "error": e.to_string() }).to_string(),
+                    )
+                }
             },
-        };
-        let code = if body_out.contains("\"error\"") {
-            400
-        } else {
-            200
         };
         let _ = req.respond(json_response_for_origin(code, body_out, origin.as_deref()));
         return;
@@ -2279,8 +2645,9 @@ fn handle_launch_generic(
         gateway_key,
         http_port,
     };
-    let mut body = String::new();
-    let _ = req.as_reader().read_to_string(&mut body);
+    // Drenaje acotado: el cuerpo es opcional (`{}` si falta/rebosa); el parse
+    // ya tolera vacío con `unwrap_or(Null)`, así que un exceso no es 413.
+    let body = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY).unwrap_or_default();
     let body_val =
         serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
     let agent_raw = body_val
@@ -2398,8 +2765,8 @@ fn handle_launch_compat(
     http_port: u16,
     origin: Option<String>,
 ) {
-    let mut body = String::new();
-    let _ = req.as_reader().read_to_string(&mut body);
+    // Drenaje acotado: igual que el genérico, cuerpo opcional.
+    let body = read_bounded_body(&mut req.as_reader(), MAX_SMALL_JSON_BODY).unwrap_or_default();
     let body_val =
         serde_json::from_str::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null);
     let req_dir = body_val
@@ -2534,7 +2901,6 @@ fn resolve_launch_target(
 /// Los CLIs hablan con el GATEWAY ligado (`http://127.0.0.1:<http_port>/v1`,
 /// propagado desde `HttpServer::start` por cada request) para pasar por
 /// clave/aliasing/usage. El puerto del motor (`st.port`) es solo interno.
-
 /// Núcleo CLI compartido (`pi`/`omp`; `opencode`/`deepseek` tienen lanzador
 /// propio): 409 sin motor, dir privado con estado vivo, spawn verificado.
 fn launch_cli(
@@ -2961,9 +3327,17 @@ fn handle_remote_forward(
         return;
     };
     let target = format!("{}{}", root, path);
-    let mut body_bytes = Vec::new();
-    let _ = req.as_reader().read_to_end(&mut body_bytes);
-    // Modelo pedido (para el registro local sin tokens); si no hay, "remoto".
+    let body_bytes = match read_capped_bytes(&mut req.as_reader(), MAX_V1_BODY) {
+        Ok(b) => b,
+        Err((code, msg)) => {
+            let _ = req.respond(json_response_for_origin(
+                code,
+                serde_json::json!({ "error": msg }).to_string(),
+                origin.as_deref(),
+            ));
+            return;
+        }
+    };
     let req_model = serde_json::from_slice::<serde_json::Value>(&body_bytes)
         .ok()
         .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
@@ -3063,10 +3437,19 @@ fn handle_chat_completions(
     cfg: &Arc<ConfigStore>,
     origin: Option<String>,
 ) {
-    let mut body_bytes = Vec::new();
-    let _ = req.as_reader().read_to_end(&mut body_bytes);
+    // P1 producción: cap 25 MB anti-OOM (413 si excede).
+    let body_bytes = match read_capped_bytes(&mut req.as_reader(), MAX_V1_BODY) {
+        Ok(b) => b,
+        Err((code, msg)) => {
+            let _ = req.respond(json_response_for_origin(
+                code,
+                serde_json::json!({ "error": msg }).to_string(),
+                origin.as_deref(),
+            ));
+            return;
+        }
+    };
     mgr.touch_activity();
-
     let st = mgr.get_status();
     // Fase A6: `stopped`/`error` con puerto placeholder no es motor (el 8080
     // lo puede ocupar cualquiera). `starting` sí proxyea: ya responde.
@@ -3307,8 +3690,18 @@ fn handle_anthropic_messages(
     cfg: &Arc<ConfigStore>,
     origin: Option<String>,
 ) {
-    let mut body_bytes = Vec::new();
-    let _ = req.as_reader().read_to_end(&mut body_bytes);
+    // P1 producción: cap 25 MB anti-OOM (413 si excede).
+    let body_bytes = match read_capped_bytes(&mut req.as_reader(), MAX_V1_BODY) {
+        Ok(b) => b,
+        Err((code, msg)) => {
+            let _ = req.respond(json_response_for_origin(
+                code,
+                serde_json::json!({ "error": msg }).to_string(),
+                origin.as_deref(),
+            ));
+            return;
+        }
+    };
     mgr.touch_activity();
 
     let st = mgr.get_status();
@@ -3410,8 +3803,18 @@ fn handle_responses(
     cfg: &Arc<ConfigStore>,
     origin: Option<String>,
 ) {
-    let mut body_bytes = Vec::new();
-    let _ = req.as_reader().read_to_end(&mut body_bytes);
+    // P1 producción: cap 25 MB anti-OOM (413 si excede).
+    let body_bytes = match read_capped_bytes(&mut req.as_reader(), MAX_V1_BODY) {
+        Ok(b) => b,
+        Err((code, msg)) => {
+            let _ = req.respond(json_response_for_origin(
+                code,
+                serde_json::json!({ "error": msg }).to_string(),
+                origin.as_deref(),
+            ));
+            return;
+        }
+    };
     mgr.touch_activity();
 
     let st = mgr.get_status();
@@ -3721,6 +4124,52 @@ mod proxy {
                 Some(("omni.png", b"image/png".as_slice()))
             );
             assert!(super::super::icon_asset_for("/otro.png").is_none());
+        }
+        #[test]
+        fn puerta_auth_protegidas_401() {
+            // Puerta D-7 (`puerta_auth_exige_clave` + `is_authorized`): las
+            // rutas públicas y el login no exigen clave; todo lo demás sí —
+            // incluido `GET /api/version` (decisión documentada en el
+            // docstring de `handle_request`: antes era pública de facto).
+            // Sin la puerta, una ruta protegida sin credencial llegaba al
+            // handler y respondía 200: este test falla en ese código.
+            use tiny_http::Header;
+            let exige = super::super::puerta_auth_exige_clave;
+            // Públicas: no exigen.
+            assert!(!exige("GET", "/"));
+            assert!(!exige("GET", "/index.html"));
+            assert!(!exige("GET", "/omni.ico"));
+            assert!(!exige("OPTIONS", "/api/status"));
+            // Login: no exige (es quien ENTREGA la credencial).
+            assert!(!exige("POST", "/api/unlock"));
+            // Protegidas: exigen (api, versiones, v1, 404s no públicas).
+            assert!(exige("GET", "/api/status"));
+            assert!(exige("GET", "/api/version"));
+            assert!(exige("GET", "/api/models"));
+            assert!(exige("GET", "/v1/models"));
+            assert!(exige("POST", "/api/start"));
+            assert!(exige("GET", "/definitely-not-a-route"));
+            // Y sin credencial `is_authorized` es falso → el handler
+            // respondería 401 (`unauthorized_json_for_origin`).
+            let clave = "clave-de-prueba-puerta-d7";
+            assert!(!crate::auth::is_authorized(&[], clave));
+            let mala = [Header::from_bytes(b"Authorization", b"Bearer otra").unwrap()];
+            assert!(!crate::auth::is_authorized(&mala, clave));
+            // Con credencial válida sí pasa: Bearer, x-api-key y cookie.
+            let bearer =
+                [
+                    Header::from_bytes(b"Authorization", format!("Bearer {}", clave).as_bytes())
+                        .unwrap(),
+                ];
+            assert!(crate::auth::is_authorized(&bearer, clave));
+            let api_key = [Header::from_bytes(b"x-api-key", clave.as_bytes()).unwrap()];
+            assert!(crate::auth::is_authorized(&api_key, clave));
+            let cookie =
+                [Header::from_bytes(b"Cookie", format!("lm_key={}", clave).as_bytes()).unwrap()];
+            assert!(crate::auth::is_authorized(&cookie, clave));
+            // El 401 lleva el cuerpo pactado.
+            let resp = super::super::unauthorized_json_for_origin(None);
+            assert_eq!(resp.status_code().0, 401);
         }
         #[test]
         fn native_usage_lee_ambos_dialectos_y_toma_el_ultimo() {
@@ -4352,6 +4801,84 @@ mod proxy {
                     .unwrap();
             assert_eq!(ok.len(), 1);
             assert_eq!(ok[0].context, 131072);
+        }
+
+        #[test]
+        fn limit_body_acota_y_informa_bytes() {
+            // Helper puro: exacto al límite pasa, 1 byte más falla con mensaje útil.
+            assert!(super::super::limit_body(b"12345", 5).is_ok());
+            assert!(super::super::limit_body(b"", 5).is_ok());
+            let err = super::super::limit_body(b"123456", 5).unwrap_err();
+            assert!(err.contains("cuerpo demasiado grande"), "{}", err);
+            assert!(err.contains("6 bytes"), "{}", err);
+            assert!(err.contains("5 bytes"), "{}", err);
+
+            // Reader acotado: detecta exceso leyendo como máximo max + 1 bytes.
+            let data = vec![b'a'; 100];
+            let mut cur = std::io::Cursor::new(data);
+            let ok = super::super::read_bounded_body(&mut cur, 100).unwrap();
+            assert_eq!(ok.len(), 100);
+
+            let data_overflow = vec![b'b'; 101];
+            let mut cur_over = std::io::Cursor::new(data_overflow);
+            let err_over = super::super::read_bounded_body(&mut cur_over, 100).unwrap_err();
+            assert_eq!(err_over.0, 413);
+            assert!(err_over.1.contains("demasiado grande"));
+
+            // Cap /v1/* (P1 producción): bytes crudos hasta MAX_V1_BODY.
+            let big = vec![b'x'; super::super::MAX_V1_BODY + 1];
+            let mut cur_big = std::io::Cursor::new(big);
+            let err_big = super::super::read_capped_bytes(&mut cur_big, super::super::MAX_V1_BODY)
+                .unwrap_err();
+            assert_eq!(err_big.0, 413);
+        }
+
+        /// Allowlist `POST /api/open_data_dir` (P1-7 producción): solo
+        /// `appdata`/`temp` resuelven; `..`, rutas absolutas y resto → `None`.
+        #[test]
+        fn data_dir_allowlist_cerrada() {
+            assert!(super::super::data_dir_for("appdata").is_some());
+            assert!(super::super::data_dir_for("temp").is_some());
+            assert!(super::super::data_dir_for("..").is_none());
+            assert!(super::super::data_dir_for("C:/Windows").is_none());
+            assert!(super::super::data_dir_for("").is_none());
+            assert!(super::super::data_dir_for("models").is_none());
+        }
+
+        #[test]
+        fn import_model_body_parse_y_overwrite_optin() {
+            // Parsea path obligatorio y overwrite por defecto false.
+            let p1 = super::super::parse_import_model_body(r#"{"path":"C:/m/a.gguf"}"#).unwrap();
+            assert_eq!(p1.path, "C:/m/a.gguf");
+
+            // overwrite true explícito.
+            let p2 =
+                super::super::parse_import_model_body(r#"{"path":"C:/m/a.gguf","overwrite":true}"#)
+                    .unwrap();
+            assert!(p2.overwrite);
+
+            // Errores de validación: falta path o vacío.
+            assert!(super::super::parse_import_model_body(r#"{"overwrite":true}"#).is_err());
+            assert!(super::super::parse_import_model_body(r#"{"path":"   "}"#).is_err());
+            assert!(super::super::parse_import_model_body(r#"[]"#).is_err());
+        }
+
+        #[test]
+        fn profiles_import_rechaza_flags_de_escritura_peligrosas() {
+            let perfil = |flags: &str| {
+                format!(
+                    r#"[{{"id":"test","name":"T","description":"","context":32768,"cache_ram":0,"extra_flags":{}}}]"#,
+                    flags
+                )
+            };
+            // --log-file y --out-file deben ser rechazadas al importar/persistir.
+            let err1 = super::super::parse_profiles_import(&perfil(r#"["--log-file=pwn.log"]"#))
+                .unwrap_err();
+            assert!(err1.contains("seguridad de escritura"), "{}", err1);
+
+            let err2 = super::super::parse_profiles_import(&perfil(r#"["--out-file", "evil"]"#))
+                .unwrap_err();
+            assert!(err2.contains("seguridad de escritura"), "{}", err2);
         }
     }
     // ---- Fase UX-Guest: target remoto y resolver sin red ----
